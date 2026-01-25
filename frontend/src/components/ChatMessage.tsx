@@ -27,6 +27,50 @@ function stripHiddenBlocks(text: string): { content: string; hadThinking: boolea
   return { content, hadThinking }
 }
 
+// Convert numbered line formats (• 1: code) to proper markdown code blocks
+function convertNumberedLinesToCodeBlocks(text: string): string {
+  // Find consecutive numbered lines and wrap them in code blocks
+  const lines = text.split('\n')
+  const result: string[] = []
+  let inCodeBlock = false
+  let codeLines: string[] = []
+  let prevWasNumbered = false
+  
+  for (const line of lines) {
+    const match = line.match(/^[•\-\*]\s*(\d+):\s*(.*)$/)
+    
+    if (match) {
+      if (!inCodeBlock) {
+        inCodeBlock = true
+        codeLines = []
+      }
+      // Extract just the code part (after "• N: ")
+      codeLines.push(match[2])
+      prevWasNumbered = true
+    } else {
+      if (inCodeBlock && prevWasNumbered) {
+        // End of code block - wrap it
+        result.push('```')
+        result.push(...codeLines)
+        result.push('```')
+        inCodeBlock = false
+        codeLines = []
+      }
+      result.push(line)
+      prevWasNumbered = false
+    }
+  }
+  
+  // Handle trailing code block
+  if (inCodeBlock && codeLines.length > 0) {
+    result.push('```')
+    result.push(...codeLines)
+    result.push('```')
+  }
+  
+  return result.join('\n')
+}
+
 const agentColors: Record<string, string> = {
   mo: 'from-violet-500 to-purple-600',
   architect: 'from-blue-500 to-cyan-600',
@@ -176,7 +220,8 @@ export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
         ) : (
           <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-li:text-foreground">
             {(() => {
-              const { content, hadThinking } = stripHiddenBlocks(message.content)
+              const { content: rawContent, hadThinking } = stripHiddenBlocks(message.content)
+              const content = convertNumberedLinesToCodeBlocks(rawContent)
               return (
                 <>
                   {hadThinking && (
