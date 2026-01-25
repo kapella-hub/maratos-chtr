@@ -1,11 +1,15 @@
 """Kiro CLI agent - uses kiro-cli for Claude models via AWS."""
 
 import asyncio
+import re
 import shutil
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 from app.agents.base import Agent, AgentConfig
+
+# Regex to strip ANSI escape codes
+ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 
 @dataclass
@@ -99,6 +103,8 @@ class KiroAgent(Agent):
                 if not chunk:
                     break
                 text = chunk.decode("utf-8", errors="replace")
+                # Strip ANSI escape codes from terminal output
+                text = ANSI_ESCAPE.sub('', text)
                 yield text
 
             # Wait for completion
