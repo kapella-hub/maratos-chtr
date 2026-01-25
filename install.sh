@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # MaratOS Installer for macOS/Linux
-# Usage: curl -fsSL https://raw.githubusercontent.com/kapella-hub/maratos/main/install.sh | bash
+# Usage: curl -fsSL https://cdn.jsdelivr.net/gh/kapella-hub/maratos@main/install.sh | bash
 #
 
 set -e

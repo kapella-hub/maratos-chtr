@@ -10,16 +10,23 @@ Your personal AI operating system, powered by **MO** — a capable, opinionated 
 ### macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kapella-hub/maratos/main/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/kapella-hub/maratos@main/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/kapella-hub/maratos/main/install.ps1 | iex
+irm https://cdn.jsdelivr.net/gh/kapella-hub/maratos@main/install.ps1 | iex
 ```
 
-Then add your [Anthropic API key](https://console.anthropic.com/) and run:
+> **Note:** If you get a cached version, purge first:
+> ```bash
+> curl -X PURGE https://purge.jsdelivr.net/gh/kapella-hub/maratos@main/install.sh
+> ```
+
+**No API key?** Install [Kiro CLI](https://kiro.dev/cli/) — MaratOS will use it automatically for Claude models.
+
+Then run:
 
 ```bash
 # macOS/Linux
