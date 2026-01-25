@@ -75,10 +75,12 @@ MaratOS is a self-hostable AI platform with a beautiful web interface and multi-
 - 🤖 **MO Agent** — Capable AI with real personality
 - 🏗️ **Multi-Agent** — MO, Architect, Reviewer (Kiro-powered)
 - 🎨 **Beautiful UI** — Modern dark-mode web interface
+- 💭 **Thinking Indicator** — See when MO is processing
+- 🔄 **Auto-Orchestration** — MO spawns subagents for complex tasks
 - 💬 **Multi-Channel** — Web, Telegram, iMessage, Webex
 - 🔧 **Kiro Integration** — Enterprise AI for quality coding
 - 🧩 **Skills System** — Reusable Kiro workflows
-- 🚀 **Subagents** — Background task execution
+- 🚀 **Subagents** — Background task execution with progress
 - 🧠 **Infinite Memory** — Semantic search, auto-compaction
 - 🔒 **Sandboxed Writes** — Read anywhere, write to workspace
 - ⚙️ **Easy Config** — Visual settings
@@ -349,6 +351,56 @@ GET /api/subagents/tasks?status=running
 
 ---
 
+## Auto-Orchestration
+
+MO can automatically delegate complex tasks to specialized subagents using `[SPAWN:agent]` markers:
+
+### How It Works
+
+```
+User: "Design an authentication system for my FastAPI app"
+        ↓
+MO: "I'll have the architect design this properly...
+     [SPAWN:architect] Design a secure authentication system for FastAPI 
+     with JWT tokens, OAuth2 support, and role-based access control"
+        ↓
+System: Parses marker → Spawns architect subagent
+        ↓
+UI: Shows progress bar "🏗️ Architect 45%..."
+        ↓
+Result: Architect's detailed design appears as a new message
+```
+
+### Available Agents
+
+| Agent | Marker | Best For |
+|-------|--------|----------|
+| 🏗️ **Architect** | `[SPAWN:architect]` | System design, architecture decisions |
+| 🔍 **Reviewer** | `[SPAWN:reviewer]` | Code review, security audits |
+| 🤖 **MO** | `[SPAWN:mo]` | General tasks, parallel work |
+
+### Example Prompts
+
+```
+"Review my authentication code for security issues"
+→ MO: [SPAWN:reviewer] Review src/auth.py for security vulnerabilities...
+
+"Design a microservices architecture for this e-commerce app"
+→ MO: [SPAWN:architect] Design a scalable microservices architecture...
+
+"Analyze these 5 files in parallel for code quality"
+→ MO: [SPAWN:reviewer] Review file1.py...
+       [SPAWN:reviewer] Review file2.py...
+```
+
+### UI Features
+
+- **Thinking Indicator**: Animated dots while MO processes
+- **Progress Bars**: Real-time progress for each subagent
+- **Inline Results**: Subagent responses appear as chat messages
+
+---
+
 ## Memory System
 
 Infinite memory with semantic search:
@@ -433,6 +485,21 @@ docker run -p 8000:8000 \
 | `GET /api/config` | Get configuration |
 | `GET /docs` | Swagger API docs |
 
+### SSE Events (Chat Streaming)
+
+The `/api/chat` endpoint streams Server-Sent Events:
+
+| Event | Data | Description |
+|-------|------|-------------|
+| `session_id` | `{"session_id": "..."}` | Chat session identifier |
+| `agent` | `{"agent": "mo"}` | Active agent |
+| `thinking` | `{"thinking": true/false}` | Processing indicator |
+| `content` | `{"content": "..."}` | Response text chunk |
+| `orchestrating` | `{"orchestrating": true/false}` | Subagent spawning active |
+| `subagent` | `{"subagent": "architect", "status": "running", "progress": 0.5}` | Subagent progress |
+| `subagent_result` | `{"subagent_result": "architect", "content": "..."}` | Subagent response |
+| `[DONE]` | — | Stream complete |
+
 ---
 
 ## Project Structure
@@ -441,23 +508,31 @@ docker run -p 8000:8000 \
 maratos/
 ├── backend/
 │   └── app/
-│       ├── agents/      # MO, Architect, Reviewer
-│       ├── channels/    # Telegram, iMessage, Webex
-│       ├── memory/      # Infinite memory system
-│       ├── skills/      # Skill execution engine
-│       ├── subagents/   # Background task runner
-│       ├── tools/       # filesystem, shell, web, kiro
-│       └── api/         # REST endpoints
+│       ├── agents/        # MO, Architect, Reviewer
+│       ├── channels/      # Telegram, iMessage, Webex
+│       ├── memory/        # Infinite memory system
+│       ├── skills/        # Skill execution engine
+│       ├── subagents/     # Background task runner
+│       │   ├── manager.py # Task spawning & tracking
+│       │   └── runner.py  # Agent execution
+│       ├── tools/         # filesystem, shell, web, kiro, orchestrate
+│       └── api/
+│           └── chat.py    # SSE streaming + auto-orchestration
 ├── frontend/
 │   └── src/
-│       ├── pages/       # Chat, History, Settings
-│       └── components/
-├── skills/              # Built-in skill definitions
-│   ├── api-endpoint.yaml
-│   ├── refactor.yaml
-│   └── security-review.yaml
-├── install.sh           # macOS/Linux installer
-├── install.ps1          # Windows installer
+│       ├── pages/
+│       │   └── ChatPage.tsx
+│       ├── components/
+│       │   ├── ChatMessage.tsx
+│       │   ├── ThinkingIndicator.tsx  # Animated dots
+│       │   └── SubagentStatus.tsx     # Progress bars
+│       ├── stores/
+│       │   └── chat.ts    # State management
+│       └── lib/
+│           └── api.ts     # SSE event handling
+├── skills/                # Built-in skill definitions
+├── install.sh             # macOS/Linux installer
+├── install.ps1            # Windows installer
 └── docker-compose.yml
 ```
 
