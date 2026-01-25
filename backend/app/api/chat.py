@@ -217,10 +217,13 @@ async def chat(
                         # Stream the subagent result
                         yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "completed"}}\n\n'
                         
-                        # Stream result content (use JSON to properly escape)
+                        # Stream result content (use proper JSON to escape all special chars)
                         import json
-                        escaped_result = json.dumps(result_text)[1:-1]  # Remove outer quotes
-                        yield f'data: {{"subagent_result": "{agent_id_spawn}", "content": "{escaped_result}"}}\n\n'
+                        result_event = json.dumps({
+                            "subagent_result": agent_id_spawn,
+                            "content": result_text
+                        })
+                        yield f'data: {result_event}\n\n'
                         
                         logger.info(f"Sent subagent_result event")
                         
