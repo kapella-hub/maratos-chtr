@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown } from 'lucide-react'
-import { fetchAgents, type Agent } from '@/lib/api'
+import { fetchAgents } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useState, useRef, useEffect } from 'react'
 

@@ -16,7 +16,6 @@ export default function ChatInput({
   onQueue, 
   onStop, 
   isLoading, 
-  hasQueue,
   placeholder = 'Type a message...' 
 }: ChatInputProps) {
   const [input, setInput] = useState('')
