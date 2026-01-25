@@ -163,10 +163,24 @@ async def chat(
 
         # Signal thinking started
         yield 'data: {"thinking": true}\n\n'
+        
+        # Get memory context
+        context = request.context or {}
+        try:
+            from app.memory.manager import memory_manager
+            memory_context = await memory_manager.get_context(
+                query=request.message,
+                session_id=session.id,
+                max_tokens=1000,
+            )
+            if memory_context:
+                context["memory"] = memory_context
+        except Exception as e:
+            logger.warning(f"Memory retrieval failed: {e}")
 
         first_chunk = True
         in_model_thinking = False
-        async for chunk in agent.chat(messages, request.context):
+        async for chunk in agent.chat(messages, context):
             # Handle thinking block markers
             if chunk == "__THINKING_START__":
                 in_model_thinking = True
@@ -211,6 +225,20 @@ async def chat(
                 logger.info(f"Generated session title: {new_title}")
             except Exception as e:
                 logger.warning(f"Failed to update title: {e}")
+        
+        # Store important exchanges in memory
+        try:
+            from app.memory.manager import memory_manager
+            await memory_manager.extract_and_store(
+                conversation=[
+                    {"role": "user", "content": request.message},
+                    {"role": "assistant", "content": full_response},
+                ],
+                session_id=session.id,
+                agent_id=agent_id,
+            )
+        except Exception as e:
+            logger.warning(f"Memory storage failed: {e}")
 
         # Check for [SPAWN:agent] markers and auto-orchestrate
         spawn_matches = SPAWN_PATTERN.findall(full_response)

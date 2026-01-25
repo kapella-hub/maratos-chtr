@@ -1,10 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { Trash2, MessageSquare, Clock } from 'lucide-react'
-import { fetchSessions, deleteSession } from '@/lib/api'
+import { fetchSessions, deleteSession, fetchSession } from '@/lib/api'
+import { useChatStore } from '@/stores/chat'
 import { cn } from '@/lib/utils'
 
 export default function SessionsPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const { setSessionId, addMessage, clearMessages } = useChatStore()
 
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ['sessions'],
@@ -17,6 +21,24 @@ export default function SessionsPage() {
       queryClient.invalidateQueries({ queryKey: ['sessions'] })
     },
   })
+
+  const handleResumeSession = async (sessionId: string) => {
+    try {
+      const data = await fetchSession(sessionId)
+      clearMessages()
+      setSessionId(sessionId)
+      // Load messages into store
+      for (const msg of data.messages) {
+        addMessage({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content,
+        })
+      }
+      navigate('/')
+    } catch (error) {
+      console.error('Failed to load session:', error)
+    }
+  }
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr)
@@ -55,8 +77,9 @@ export default function SessionsPage() {
             {sessions.map((session) => (
               <div
                 key={session.id}
+                onClick={() => handleResumeSession(session.id)}
                 className={cn(
-                  'flex items-center gap-4 p-4 rounded-lg',
+                  'flex items-center gap-4 p-4 rounded-lg cursor-pointer',
                   'bg-muted/50 hover:bg-muted transition-colors'
                 )}
               >
@@ -77,7 +100,10 @@ export default function SessionsPage() {
                 </div>
 
                 <button
-                  onClick={() => deleteMutation.mutate(session.id)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteMutation.mutate(session.id)
+                  }}
                   disabled={deleteMutation.isPending}
                   className={cn(
                     'p-2 rounded-lg text-muted-foreground',
