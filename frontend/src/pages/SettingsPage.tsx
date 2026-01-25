@@ -4,12 +4,20 @@ import { fetchConfig, updateConfig, type Config } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useState, useEffect } from 'react'
 
-const models = [
-  { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
-  { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku' },
-  { id: 'claude-opus-4-20250514', name: 'Claude Opus 4' },
-  { id: 'gpt-4o', name: 'GPT-4o' },
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+// Kiro CLI available models (AWS-hosted Claude)
+const kiroModels = [
+  { id: 'Auto', name: 'Auto', credits: '1x', desc: 'Models chosen by task for optimal usage' },
+  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', credits: '1.3x', desc: 'Latest Claude Sonnet model' },
+  { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', credits: '1.3x', desc: 'Hybrid reasoning and coding' },
+  { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', credits: '0.4x', desc: 'Latest Claude Haiku (fast)' },
+  { id: 'claude-opus-4.5', name: 'Claude Opus 4.5', credits: '2.2x', desc: 'Latest Claude Opus (most capable)' },
+]
+
+// Direct API models (requires API keys)
+const apiModels = [
+  { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4 (API)', credits: null, desc: 'Requires Anthropic API key' },
+  { id: 'claude-opus-4-20250514', name: 'Claude Opus 4 (API)', credits: null, desc: 'Requires Anthropic API key' },
+  { id: 'gpt-4o', name: 'GPT-4o (API)', credits: null, desc: 'Requires OpenAI API key' },
 ]
 
 export default function SettingsPage() {
@@ -112,31 +120,80 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          {/* Model Selection */}
+          {/* Kiro CLI Models */}
           <section>
-            <h2 className="text-lg font-semibold mb-4">Language Model</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Model for MO
-                </label>
-                <select
-                  value={localConfig.default_model || ''}
-                  onChange={(e) => setLocalConfig({ ...localConfig, default_model: e.target.value })}
+            <h2 className="text-lg font-semibold mb-2">Kiro CLI Models</h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              AWS-hosted Claude models via Kiro CLI — no API key needed
+            </p>
+            <div className="space-y-2">
+              {kiroModels.map((model) => (
+                <label
+                  key={model.id}
                   className={cn(
-                    'w-full px-4 py-2 rounded-lg',
-                    'bg-muted border border-input',
-                    'focus:outline-none focus:ring-2 focus:ring-ring'
+                    'flex items-center gap-4 p-4 rounded-lg cursor-pointer transition-colors',
+                    'border border-border hover:border-primary/50',
+                    localConfig.default_model === model.id && 'border-primary bg-primary/5'
                   )}
                 >
-                  {models.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <input
+                    type="radio"
+                    name="model"
+                    value={model.id}
+                    checked={localConfig.default_model === model.id}
+                    onChange={(e) => setLocalConfig({ ...localConfig, default_model: e.target.value })}
+                    className="w-4 h-4"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{model.name}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">
+                        {model.credits} credit
+                      </span>
+                    </div>
+                    <div className="text-sm text-muted-foreground">{model.desc}</div>
+                  </div>
+                </label>
+              ))}
             </div>
+          </section>
+
+          {/* API Models (Collapsed) */}
+          <section>
+            <details className="group">
+              <summary className="text-lg font-semibold mb-2 cursor-pointer list-none flex items-center gap-2">
+                <span className="text-muted-foreground group-open:rotate-90 transition-transform">▶</span>
+                API Models (Advanced)
+              </summary>
+              <p className="text-sm text-muted-foreground mb-4 ml-5">
+                Requires separate API keys configured in .env
+              </p>
+              <div className="space-y-2 ml-5">
+                {apiModels.map((model) => (
+                  <label
+                    key={model.id}
+                    className={cn(
+                      'flex items-center gap-4 p-4 rounded-lg cursor-pointer transition-colors',
+                      'border border-border hover:border-primary/50 opacity-60',
+                      localConfig.default_model === model.id && 'border-primary bg-primary/5 opacity-100'
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="model"
+                      value={model.id}
+                      checked={localConfig.default_model === model.id}
+                      onChange={(e) => setLocalConfig({ ...localConfig, default_model: e.target.value })}
+                      className="w-4 h-4"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium">{model.name}</div>
+                      <div className="text-sm text-muted-foreground">{model.desc}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </details>
           </section>
 
           {/* Token Limits */}
