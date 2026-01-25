@@ -3,10 +3,7 @@
 import logging
 from typing import Any
 
-from app.agents import agent_registry
-from app.agents.base import Message
 from app.subagents.manager import SubagentTask, subagent_manager
-from app.memory.manager import memory_manager
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +34,11 @@ class SubagentRunner:
         """
         async def work_fn(task: SubagentTask) -> dict[str, Any]:
             """The actual work function."""
+            # Import here to avoid circular imports
+            from app.agents import agent_registry
+            from app.agents.base import Message
+            from app.memory.manager import memory_manager
+            
             task.log(f"Using agent: {agent_id}")
             
             agent = agent_registry.get(agent_id)
