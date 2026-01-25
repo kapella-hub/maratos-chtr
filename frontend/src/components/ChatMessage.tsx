@@ -17,11 +17,13 @@ function stripAnsi(text: string): string {
   return text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
 }
 
-// Strip <thinking>...</thinking> blocks from content
-function stripThinking(text: string): { content: string; hadThinking: boolean } {
+// Strip <thinking> and <analysis> blocks from content
+function stripHiddenBlocks(text: string): { content: string; hadThinking: boolean } {
   const thinkingRegex = /<thinking>[\s\S]*?<\/thinking>\s*/gi
-  const hadThinking = thinkingRegex.test(text)
-  const content = text.replace(/<thinking>[\s\S]*?<\/thinking>\s*/gi, '').trim()
+  const analysisRegex = /<analysis>[\s\S]*?<\/analysis>\s*/gi
+  const hadThinking = thinkingRegex.test(text) || analysisRegex.test(text)
+  let content = text.replace(/<thinking>[\s\S]*?<\/thinking>\s*/gi, '')
+  content = content.replace(/<analysis>[\s\S]*?<\/analysis>\s*/gi, '').trim()
   return { content, hadThinking }
 }
 
@@ -164,7 +166,7 @@ export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
         ) : (
           <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-li:text-foreground">
             {(() => {
-              const { content, hadThinking } = stripThinking(message.content)
+              const { content, hadThinking } = stripHiddenBlocks(message.content)
               return (
                 <>
                   {hadThinking && (

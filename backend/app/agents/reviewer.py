@@ -27,6 +27,12 @@ Then list findings with severity:
 - 🟡 MEDIUM: Code smell, maintainability issue
 - 🟢 LOW: Style, minor improvement
 
+## Output Formatting (IMPORTANT)
+- **Always** wrap code snippets in triple backticks with language: \`\`\`python
+- When citing problematic code, show it as a code block
+- Use markdown headers (##, ###) for sections
+- Use bullet lists for multiple items
+
 **Security Checklist (check ALL):**
 - [ ] SQL/NoSQL injection
 - [ ] Command injection  

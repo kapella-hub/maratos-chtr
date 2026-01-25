@@ -100,41 +100,55 @@ class Agent:
         full_content = ""
         tool_calls: list[dict] = []
         
-        # Buffer for filtering <thinking> blocks
+        # Buffer for filtering <thinking> and <analysis> blocks
         buffer = ""
-        in_thinking = False
+        in_hidden_block = False
+        hidden_tag = ""  # Which tag we're currently inside
 
         async for chunk in response:
             delta = chunk.choices[0].delta
 
-            # Stream content (filter out <thinking> blocks)
+            # Stream content (filter out <thinking> and <analysis> blocks)
             if delta.content:
                 full_content += delta.content
                 buffer += delta.content
                 
-                # Process buffer to filter thinking blocks
+                # Hidden tags to filter out
+                hidden_tags = ["thinking", "analysis"]
+                
+                # Process buffer to filter hidden blocks
                 while True:
-                    if in_thinking:
+                    if in_hidden_block:
                         # Look for closing tag
-                        end_idx = buffer.find("</thinking>")
+                        end_tag = f"</{hidden_tag}>"
+                        end_idx = buffer.find(end_tag)
                         if end_idx != -1:
-                            # Discard everything up to and including </thinking>
-                            buffer = buffer[end_idx + 11:]
-                            in_thinking = False
+                            # Discard everything up to and including closing tag
+                            buffer = buffer[end_idx + len(end_tag):]
+                            in_hidden_block = False
+                            hidden_tag = ""
                         else:
-                            # Still in thinking, keep buffering (don't yield)
+                            # Still in hidden block, keep buffering (don't yield)
                             break
                     else:
-                        # Look for opening tag
-                        start_idx = buffer.find("<thinking>")
-                        if start_idx != -1:
+                        # Look for any opening tag
+                        found_tag = None
+                        found_idx = -1
+                        for tag in hidden_tags:
+                            idx = buffer.find(f"<{tag}>")
+                            if idx != -1 and (found_idx == -1 or idx < found_idx):
+                                found_idx = idx
+                                found_tag = tag
+                        
+                        if found_tag:
                             # Yield content before the tag
-                            if start_idx > 0:
-                                yield buffer[:start_idx]
-                            buffer = buffer[start_idx + 10:]
-                            in_thinking = True
+                            if found_idx > 0:
+                                yield buffer[:found_idx]
+                            buffer = buffer[found_idx + len(found_tag) + 2:]  # +2 for < and >
+                            in_hidden_block = True
+                            hidden_tag = found_tag
                         else:
-                            # No thinking tag, but keep potential partial tag in buffer
+                            # No hidden tag, but keep potential partial tag in buffer
                             # Only yield up to last '<' to avoid splitting a tag
                             last_lt = buffer.rfind("<")
                             if last_lt > 0:
@@ -146,8 +160,8 @@ class Agent:
                                 buffer = ""
                             break
         
-        # Flush remaining buffer (if not in thinking block)
-        if buffer and not in_thinking:
+        # Flush remaining buffer (if not in hidden block)
+        if buffer and not in_hidden_block:
             yield buffer
 
             # Collect tool calls
