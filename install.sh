@@ -81,31 +81,35 @@ echo ""
 # === Download/Clone MaratOS ===
 if [ -d "$INSTALL_DIR" ]; then
     warn "Directory exists: $INSTALL_DIR"
-    info "Removing previous installation..."
-    rm -rf "$INSTALL_DIR"
+    info "Updating existing installation..."
+    cd "$INSTALL_DIR"
+    git pull origin main || {
+        warn "Git pull failed, removing and re-cloning..."
+        cd ..
+        rm -rf "$INSTALL_DIR"
+    }
 fi
 
-info "Downloading MaratOS..."
-if check_cmd git; then
-    if ! git clone --depth 1 https://github.com/kapella-hub/maratos.git "$INSTALL_DIR" 2>&1; then
-        warn "Git clone failed. Trying alternative download..."
-        # Try downloading as ZIP
-        if check_cmd curl; then
-            TEMP_ZIP="/tmp/maratos-$$.zip"
-            curl -fsSL "https://github.com/kapella-hub/maratos/archive/main.zip" -o "$TEMP_ZIP" && \
-            unzip -q "$TEMP_ZIP" -d /tmp && \
-            mv /tmp/maratos-main "$INSTALL_DIR" && \
-            rm -f "$TEMP_ZIP"
-        elif [ -f "./backend/app/main.py" ]; then
-            info "Copying from local directory..."
-            cp -r . "$INSTALL_DIR"
-        else
-            echo ""
-            error "Could not download MaratOS. Try manually:\n  git clone https://github.com/kapella-hub/maratos.git ~/.maratos"
-        fi
+if [ ! -d "$INSTALL_DIR" ]; then
+    info "Downloading MaratOS..."
+    if check_cmd git; then
+        git clone --depth 1 https://github.com/kapella-hub/maratos.git "$INSTALL_DIR" || {
+            warn "Git clone failed. Trying ZIP download..."
+            # Try downloading as ZIP
+            if check_cmd curl && check_cmd unzip; then
+                TEMP_ZIP="/tmp/maratos-$$.zip"
+                curl -fsSL "https://github.com/kapella-hub/maratos/archive/main.zip" -o "$TEMP_ZIP"
+                unzip -q "$TEMP_ZIP" -d /tmp
+                mv /tmp/maratos-main "$INSTALL_DIR"
+                rm -f "$TEMP_ZIP"
+            else
+                echo ""
+                error "Could not download MaratOS. Try manually:\n  git clone https://github.com/kapella-hub/maratos.git ~/.maratos"
+            fi
+        }
+    else
+        error "git not found. Install git first."
     fi
-else
-    error "git not found. Install git first."
 fi
 success "Downloaded"
 
