@@ -6,6 +6,7 @@ from app.agents.base import Agent, AgentConfig
 from app.agents.mo import MOAgent
 from app.agents.architect import ArchitectAgent
 from app.agents.reviewer import ReviewerAgent
+from app.agents.kiro import create_kiro_agent
 
 
 class AgentRegistry:
@@ -91,3 +92,26 @@ agent_registry = AgentRegistry()
 agent_registry.register(MOAgent(), is_default=True)
 agent_registry.register(ArchitectAgent())
 agent_registry.register(ReviewerAgent())
+
+# Kiro CLI agents (Claude via AWS - no API key needed)
+kiro_sonnet = create_kiro_agent(
+    agent_id="kiro-sonnet",
+    name="Kiro (Sonnet)",
+    description="Claude Sonnet 4 via Kiro CLI",
+    model="claude-sonnet",
+)
+kiro_opus = create_kiro_agent(
+    agent_id="kiro-opus",
+    name="Kiro (Opus)",
+    description="Claude Opus 4.5 via Kiro CLI",
+    model="claude-opus",
+)
+
+# If Kiro is available and no Anthropic key, make Kiro the default
+from app.config import settings
+if kiro_sonnet.available and not settings.anthropic_api_key:
+    agent_registry.register(kiro_sonnet, is_default=True)
+    agent_registry.register(kiro_opus)
+else:
+    agent_registry.register(kiro_sonnet)
+    agent_registry.register(kiro_opus)
