@@ -87,15 +87,23 @@ fi
 
 info "Downloading MaratOS..."
 if check_cmd git; then
-    git clone --depth 1 https://github.com/kapella-hub/maratos.git "$INSTALL_DIR" 2>/dev/null || {
-        # Fallback: copy from current directory if we're in the repo
-        if [ -f "./backend/app/main.py" ]; then
+    if ! git clone --depth 1 https://github.com/kapella-hub/maratos.git "$INSTALL_DIR" 2>&1; then
+        warn "Git clone failed. Trying alternative download..."
+        # Try downloading as ZIP
+        if check_cmd curl; then
+            TEMP_ZIP="/tmp/maratos-$$.zip"
+            curl -fsSL "https://github.com/kapella-hub/maratos/archive/main.zip" -o "$TEMP_ZIP" && \
+            unzip -q "$TEMP_ZIP" -d /tmp && \
+            mv /tmp/maratos-main "$INSTALL_DIR" && \
+            rm -f "$TEMP_ZIP"
+        elif [ -f "./backend/app/main.py" ]; then
             info "Copying from local directory..."
             cp -r . "$INSTALL_DIR"
         else
-            error "Could not download MaratOS. Clone manually from GitHub."
+            echo ""
+            error "Could not download MaratOS. Try manually:\n  git clone https://github.com/kapella-hub/maratos.git ~/.maratos"
         fi
-    }
+    fi
 else
     error "git not found. Install git first."
 fi
