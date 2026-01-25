@@ -12,6 +12,7 @@ from app.api.channels import router as channels_router
 from app.config import settings, get_channel_config
 from app.database import init_db
 from app.channels.manager import channel_manager, init_channels
+from app.skills.loader import load_skills_from_dir
 
 
 @asynccontextmanager
@@ -19,6 +20,18 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup
     await init_db()
+    
+    # Load skills
+    skills_dir = Path(__file__).parent.parent / "skills"
+    if skills_dir.exists():
+        count = load_skills_from_dir(skills_dir)
+        print(f"Loaded {count} skills from {skills_dir}")
+    
+    # Also load user skills
+    user_skills_dir = Path.home() / ".maratos" / "skills"
+    if user_skills_dir.exists():
+        count = load_skills_from_dir(user_skills_dir)
+        print(f"Loaded {count} user skills from {user_skills_dir}")
     
     # Initialize and start channels
     channel_config = get_channel_config()
@@ -56,11 +69,18 @@ app.include_router(channels_router, prefix="/api", tags=["channels"])
 @app.get("/health")
 async def health():
     """Health check endpoint."""
+    from app.skills.base import skill_registry
+    from app.memory.manager import memory_manager
+    from app.subagents.manager import subagent_manager
+    
     return {
         "status": "ok", 
         "version": "0.1.0", 
         "agent": "MO",
         "channels": len(channel_manager.list_channels()),
+        "skills": len(skill_registry.list_all()),
+        "memories": memory_manager.stats().get("total_memories", 0),
+        "running_tasks": subagent_manager.get_running_count(),
     }
 
 
@@ -77,7 +97,7 @@ else:
             "agent": "MO",
             "docs": "/docs",
             "api": "/api",
-            "channels": "/api/channels",
+            "features": ["skills", "memory", "subagents", "channels"],
         }
 
 

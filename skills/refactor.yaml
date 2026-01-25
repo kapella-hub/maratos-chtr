@@ -1,0 +1,93 @@
+id: refactor
+name: Refactor Code
+description: Safely refactor code with validation and regression testing
+version: "1.0.0"
+author: MaratOS
+tags:
+  - refactoring
+  - cleanup
+  - maintenance
+
+triggers:
+  - refactor
+  - clean up code
+  - improve code
+  - restructure
+
+system_context: |
+  This skill performs safe refactoring with comprehensive validation:
+  - Maintains existing functionality (no behavior changes)
+  - Improves code quality, readability, maintainability
+  - Preserves or improves performance
+  - Ensures all tests pass before and after
+
+quality_checklist:
+  - No behavior changes (same inputs = same outputs)
+  - All existing tests pass
+  - Code complexity reduced or maintained
+  - Clear, descriptive naming
+  - DRY principle applied appropriately
+  - SOLID principles considered
+  - No new warnings or errors
+
+test_requirements:
+  - Run existing tests before refactoring
+  - Run existing tests after refactoring
+  - Add tests for any uncovered code paths
+  - Performance regression tests if applicable
+
+workflow:
+  - name: analyze
+    action: kiro_prompt
+    description: Analyze code to refactor
+    params:
+      task: |
+        Analyze the following code for refactoring opportunities:
+        {{files}}
+        
+        Identify:
+        1. Code smells and anti-patterns
+        2. Duplication
+        3. Complexity issues
+        4. Naming problems
+        5. Potential simplifications
+        
+        Rank by impact and risk.
+
+  - name: run_existing_tests
+    action: shell
+    description: Run existing tests as baseline
+    params:
+      command: "{{test_command}}"
+
+  - name: refactor
+    action: kiro_architect
+    description: Perform the refactoring
+    params:
+      task: |
+        Refactor the code based on the analysis.
+        
+        Files: {{files}}
+        
+        CRITICAL: Maintain exact same behavior.
+        
+        Focus on:
+        {{focus_areas}}
+
+  - name: validate
+    action: kiro_validate
+    description: Validate the refactoring
+    params:
+      files: "{{files}}"
+      spec: |
+        Verify:
+        - Behavior is unchanged
+        - No new bugs introduced
+        - Improvements are meaningful
+        - Code is cleaner
+
+  - name: run_tests_after
+    action: shell
+    description: Run tests after refactoring
+    params:
+      command: "{{test_command}}"

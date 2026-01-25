@@ -1,0 +1,93 @@
+id: api-endpoint
+name: Create API Endpoint
+description: Create a new REST API endpoint with validation, tests, and documentation
+version: "1.0.0"
+author: MaratOS
+tags:
+  - api
+  - backend
+  - fastapi
+
+triggers:
+  - create api
+  - new endpoint
+  - add route
+  - rest api
+
+system_context: |
+  This skill creates production-ready API endpoints following best practices:
+  - Input validation with Pydantic
+  - Proper error handling with meaningful messages
+  - OpenAPI documentation
+  - Unit and integration tests
+  - Logging and monitoring hooks
+
+quality_checklist:
+  - Input validation for all parameters
+  - Proper HTTP status codes
+  - Error responses follow consistent format
+  - Authentication/authorization if needed
+  - Rate limiting considerations
+  - Request/response logging
+  - OpenAPI schema is accurate
+
+test_requirements:
+  - Test successful request with valid data
+  - Test validation errors with invalid data
+  - Test authentication failures
+  - Test not found cases
+  - Test edge cases (empty, null, boundary values)
+  - Test concurrent requests if relevant
+
+workflow:
+  - name: analyze
+    action: kiro_prompt
+    description: Analyze requirements and existing code
+    params:
+      task: |
+        Analyze the following API endpoint requirements:
+        {{requirements}}
+        
+        Review the existing codebase structure and identify:
+        1. Where the endpoint should be added
+        2. What models/schemas are needed
+        3. What dependencies exist
+        4. Authentication requirements
+
+  - name: implement
+    action: kiro_architect
+    description: Design and implement the endpoint
+    params:
+      task: |
+        Implement an API endpoint based on the analysis.
+        
+        Requirements: {{requirements}}
+        
+        Include:
+        - Pydantic request/response models
+        - Route handler with full implementation
+        - Error handling
+        - Logging
+
+  - name: validate
+    action: kiro_validate
+    description: Review the implementation
+    params:
+      files: "{{created_files}}"
+      spec: |
+        Focus on:
+        - Security (input validation, auth)
+        - Error handling completeness
+        - API design best practices
+
+  - name: test
+    action: kiro_test
+    description: Generate tests
+    params:
+      files: "{{created_files}}"
+      spec: |
+        Generate comprehensive tests including:
+        - Happy path
+        - Validation errors
+        - Auth failures
+        - Edge cases

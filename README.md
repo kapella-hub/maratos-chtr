@@ -271,6 +271,79 @@ curl -X POST /api/chat -d '{"message": "...", "agent_id": "architect"}'
 
 ---
 
+## Skills System
+
+Skills are reusable workflows that orchestrate Kiro for complex tasks:
+
+```yaml
+# skills/api-endpoint.yaml
+id: api-endpoint
+name: Create API Endpoint
+triggers: ["create api", "new endpoint"]
+workflow:
+  - name: analyze
+    action: kiro_prompt
+  - name: implement
+    action: kiro_architect
+  - name: validate
+    action: kiro_validate
+  - name: test
+    action: kiro_test
+```
+
+**Built-in skills:**
+- `api-endpoint` — Create production-ready API endpoints
+- `refactor` — Safe refactoring with validation
+- `security-review` — Comprehensive security audit
+
+**Add custom skills:** Drop YAML files in `~/.maratos/skills/`
+
+---
+
+## Subagents
+
+Spawn background tasks that run independently:
+
+```bash
+# Spawn a task
+POST /api/subagents/spawn
+{"task": "Review all Python files for security issues", "agent_id": "reviewer"}
+
+# Check status
+GET /api/subagents/tasks/{task_id}
+
+# List running tasks
+GET /api/subagents/tasks?status=running
+```
+
+---
+
+## Memory System
+
+Infinite memory with semantic search:
+
+```bash
+# Store a memory
+POST /api/memory/remember
+{"content": "User prefers TypeScript over JavaScript", "importance": 0.8}
+
+# Recall relevant memories
+POST /api/memory/recall
+{"query": "programming language preferences"}
+
+# Get stats
+GET /api/memory/stats
+```
+
+Memory is automatically used in conversations for context.
+
+**Optional:** Install embeddings for semantic search:
+```bash
+pip install maratos[embeddings]
+```
+
+---
+
 ## Tools
 
 | Tool | Description |
@@ -279,6 +352,7 @@ curl -X POST /api/chat -d '{"message": "...", "agent_id": "architect"}'
 | **Shell** | Execute commands |
 | **Web Search** | Search the internet |
 | **Web Fetch** | Read web pages |
+| **Kiro** | Enterprise AI for coding |
 
 ---
 

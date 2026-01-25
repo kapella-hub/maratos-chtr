@@ -1,0 +1,125 @@
+id: security-review
+name: Security Review
+description: Comprehensive security review of code
+version: "1.0.0"
+author: MaratOS
+tags:
+  - security
+  - review
+  - audit
+
+triggers:
+  - security review
+  - security audit
+  - check security
+  - vulnerability scan
+
+system_context: |
+  This skill performs a thorough security review covering:
+  - OWASP Top 10 vulnerabilities
+  - Authentication and authorization
+  - Data validation and sanitization
+  - Cryptographic practices
+  - Sensitive data handling
+  - Dependency vulnerabilities
+
+quality_checklist:
+  - No SQL injection vulnerabilities
+  - No XSS vulnerabilities
+  - No command injection
+  - Proper authentication
+  - Proper authorization (RBAC/ABAC)
+  - Secrets not hardcoded
+  - Sensitive data encrypted
+  - Secure communications (TLS)
+  - Input validation on all entry points
+  - Output encoding
+  - CSRF protection
+  - Rate limiting
+  - Logging without sensitive data
+
+test_requirements:
+  - Test authentication bypass attempts
+  - Test authorization bypass attempts
+  - Test injection attacks
+  - Test with malformed inputs
+  - Test rate limiting
+  - Test session management
+
+workflow:
+  - name: static_analysis
+    action: kiro_validate
+    description: Static security analysis
+    params:
+      files: "{{files}}"
+      spec: |
+        SECURITY REVIEW - Check for:
+        
+        INJECTION:
+        - SQL injection (parameterized queries?)
+        - Command injection (shell escaping?)
+        - XSS (output encoding?)
+        - LDAP/XML/other injection
+        
+        AUTHENTICATION:
+        - Password handling (hashing, salting)
+        - Session management
+        - Token security (JWT validation)
+        - MFA considerations
+        
+        AUTHORIZATION:
+        - Access control checks
+        - Privilege escalation risks
+        - IDOR vulnerabilities
+        
+        DATA PROTECTION:
+        - Sensitive data exposure
+        - Encryption at rest/transit
+        - PII handling
+        - Logging of sensitive data
+        
+        CONFIGURATION:
+        - Hardcoded secrets
+        - Debug mode in production
+        - Security headers
+        - CORS configuration
+        
+        DEPENDENCIES:
+        - Known vulnerable packages
+        - Outdated dependencies
+
+  - name: dependency_check
+    action: shell
+    description: Check for vulnerable dependencies
+    params:
+      command: |
+        # Python
+        if [ -f requirements.txt ] || [ -f pyproject.toml ]; then
+          pip audit 2>/dev/null || echo "pip-audit not installed"
+        fi
+        # Node
+        if [ -f package.json ]; then
+          npm audit 2>/dev/null || echo "npm not available"
+        fi
+
+  - name: generate_report
+    action: kiro_prompt
+    description: Generate security report
+    params:
+      task: |
+        Based on the security analysis, generate a report with:
+        
+        1. EXECUTIVE SUMMARY
+        2. CRITICAL FINDINGS (must fix immediately)
+        3. HIGH SEVERITY (fix soon)
+        4. MEDIUM SEVERITY (should fix)
+        5. LOW SEVERITY (consider fixing)
+        6. RECOMMENDATIONS
+        7. COMPLIANCE NOTES (GDPR, SOC2, etc if applicable)
+        
+        For each finding include:
+        - Description
+        - Location (file, line)
+        - Risk rating
+        - Remediation steps
+        - References (CWE, OWASP)

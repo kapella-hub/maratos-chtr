@@ -1,14 +1,20 @@
-"""API routes for Clawd Studio."""
+"""API routes for MaratOS."""
 
 from fastapi import APIRouter
 
 from app.api.agents import router as agents_router
 from app.api.chat import router as chat_router
 from app.api.config import router as config_router
+from app.api.skills import router as skills_router
+from app.api.memory import router as memory_router
+from app.api.subagents import router as subagents_router
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(chat_router, tags=["chat"])
 api_router.include_router(agents_router, tags=["agents"])
 api_router.include_router(config_router, tags=["config"])
+api_router.include_router(skills_router, tags=["skills"])
+api_router.include_router(memory_router, tags=["memory"])
+api_router.include_router(subagents_router, tags=["subagents"])
 
 __all__ = ["api_router"]
