@@ -13,6 +13,8 @@ const agentColors: Record<string, string> = {
   mo: 'from-violet-500 to-purple-600',
   architect: 'from-blue-500 to-cyan-600',
   reviewer: 'from-amber-500 to-orange-600',
+  'kiro-sonnet': 'from-emerald-500 to-teal-600',
+  'kiro-opus': 'from-rose-500 to-pink-600',
 }
 
 export default function AgentSelector({ value, onChange }: AgentSelectorProps) {

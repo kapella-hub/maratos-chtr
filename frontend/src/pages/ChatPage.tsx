@@ -1,10 +1,11 @@
 import { useRef, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 import ChatInput from '@/components/ChatInput'
 import ChatMessage from '@/components/ChatMessage'
 import AgentSelector from '@/components/AgentSelector'
 import { useChatStore } from '@/stores/chat'
-import { streamChat } from '@/lib/api'
+import { streamChat, fetchAgents } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 export default function ChatPage() {
@@ -22,6 +23,21 @@ export default function ChatPage() {
     setStreaming,
     clearMessages,
   } = useChatStore()
+
+  // Fetch agents and set the default on initial load
+  const { data: agents } = useQuery({
+    queryKey: ['agents'],
+    queryFn: fetchAgents,
+  })
+
+  useEffect(() => {
+    if (agents && agents.length > 0) {
+      const defaultAgent = agents.find(a => a.is_default) || agents[0]
+      if (defaultAgent && agentId === 'mo' && defaultAgent.id !== 'mo') {
+        setAgentId(defaultAgent.id)
+      }
+    }
+  }, [agents, agentId, setAgentId])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -55,6 +71,8 @@ export default function ChatPage() {
     mo: { gradient: 'from-violet-500 to-purple-600', tagline: 'Your capable AI partner' },
     architect: { gradient: 'from-blue-500 to-cyan-600', tagline: 'Senior engineer for complex tasks' },
     reviewer: { gradient: 'from-amber-500 to-orange-600', tagline: 'Code quality guardian' },
+    'kiro-sonnet': { gradient: 'from-emerald-500 to-teal-600', tagline: 'Claude Sonnet 4 via Kiro CLI' },
+    'kiro-opus': { gradient: 'from-rose-500 to-pink-600', tagline: 'Claude Opus 4.5 via Kiro CLI' },
   }
 
   const current = agentInfo[agentId] || agentInfo.mo
