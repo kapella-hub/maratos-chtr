@@ -17,6 +17,14 @@ function stripAnsi(text: string): string {
   return text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
 }
 
+// Strip <thinking>...</thinking> blocks from content
+function stripThinking(text: string): { content: string; hadThinking: boolean } {
+  const thinkingRegex = /<thinking>[\s\S]*?<\/thinking>\s*/gi
+  const hadThinking = thinkingRegex.test(text)
+  const content = text.replace(/<thinking>[\s\S]*?<\/thinking>\s*/gi, '').trim()
+  return { content, hadThinking }
+}
+
 const agentColors: Record<string, string> = {
   mo: 'from-violet-500 to-purple-600',
   architect: 'from-blue-500 to-cyan-600',
@@ -155,9 +163,19 @@ export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
           <ThinkingIndicator />
         ) : (
           <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-li:text-foreground">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
+            {(() => {
+              const { content, hadThinking } = stripThinking(message.content)
+              return (
+                <>
+                  {hadThinking && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2 pb-2 border-b border-border">
+                      <span className="w-2 h-2 rounded-full bg-violet-500" />
+                      <span>Thought through the problem</span>
+                    </div>
+                  )}
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
                 h1: ({ children }) => (
                   <h1 className="text-xl font-bold mt-6 mb-3 pb-2 border-b border-border">{children}</h1>
                 ),
@@ -252,9 +270,12 @@ export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
                   return <strong className="font-semibold">{children}</strong>
                 },
               }}
-            >
-              {stripAnsi(message.content)}
-            </ReactMarkdown>
+                  >
+                    {stripAnsi(content)}
+                  </ReactMarkdown>
+                </>
+              )
+            })()}
           </div>
         )}
       </div>
