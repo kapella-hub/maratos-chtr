@@ -229,19 +229,42 @@ When you ask MO to modify external code, it copies the files to workspace first,
 
 ---
 
-## Agents
+## Agents + Kiro Integration
 
-MaratOS includes specialized agents optimized for different tasks:
+MaratOS uses **Kiro AI** (your company's approved AI) for all coding tasks. Agents orchestrate Kiro with quality-focused workflows:
 
-| Agent | Model | Use For |
-|-------|-------|---------|
-| 🤖 **MO** | Claude Sonnet | General tasks, quick edits, research |
-| 🏗️ **Architect** | Claude Opus | Complex architecture, system design, quality-critical code |
-| 🔍 **Reviewer** | Claude Opus | Code review, validation, security audits |
+| Agent | Role | Kiro Usage |
+|-------|------|------------|
+| 🤖 **MO** | General partner | Uses Kiro for any coding |
+| 🏗️ **Architect** | System design | `kiro architect` with detailed specs |
+| 🔍 **Reviewer** | Code review | `kiro validate` with full checklist |
 
-**MO** is fast and capable for everyday tasks. When you need maximum quality — architecture decisions, complex refactoring, thorough reviews — switch to **Architect** or **Reviewer** mode.
+### Kiro Actions (Quality-Tuned)
 
-Select the agent in the UI or specify in API:
+```bash
+# Architecture-first implementation
+kiro architect task="implement rate limiter" workdir="/project"
+
+# Thorough code review
+kiro validate files="src/auth.py" workdir="/project"
+
+# Comprehensive test generation  
+kiro test files="src/api.py" workdir="/project"
+
+# Direct prompt (still quality-focused)
+kiro prompt task="explain this function"
+```
+
+### Quality Workflow
+
+1. **Understand** — MO reads existing code
+2. **Copy to workspace** — Sandbox for modifications
+3. **Architect** — Kiro designs and implements with quality focus
+4. **Validate** — Kiro reviews for security, performance, correctness
+5. **Test** — Kiro generates comprehensive tests
+6. **Report** — Summary for user review
+
+Select agent in UI or API:
 ```bash
 curl -X POST /api/chat -d '{"message": "...", "agent_id": "architect"}'
 ```
