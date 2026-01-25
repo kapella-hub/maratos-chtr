@@ -243,7 +243,7 @@ class DocsAgent(Agent):
                 name="Docs",
                 description="Documentation — clear, comprehensive technical writing",
                 icon="📝",
-                model="claude-sonnet-4-20250514",
+                model="",  # Inherit from settings
                 temperature=0.4,
                 system_prompt=DOCS_SYSTEM_PROMPT,
                 tools=["filesystem", "shell", "kiro"],

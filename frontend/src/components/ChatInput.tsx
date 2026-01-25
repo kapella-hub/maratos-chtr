@@ -72,17 +72,20 @@ export default function ChatInput({
           />
         </div>
         
-        {/* Stop button - always visible when loading */}
+        {/* Stop button - prominent when loading */}
         {isLoading && (
           <button
             onClick={onStop}
             className={cn(
-              'p-3 rounded-lg bg-destructive text-destructive-foreground',
-              'hover:bg-destructive/90 transition-colors'
+              'p-3 rounded-lg bg-red-600 text-white',
+              'hover:bg-red-700 transition-colors',
+              'animate-pulse shadow-lg shadow-red-500/30',
+              'flex items-center gap-2'
             )}
-            title="Stop generation"
+            title="Stop generation (Esc)"
           >
-            <Square className="w-5 h-5" />
+            <Square className="w-5 h-5 fill-current" />
+            <span className="text-sm font-medium">Stop</span>
           </button>
         )}
         

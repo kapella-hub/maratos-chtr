@@ -138,7 +138,7 @@ class ArchitectAgent(Agent):
                 name="Architect",
                 description="System design and complex architecture via Kiro",
                 icon="🏗️",
-                model="claude-sonnet-4-20250514",
+                model="",  # Inherit from settings
                 temperature=0.3,
                 system_prompt=ARCHITECT_SYSTEM_PROMPT,
                 tools=["filesystem", "shell", "kiro"],

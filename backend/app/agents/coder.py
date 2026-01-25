@@ -152,7 +152,7 @@ class CoderAgent(Agent):
                 name="Coder",
                 description="Pure implementation — clean, production-ready code",
                 icon="💻",
-                model="claude-sonnet-4-20250514",
+                model="",  # Inherit from settings
                 temperature=0.2,
                 system_prompt=CODER_SYSTEM_PROMPT,
                 tools=["filesystem", "shell", "kiro"],

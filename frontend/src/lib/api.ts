@@ -146,8 +146,8 @@ export async function* streamChat(
                 subagent: parsed.subagent_result,
                 data: parsed.content || '',
               }
-            }
-            if (parsed.content) {
+            } else if (parsed.content) {
+              // Only yield content if NOT part of subagent_result
               yield { type: 'content', data: parsed.content.replace(/\\n/g, '\n') }
             }
           } catch {

@@ -229,7 +229,7 @@ class DevOpsAgent(Agent):
                 name="DevOps",
                 description="Infrastructure, CI/CD, and deployment automation",
                 icon="🚀",
-                model="claude-sonnet-4-20250514",
+                model="",  # Inherit from settings
                 temperature=0.3,
                 system_prompt=DEVOPS_SYSTEM_PROMPT,
                 tools=["filesystem", "shell", "kiro"],

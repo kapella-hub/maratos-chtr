@@ -102,7 +102,7 @@ class MOAgent(Agent):
                 name="MO",
                 description="Your AI partner - uses Kiro for coding",
                 icon="🤖",
-                model="claude-sonnet-4-20250514",
+                model="",  # Inherit from settings
                 temperature=0.5,
                 system_prompt=MO_SYSTEM_PROMPT,
                 tools=["filesystem", "shell", "web_search", "web_fetch", "kiro"],

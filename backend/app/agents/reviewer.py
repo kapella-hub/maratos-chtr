@@ -184,7 +184,7 @@ class ReviewerAgent(Agent):
                 name="Reviewer",
                 description="Thorough code review and validation via Kiro",
                 icon="🔍",
-                model="claude-sonnet-4-20250514",
+                model="",  # Inherit from settings
                 temperature=0.2,
                 system_prompt=REVIEWER_SYSTEM_PROMPT,
                 tools=["filesystem", "shell", "kiro"],

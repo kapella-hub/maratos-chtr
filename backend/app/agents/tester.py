@@ -198,7 +198,7 @@ class TesterAgent(Agent):
                 name="Tester",
                 description="Test generation — comprehensive coverage and edge cases",
                 icon="🧪",
-                model="claude-sonnet-4-20250514",
+                model="",  # Inherit from settings
                 temperature=0.2,
                 system_prompt=TESTER_SYSTEM_PROMPT,
                 tools=["filesystem", "shell", "kiro"],
