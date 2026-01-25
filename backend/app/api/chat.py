@@ -178,8 +178,11 @@ async def chat(
         if spawn_matches:
             yield 'data: {"orchestrating": true}\n\n'
             
+            # Phase 1: Spawn all tasks in parallel
+            running_tasks: list[tuple[str, Any]] = []  # (agent_id, task)
+            
             for agent_id_spawn, task_desc in spawn_matches:
-                logger.info(f"Processing spawn: {agent_id_spawn}")
+                logger.info(f"Spawning: {agent_id_spawn}")
                 task_desc = task_desc.strip()
                 if not task_desc:
                     continue
@@ -190,82 +193,76 @@ async def chat(
                     logger.warning(f"Unknown agent in SPAWN: {agent_id_spawn}")
                     continue
                 
-                # Generate task ID upfront for consistent tracking
-                preliminary_task_id = str(uuid.uuid4())[:8]
-                
                 # Notify client about spawned task
                 escaped_task = task_desc[:100].replace("\n", " ").replace('"', '\\"')
-                yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{preliminary_task_id}", "task": "{escaped_task}", "status": "spawning"}}\n\n'
                 
                 try:
-                    # Spawn the subagent task
+                    # Spawn the subagent task (returns immediately, runs in background)
                     task = await subagent_runner.run_task(
                         task_description=task_desc,
                         agent_id=agent_id_spawn,
                         context=request.context,
                         callback_session=session.id,
                     )
-                    
-                    # Update with actual task ID (should match preliminary in most cases)
-                    yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "prev_task_id": "{preliminary_task_id}", "status": "running"}}\n\n'
-                    
-                    # Wait for completion (no timeout - run until done)
-                    last_progress = 0.0
-                    while True:
-                        current = subagent_manager.get(task.id)
-                        if current and current.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
-                            logger.info(f"Subagent {agent_id_spawn} finished with status: {current.status}")
-                            break
-                        await asyncio.sleep(2)
-                        
-                        # Send progress updates (only when changed)
-                        if current and current.progress != last_progress:
-                            last_progress = current.progress
-                            logger.info(f"Subagent {agent_id_spawn} progress: {current.progress:.0%}")
-                            yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "progress": {current.progress:.2f}}}\n\n'
-                    
-                    # Get result
-                    final_task = subagent_manager.get(task.id)
-                    logger.info(f"Final task status: {final_task.status if final_task else 'None'}")
-                    if final_task:
-                        logger.info(f"Final task result: {final_task.result is not None}, error: {final_task.error}")
-                    
-                    if final_task and final_task.status == TaskStatus.COMPLETED:
-                        result_text = final_task.result.get("response", "") if final_task.result else ""
-                        logger.info(f"Subagent response length: {len(result_text)}")
-                        
-                        # Stream the subagent result
-                        yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "completed"}}\n\n'
-                        
-                        # Stream result content (use proper JSON to escape all special chars)
-                        import json
-                        result_event = json.dumps({
-                            "subagent_result": agent_id_spawn,
-                            "content": result_text
-                        })
-                        logger.info(f"Sending subagent_result: agent={agent_id_spawn}, content_len={len(result_text)}")
-                        yield f'data: {result_event}\n\n'
-                        
-                        logger.info(f"Sent subagent_result event successfully")
-                        
-                        # Save subagent result as a message
-                        async with db.begin():
-                            subagent_msg = DBMessage(
-                                id=str(uuid.uuid4()),
-                                session_id=session.id,
-                                role="assistant",
-                                content=f"**[{agent_id_spawn.upper()}]**\n\n{result_text}",
-                            )
-                            db.add(subagent_msg)
-                    else:
-                        error = final_task.error if final_task else "timeout"
-                        yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "failed", "error": "{error}"}}\n\n'
-                        
+                    running_tasks.append((agent_id_spawn, task))
+                    yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "task": "{escaped_task}", "status": "running"}}\n\n'
+                    logger.info(f"Spawned {agent_id_spawn} with task_id {task.id}")
                 except Exception as e:
-                    import traceback
-                    logger.error(f"Failed to spawn subagent {agent_id_spawn}: {e}\n{traceback.format_exc()}")
+                    logger.error(f"Failed to spawn {agent_id_spawn}: {e}")
                     escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
                     yield f'data: {{"subagent": "{agent_id_spawn}", "status": "error", "error": "{escaped_err}"}}\n\n'
+            
+            # Phase 2: Poll all tasks in parallel until all complete
+            last_progress: dict[str, float] = {}
+            completed_tasks: set[str] = set()
+            
+            while len(completed_tasks) < len(running_tasks):
+                await asyncio.sleep(1)
+                
+                for agent_id_spawn, task in running_tasks:
+                    if task.id in completed_tasks:
+                        continue
+                    
+                    current = subagent_manager.get(task.id)
+                    if not current:
+                        continue
+                    
+                    # Send progress updates
+                    if current.progress != last_progress.get(task.id, 0):
+                        last_progress[task.id] = current.progress
+                        yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "progress": {current.progress:.2f}}}\n\n'
+                    
+                    # Check if completed
+                    if current.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+                        completed_tasks.add(task.id)
+                        logger.info(f"Subagent {agent_id_spawn} finished with status: {current.status}")
+                        
+                        if current.status == TaskStatus.COMPLETED:
+                            result_text = current.result.get("response", "") if current.result else ""
+                            logger.info(f"Subagent {agent_id_spawn} response length: {len(result_text)}")
+                            
+                            yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "completed"}}\n\n'
+                            
+                            # Stream result
+                            import json
+                            result_event = json.dumps({
+                                "subagent_result": agent_id_spawn,
+                                "content": result_text
+                            })
+                            yield f'data: {result_event}\n\n'
+                            
+                            # Save to DB
+                            async with db.begin():
+                                subagent_msg = DBMessage(
+                                    id=str(uuid.uuid4()),
+                                    session_id=session.id,
+                                    role="assistant",
+                                    content=f"**[{agent_id_spawn.upper()}]**\n\n{result_text}",
+                                )
+                                db.add(subagent_msg)
+                        else:
+                            error = current.error or "Unknown error"
+                            yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "failed", "error": "{error}"}}\n\n'
             
             yield 'data: {"orchestrating": false}\n\n'
 
