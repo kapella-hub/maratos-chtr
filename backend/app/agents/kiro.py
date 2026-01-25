@@ -13,14 +13,18 @@ ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 # Patterns for verbose tool logs to filter out (line-based)
 TOOL_LOG_PATTERNS = [
-    r'^\s*Reading (?:directory|file):.*',
-    r'^\s*Batch \w+ operation.*',
-    r'^\s*↱ Operation \d+:.*',
-    r'^\s*[✓✗] (?:Successfully|Failed).*',
-    r'^\s*⋮\s*•\s*Summary:.*',
-    r'^\s*•\s*Completed in.*',
+    r'^Reading (?:directory|file):.*',
+    r'^Batch \w+ operation.*',
+    r'^↱ Operation \d+:.*',
+    r'^[✓✗] (?:Successfully|Failed).*',
+    r'^⋮.*Summary:.*',
+    r'^•\s*Completed in.*',
     r'.*\(using tool:.*\).*',
-    r'^\s*\d+;\d+m.*entries\).*',
+    r'^\d+;\d+m.*entries.*',
+    r'^\s*\[\d+ more items found\].*',
+    r'^\[Overview\].*bytes.*tokens.*',
+    r'^\d+ \w+ at /.*:\d+:\d+$',  # "1 Class RequestData at /path:30:1"
+    r'^\(\d+ more items found\)$',
 ]
 
 def is_tool_log_line(line: str) -> bool:

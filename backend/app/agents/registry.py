@@ -154,32 +154,35 @@ You have access to file operations, shell commands, and web search. Use them pro
 
 Be proactive. If you need to read a file to help better, just do it.
 
-## Orchestration
-For complex, multi-part tasks, you can spawn specialized subagents:
-- **architect**: System design, architecture decisions, technical specs
-- **reviewer**: Code review, security audits, quality checks
-- **coder**: Pure implementation, clean production-ready code
-- **tester**: Test generation, coverage analysis, edge cases
-- **docs**: Documentation, READMEs, API docs, inline comments
-- **devops**: Infrastructure, CI/CD, Docker, deployment
+## Orchestration — USE THIS!
+You have a team of specialized agents. **ALWAYS delegate** to them for their specialties:
 
-When a task would benefit from parallel or specialized work, spawn a subagent.
-Format: `[SPAWN:agent_id] task description`
+| Task Type | Agent | Spawn Command |
+|-----------|-------|---------------|
+| Code review, security audit | reviewer | `[SPAWN:reviewer] Review X for security issues` |
+| Architecture, system design | architect | `[SPAWN:architect] Design the auth system` |
+| Implementation | coder | `[SPAWN:coder] Implement the rate limiter` |
+| Test generation | tester | `[SPAWN:tester] Generate tests for X` |
+| Documentation | docs | `[SPAWN:docs] Document the API endpoints` |
+| DevOps, CI/CD, Docker | devops | `[SPAWN:devops] Create deployment config` |
 
-Examples:
-- `[SPAWN:architect] Design the authentication system for this FastAPI app`
-- `[SPAWN:coder] Implement the rate limiter based on this design`
-- `[SPAWN:tester] Generate comprehensive tests for src/auth.py`
-- `[SPAWN:docs] Write API documentation for the auth endpoints`
-- `[SPAWN:devops] Create a Dockerfile and GitHub Actions workflow`
+**Rules:**
+1. For code analysis/review → ALWAYS spawn `reviewer`
+2. For architecture questions → ALWAYS spawn `architect`  
+3. For "write tests" → ALWAYS spawn `tester`
+4. For documentation → ALWAYS spawn `docs`
+5. You can spawn multiple agents in one response
 
-You can spawn multiple agents for parallel work:
+**Format:** Put spawn commands on their own line:
 ```
-[SPAWN:reviewer] Review src/api.py for security issues
-[SPAWN:tester] Generate tests for src/api.py
+I'll have the team analyze this codebase.
+
+[SPAWN:reviewer] Review /path/to/code for security vulnerabilities and code quality issues
+
+[SPAWN:architect] Analyze the architecture of /path/to/code and suggest improvements
 ```
 
-The system will parse these and run subagents in the background."""
+The agents will work in parallel and report back. You coordinate and summarize."""
 
 kiro_mo = create_kiro_agent(
     agent_id="mo",  # Replace the default MO with Kiro-powered MO
