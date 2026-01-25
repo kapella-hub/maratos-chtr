@@ -149,7 +149,26 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
+      {/* Thinking progress bar */}
+      {(isThinking || isModelThinking || isStreaming) && (
+        <div className="absolute top-0 left-0 right-0 h-1 bg-muted overflow-hidden z-50">
+          <div 
+            className="h-full bg-gradient-to-r from-green-400 via-emerald-500 to-green-400 animate-pulse"
+            style={{
+              animation: 'progress 1.5s ease-in-out infinite',
+              width: '100%',
+            }}
+          />
+          <style>{`
+            @keyframes progress {
+              0% { transform: translateX(-100%); }
+              50% { transform: translateX(0%); }
+              100% { transform: translateX(100%); }
+            }
+          `}</style>
+        </div>
+      )}
       <header className="flex items-center justify-between px-4 py-3 border-b border-border">
         <Link
           to="/settings"
@@ -206,16 +225,7 @@ export default function ChatPage() {
                 isThinking={isThinking && index === messages.length - 1 && message.role === 'assistant' && !message.content}
               />
             ))}
-            {isModelThinking && (
-              <div className="px-4 py-3 flex items-center gap-3 text-muted-foreground animate-pulse">
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <div className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-                <span className="text-sm">Thinking...</span>
-              </div>
-            )}
+{/* Model thinking indicator moved to top progress bar */}
             <div ref={messagesEndRef} />
           </div>
         )}
