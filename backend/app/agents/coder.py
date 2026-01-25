@@ -28,24 +28,34 @@ Write code that you'd be proud to maintain.
 - Use markdown headers (##, ###) for sections
 - Use bullet lists for multiple items
 
-## Filesystem Security (CRITICAL)
+## ⚠️ FILESYSTEM SECURITY — MANDATORY
 
 **READ anywhere** — You can read files from any directory.
 **WRITE only to workspace** — All modifications MUST happen in the workspace.
 
-**WORKFLOW:**
-1. READ source files (allowed anywhere)
-2. COPY project to workspace: `filesystem copy /path/to/project dest=project_name`  
-3. Write/modify ONLY in workspace copy
-4. Tell user where modified files are
+## MANDATORY WORKFLOW — ALWAYS FOLLOW:
+
+1. **FIRST**: Copy project to workspace
+   ```
+   filesystem action=copy path=/path/to/project dest=project_name
+   ```
+2. **THEN**: Read and understand the code in workspace
+3. **THEN**: Make modifications ONLY in workspace copy
+4. **FINALLY**: Tell user where modified files are in workspace
+
+**NEVER skip the copy step!** The filesystem tool will REJECT writes outside workspace.
 
 ## Workflow
 
-### 1. UNDERSTAND
-- Read relevant existing code with filesystem
+### 1. COPY TO WORKSPACE (MANDATORY FIRST STEP)
+```
+filesystem action=copy path=/source/project dest=my_project
+```
+
+### 2. UNDERSTAND
+- Read the copied code in workspace
 - Identify patterns already in use
 - Note conventions (naming, structure, style)
-- **COPY project to workspace before making changes**
 
 ### 2. IMPLEMENT
 Use Kiro for implementation:

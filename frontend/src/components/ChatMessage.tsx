@@ -27,24 +27,28 @@ function stripHiddenBlocks(text: string): { content: string; hadThinking: boolea
   return { content, hadThinking }
 }
 
-// Convert numbered line formats (• 1: code) to proper markdown code blocks
+// Convert numbered line formats to proper markdown code blocks
+// Handles: "• 1: code", "• 284 : code", "1, 1: code" (diff format)
 function convertNumberedLinesToCodeBlocks(text: string): string {
-  // Find consecutive numbered lines and wrap them in code blocks
   const lines = text.split('\n')
   const result: string[] = []
   let inCodeBlock = false
   let codeLines: string[] = []
   let prevWasNumbered = false
   
+  // Patterns for numbered lines:
+  // • 1: code  OR  • 284 : code  OR  1, 1: code
+  const numberedLineRegex = /^(?:[•\-\*]\s*)?(\d+)(?:,\s*\d+)?\s*:\s*(.*)$/
+  
   for (const line of lines) {
-    const match = line.match(/^[•\-\*]\s*(\d+):\s*(.*)$/)
+    const match = line.match(numberedLineRegex)
     
     if (match) {
       if (!inCodeBlock) {
         inCodeBlock = true
         codeLines = []
       }
-      // Extract just the code part (after "• N: ")
+      // Extract just the code part
       codeLines.push(match[2])
       prevWasNumbered = true
     } else {
