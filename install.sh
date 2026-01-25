@@ -81,13 +81,17 @@ echo ""
 # === Download/Clone MaratOS ===
 if [ -d "$INSTALL_DIR" ]; then
     warn "Directory exists: $INSTALL_DIR"
-    read -p "Overwrite? [y/N] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -rf "$INSTALL_DIR"
+    # Check if running interactively
+    if [ -t 0 ]; then
+        read -p "Overwrite? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            error "Installation cancelled"
+        fi
     else
-        error "Installation cancelled"
+        info "Non-interactive mode: cleaning up previous install..."
     fi
+    rm -rf "$INSTALL_DIR"
 fi
 
 info "Downloading MaratOS..."
