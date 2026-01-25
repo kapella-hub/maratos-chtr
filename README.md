@@ -268,9 +268,13 @@ MaratOS uses **Kiro AI** (your company's approved AI) for all coding tasks. Agen
 
 | Agent | Role | Kiro Usage |
 |-------|------|------------|
-| 🤖 **MO** | General partner | Uses Kiro for any coding |
+| 🤖 **MO** | General partner | Orchestrates other agents, uses Kiro for coding |
 | 🏗️ **Architect** | System design | `kiro architect` with detailed specs |
 | 🔍 **Reviewer** | Code review | `kiro validate` with full checklist |
+| 💻 **Coder** | Implementation | `kiro prompt` for clean, focused code |
+| 🧪 **Tester** | Test generation | `kiro test` with edge cases |
+| 📝 **Docs** | Documentation | `kiro prompt` for technical writing |
+| 🚀 **DevOps** | Infrastructure | `kiro prompt` for IaC and CI/CD |
 
 ### Kiro Actions (Quality-Tuned)
 
@@ -375,22 +379,28 @@ Result: Architect's detailed design appears as a new message
 
 | Agent | Marker | Best For |
 |-------|--------|----------|
-| 🏗️ **Architect** | `[SPAWN:architect]` | System design, architecture decisions |
-| 🔍 **Reviewer** | `[SPAWN:reviewer]` | Code review, security audits |
+| 🏗️ **Architect** | `[SPAWN:architect]` | System design, architecture decisions, technical specs |
+| 🔍 **Reviewer** | `[SPAWN:reviewer]` | Code review, security audits, quality checks |
+| 💻 **Coder** | `[SPAWN:coder]` | Pure implementation, clean production-ready code |
+| 🧪 **Tester** | `[SPAWN:tester]` | Test generation, coverage analysis, edge cases |
+| 📝 **Docs** | `[SPAWN:docs]` | Documentation, READMEs, API docs |
+| 🚀 **DevOps** | `[SPAWN:devops]` | Infrastructure, CI/CD, Docker, deployment |
 | 🤖 **MO** | `[SPAWN:mo]` | General tasks, parallel work |
 
 ### Example Prompts
 
 ```
-"Review my authentication code for security issues"
-→ MO: [SPAWN:reviewer] Review src/auth.py for security vulnerabilities...
+"Design and implement a rate limiter"
+→ MO: [SPAWN:architect] Design the rate limiter architecture
+       [SPAWN:coder] Implement the rate limiter based on this design
 
-"Design a microservices architecture for this e-commerce app"
-→ MO: [SPAWN:architect] Design a scalable microservices architecture...
+"Review, test, and document my auth module"
+→ MO: [SPAWN:reviewer] Review src/auth.py for security issues
+       [SPAWN:tester] Generate comprehensive tests for src/auth.py
+       [SPAWN:docs] Write API documentation for auth endpoints
 
-"Analyze these 5 files in parallel for code quality"
-→ MO: [SPAWN:reviewer] Review file1.py...
-       [SPAWN:reviewer] Review file2.py...
+"Set up CI/CD for this project"
+→ MO: [SPAWN:devops] Create Dockerfile and GitHub Actions workflow
 ```
 
 ### UI Features

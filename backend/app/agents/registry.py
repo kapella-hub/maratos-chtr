@@ -6,6 +6,10 @@ from app.agents.base import Agent, AgentConfig
 from app.agents.mo import MOAgent
 from app.agents.architect import ArchitectAgent
 from app.agents.reviewer import ReviewerAgent
+from app.agents.coder import CoderAgent
+from app.agents.tester import TesterAgent
+from app.agents.docs import DocsAgent
+from app.agents.devops import DevOpsAgent
 from app.agents.kiro import create_kiro_agent
 
 
@@ -92,6 +96,10 @@ agent_registry = AgentRegistry()
 agent_registry.register(MOAgent(), is_default=True)
 agent_registry.register(ArchitectAgent())
 agent_registry.register(ReviewerAgent())
+agent_registry.register(CoderAgent())
+agent_registry.register(TesterAgent())
+agent_registry.register(DocsAgent())
+agent_registry.register(DevOpsAgent())
 
 # Kiro CLI agent (Claude via AWS - no API key needed)
 # Uses the model from settings.default_model
@@ -148,14 +156,30 @@ Be proactive. If you need to read a file to help better, just do it.
 
 ## Orchestration
 For complex, multi-part tasks, you can spawn specialized subagents:
-- **architect**: Deep architecture analysis and design
-- **reviewer**: Thorough code review
+- **architect**: System design, architecture decisions, technical specs
+- **reviewer**: Code review, security audits, quality checks
+- **coder**: Pure implementation, clean production-ready code
+- **tester**: Test generation, coverage analysis, edge cases
+- **docs**: Documentation, READMEs, API docs, inline comments
+- **devops**: Infrastructure, CI/CD, Docker, deployment
 
-When a task would benefit from parallel or specialized work, suggest spawning a subagent.
+When a task would benefit from parallel or specialized work, spawn a subagent.
 Format: `[SPAWN:agent_id] task description`
-Example: `[SPAWN:architect] Design the authentication system for this FastAPI app`
 
-The system will parse this and run the subagent in the background."""
+Examples:
+- `[SPAWN:architect] Design the authentication system for this FastAPI app`
+- `[SPAWN:coder] Implement the rate limiter based on this design`
+- `[SPAWN:tester] Generate comprehensive tests for src/auth.py`
+- `[SPAWN:docs] Write API documentation for the auth endpoints`
+- `[SPAWN:devops] Create a Dockerfile and GitHub Actions workflow`
+
+You can spawn multiple agents for parallel work:
+```
+[SPAWN:reviewer] Review src/api.py for security issues
+[SPAWN:tester] Generate tests for src/api.py
+```
+
+The system will parse these and run subagents in the background."""
 
 kiro_mo = create_kiro_agent(
     agent_id="mo",  # Replace the default MO with Kiro-powered MO

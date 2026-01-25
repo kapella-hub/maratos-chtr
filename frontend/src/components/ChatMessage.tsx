@@ -20,6 +20,10 @@ const agentColors: Record<string, string> = {
   mo: 'from-violet-500 to-purple-600',
   architect: 'from-blue-500 to-cyan-600',
   reviewer: 'from-amber-500 to-orange-600',
+  coder: 'from-emerald-500 to-green-600',
+  tester: 'from-pink-500 to-rose-600',
+  docs: 'from-cyan-500 to-sky-600',
+  devops: 'from-orange-500 to-red-600',
   'kiro-sonnet': 'from-emerald-500 to-teal-600',
   'kiro-opus': 'from-rose-500 to-pink-600',
 }
@@ -28,6 +32,10 @@ const agentLabels: Record<string, string> = {
   mo: 'MO',
   architect: 'Architect',
   reviewer: 'Reviewer',
+  coder: 'Coder',
+  tester: 'Tester',
+  docs: 'Docs',
+  devops: 'DevOps',
   'kiro-sonnet': 'Kiro',
   'kiro-opus': 'Kiro',
 }
@@ -36,6 +44,10 @@ const agentIcons: Record<string, string> = {
   mo: 'MO',
   architect: '🏗️',
   reviewer: '🔍',
+  coder: '💻',
+  tester: '🧪',
+  docs: '📝',
+  devops: '🚀',
   'kiro-sonnet': '🦜',
   'kiro-opus': '🦜',
 }

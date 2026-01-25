@@ -169,7 +169,8 @@ async def chat(
                     continue
                 
                 # Validate agent exists
-                if agent_id_spawn not in ("architect", "reviewer", "mo"):
+                valid_agents = ("architect", "reviewer", "coder", "tester", "docs", "devops", "mo")
+                if agent_id_spawn not in valid_agents:
                     logger.warning(f"Unknown agent in SPAWN: {agent_id_spawn}")
                     continue
                 

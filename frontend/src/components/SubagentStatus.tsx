@@ -9,12 +9,20 @@ interface SubagentStatusProps {
 const agentColors: Record<string, string> = {
   architect: 'bg-blue-500',
   reviewer: 'bg-amber-500',
+  coder: 'bg-emerald-500',
+  tester: 'bg-pink-500',
+  docs: 'bg-cyan-500',
+  devops: 'bg-orange-500',
   mo: 'bg-violet-500',
 }
 
 const agentLabels: Record<string, string> = {
   architect: '🏗️ Architect',
   reviewer: '🔍 Reviewer',
+  coder: '💻 Coder',
+  tester: '🧪 Tester',
+  docs: '📝 Docs',
+  devops: '🚀 DevOps',
   mo: '🤖 MO',
 }
 

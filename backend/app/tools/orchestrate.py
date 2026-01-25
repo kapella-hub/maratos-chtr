@@ -31,9 +31,9 @@ class OrchestrateTool(Tool):
                 ToolParameter(
                     name="agent",
                     type="string",
-                    description="Which agent: architect (design/planning), reviewer (code review), mo (general)",
+                    description="Which agent: architect (design), reviewer (code review), coder (implementation), tester (tests), docs (documentation), devops (infrastructure), mo (general)",
                     required=False,
-                    enum=["architect", "reviewer", "mo"],
+                    enum=["architect", "reviewer", "coder", "tester", "docs", "devops", "mo"],
                 ),
                 ToolParameter(
                     name="task_id",
