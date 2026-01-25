@@ -88,6 +88,7 @@ export default function ChatPage() {
             error: event.error,
           })
         } else if (event.type === 'subagent_result' && event.data) {
+          console.log('Adding subagent message:', event.subagent, 'length:', (event.data as string).length)
           addMessage({ 
             role: 'assistant', 
             content: event.data as string, 

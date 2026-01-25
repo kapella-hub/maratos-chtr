@@ -140,10 +140,11 @@ export async function* streamChat(
               }
             }
             if (parsed.subagent_result) {
+              console.log('Received subagent_result:', parsed.subagent_result, 'content length:', parsed.content?.length)
               yield { 
                 type: 'subagent_result', 
                 subagent: parsed.subagent_result,
-                data: parsed.content?.replace(/\\n/g, '\n'),
+                data: parsed.content || '',
               }
             }
             if (parsed.content) {
