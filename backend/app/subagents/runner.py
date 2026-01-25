@@ -37,7 +37,6 @@ class SubagentRunner:
             # Import here to avoid circular imports
             from app.agents import agent_registry
             from app.agents.base import Message
-            from app.memory.manager import memory_manager
             
             task.log(f"Using agent: {agent_id}")
             
@@ -45,12 +44,17 @@ class SubagentRunner:
             if not agent:
                 raise ValueError(f"Agent not found: {agent_id}")
             
-            # Get memory context
-            task.log("Retrieving relevant memories...")
-            memory_context = await memory_manager.get_context(
-                query=task_description,
-                max_tokens=1000,
-            )
+            # Memory is optional - don't fail if it doesn't work
+            memory_context = None
+            try:
+                from app.memory.manager import memory_manager
+                task.log("Retrieving relevant memories...")
+                memory_context = await memory_manager.get_context(
+                    query=task_description,
+                    max_tokens=1000,
+                )
+            except Exception as e:
+                task.log(f"Memory retrieval skipped: {e}")
             
             # Build messages
             messages = [
@@ -67,22 +71,30 @@ class SubagentRunner:
             task.progress = 0.3
             
             response_text = ""
-            async for chunk in agent.chat(messages, full_context):
-                response_text += chunk
-                # Update progress based on response length (rough estimate)
-                task.progress = min(0.9, 0.3 + len(response_text) / 5000)
+            try:
+                async for chunk in agent.chat(messages, full_context):
+                    response_text += chunk
+                    # Update progress based on response length (rough estimate)
+                    task.progress = min(0.9, 0.3 + len(response_text) / 5000)
+            except Exception as e:
+                task.log(f"Agent error: {e}")
+                raise
             
             task.log(f"Agent response: {len(response_text)} chars")
             task.progress = 0.9
             
-            # Store learnings in memory
-            task.log("Storing learnings...")
-            await memory_manager.remember(
-                content=f"Task: {task_description}\nResult: {response_text[:500]}",
-                memory_type="task",
-                tags=["subagent", agent_id],
-                importance=0.5,
-            )
+            # Store learnings in memory (optional)
+            try:
+                from app.memory.manager import memory_manager
+                task.log("Storing learnings...")
+                await memory_manager.remember(
+                    content=f"Task: {task_description}\nResult: {response_text[:500]}",
+                    memory_type="task",
+                    tags=["subagent", agent_id],
+                    importance=0.5,
+                )
+            except Exception as e:
+                task.log(f"Memory storage skipped: {e}")
             
             return {
                 "response": response_text,

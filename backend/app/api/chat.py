@@ -160,10 +160,13 @@ async def chat(
 
         # Check for [SPAWN:agent] markers and auto-orchestrate
         spawn_matches = SPAWN_PATTERN.findall(full_response)
+        logger.info(f"Spawn matches found: {len(spawn_matches)}")
+        
         if spawn_matches:
             yield 'data: {"orchestrating": true}\n\n'
             
             for agent_id_spawn, task_desc in spawn_matches:
+                logger.info(f"Processing spawn: {agent_id_spawn}")
                 task_desc = task_desc.strip()
                 if not task_desc:
                     continue
@@ -228,8 +231,9 @@ async def chat(
                         yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "failed", "error": "{error}"}}\n\n'
                         
                 except Exception as e:
-                    logger.error(f"Failed to spawn subagent {agent_id_spawn}: {e}")
-                    escaped_err = str(e).replace('"', '\\"')
+                    import traceback
+                    logger.error(f"Failed to spawn subagent {agent_id_spawn}: {e}\n{traceback.format_exc()}")
+                    escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
                     yield f'data: {{"subagent": "{agent_id_spawn}", "status": "error", "error": "{escaped_err}"}}\n\n'
             
             yield 'data: {"orchestrating": false}\n\n'
