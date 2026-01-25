@@ -199,16 +199,44 @@ I'll have the team analyze this codebase.
 The agents will work in parallel and report back. You coordinate and summarize."""
 
 kiro_mo = create_kiro_agent(
-    agent_id="mo",  # Replace the default MO with Kiro-powered MO
+    agent_id="mo",
     name="MO",
     description="Your AI partner, powered by Kiro CLI",
     model=settings.default_model or "claude-sonnet-4.5",
     system_prompt=MO_SYSTEM_PROMPT,
 )
 
-# If Kiro is available, use Kiro-powered MO as default
+# If Kiro is available, replace ALL agents with Kiro-powered versions
 if kiro_mo.available:
-    # Re-register MO with Kiro backend (replaces the litellm-based MO)
-    agent_registry._agents["mo"] = kiro_mo
-    agent_registry._configs["mo"] = kiro_mo.config
+    # Import system prompts from agent modules
+    from app.agents.architect import ARCHITECT_SYSTEM_PROMPT
+    from app.agents.reviewer import REVIEWER_SYSTEM_PROMPT
+    from app.agents.coder import CODER_SYSTEM_PROMPT
+    from app.agents.tester import TESTER_SYSTEM_PROMPT
+    from app.agents.docs import DOCS_SYSTEM_PROMPT
+    from app.agents.devops import DEVOPS_SYSTEM_PROMPT
+    
+    # Create Kiro-powered versions of all agents
+    kiro_agents = [
+        ("mo", "MO", "Your AI partner", MO_SYSTEM_PROMPT, "🤖"),
+        ("architect", "Architect", "System design and architecture", ARCHITECT_SYSTEM_PROMPT, "🏗️"),
+        ("reviewer", "Reviewer", "Code review and security audit", REVIEWER_SYSTEM_PROMPT, "🔍"),
+        ("coder", "Coder", "Clean implementation", CODER_SYSTEM_PROMPT, "💻"),
+        ("tester", "Tester", "Test generation", TESTER_SYSTEM_PROMPT, "🧪"),
+        ("docs", "Docs", "Documentation", DOCS_SYSTEM_PROMPT, "📝"),
+        ("devops", "DevOps", "Infrastructure and CI/CD", DEVOPS_SYSTEM_PROMPT, "🚀"),
+    ]
+    
+    for agent_id, name, desc, prompt, icon in kiro_agents:
+        kiro_agent = create_kiro_agent(
+            agent_id=agent_id,
+            name=name,
+            description=desc,
+            model=settings.default_model or "claude-sonnet-4.5",
+            system_prompt=prompt,
+        )
+        kiro_agent.config.icon = icon
+        agent_registry._agents[agent_id] = kiro_agent
+        agent_registry._configs[agent_id] = kiro_agent.config
+    
     agent_registry._default_id = "mo"
