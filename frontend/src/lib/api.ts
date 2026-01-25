@@ -83,12 +83,14 @@ export interface ChatEvent {
 export async function* streamChat(
   message: string,
   agentId: string = 'mo',
-  sessionId?: string
+  sessionId?: string,
+  signal?: AbortSignal
 ): AsyncGenerator<ChatEvent> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, agent_id: agentId, session_id: sessionId }),
+    signal,
   })
 
   if (!res.ok) throw new Error('Failed to send message')

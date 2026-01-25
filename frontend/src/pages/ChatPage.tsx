@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Plus, Settings } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -6,14 +6,17 @@ import ChatInput from '@/components/ChatInput'
 import ChatMessage from '@/components/ChatMessage'
 import ThinkingIndicator from '@/components/ThinkingIndicator'
 import SubagentStatus from '@/components/SubagentStatus'
+import QueueIndicator from '@/components/QueueIndicator'
 import { useChatStore } from '@/stores/chat'
 import { streamChat, fetchConfig } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const processingRef = useRef(false)
   const {
     messages,
+    messageQueue,
     sessionId,
     agentId,
     isStreaming,
@@ -30,8 +33,12 @@ export default function ChatPage() {
     setOrchestrating,
     updateSubagent,
     clearSubagents,
+    setAbortController,
     stopGeneration,
     clearMessages,
+    enqueueMessage,
+    dequeueMessage,
+    clearQueue,
   } = useChatStore()
 
   // Fetch config to show current model
@@ -51,7 +58,11 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const handleSend = async (content: string) => {
+  // Process a single message
+  const processMessage = useCallback(async (content: string) => {
+    const controller = new AbortController()
+    setAbortController(controller)
+    
     addMessage({ role: 'user', content })
     addMessage({ role: 'assistant', content: '', agentId })
 
@@ -59,7 +70,7 @@ export default function ChatPage() {
     setThinking(true)
 
     try {
-      for await (const event of streamChat(content, agentId, sessionId || undefined)) {
+      for await (const event of streamChat(content, agentId, sessionId || undefined, controller.signal)) {
         if (event.type === 'session_id' && event.data) {
           setSessionId(event.data as string)
         } else if (event.type === 'agent' && event.data) {
@@ -77,7 +88,6 @@ export default function ChatPage() {
             error: event.error,
           })
         } else if (event.type === 'subagent_result' && event.data) {
-          // Add subagent result as a new message
           addMessage({ 
             role: 'assistant', 
             content: event.data as string, 
@@ -87,14 +97,45 @@ export default function ChatPage() {
           appendToLastMessage(event.data as string)
         }
       }
-    } catch (error) {
-      console.error('Chat error:', error)
-      appendToLastMessage('\n\n❌ Error: Failed to get response')
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        appendToLastMessage('\n\n⏹️ Stopped')
+      } else {
+        console.error('Chat error:', error)
+        appendToLastMessage('\n\n❌ Error: Failed to get response')
+      }
     } finally {
       setStreaming(false)
       setThinking(false)
+      setAbortController(null)
       clearSubagents()
     }
+  }, [agentId, sessionId, addMessage, appendToLastMessage, setSessionId, setLastMessageAgent, setStreaming, setThinking, setOrchestrating, updateSubagent, clearSubagents, setAbortController])
+
+  // Process queue after each message
+  const processQueue = useCallback(async () => {
+    if (processingRef.current) return
+    processingRef.current = true
+    
+    let next = dequeueMessage()
+    while (next) {
+      await processMessage(next.content)
+      next = dequeueMessage()
+    }
+    
+    processingRef.current = false
+  }, [dequeueMessage, processMessage])
+
+  // Handle sending a new message
+  const handleSend = async (content: string) => {
+    await processMessage(content)
+    // Process any queued messages
+    processQueue()
+  }
+
+  // Handle queuing a message
+  const handleQueue = (content: string) => {
+    enqueueMessage(content)
   }
 
   return (
@@ -164,10 +205,14 @@ export default function ChatPage() {
         <SubagentStatus tasks={activeSubagents} />
       )}
 
+      <QueueIndicator queue={messageQueue} onClear={clearQueue} />
+
       <ChatInput
         onSend={handleSend}
+        onQueue={handleQueue}
         onStop={stopGeneration}
         isLoading={isStreaming}
+        hasQueue={messageQueue.length > 0}
         placeholder="Message MO..."
       />
     </div>

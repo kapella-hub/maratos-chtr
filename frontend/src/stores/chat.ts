@@ -17,8 +17,15 @@ export interface SubagentTask {
   error?: string
 }
 
+export interface QueuedMessage {
+  id: string
+  content: string
+  timestamp: Date
+}
+
 interface ChatStore {
   messages: ChatMessage[]
+  messageQueue: QueuedMessage[]
   sessionId: string | null
   agentId: string
   isStreaming: boolean
@@ -40,10 +47,16 @@ interface ChatStore {
   setAbortController: (controller: AbortController | null) => void
   stopGeneration: () => void
   clearMessages: () => void
+  
+  // Queue management
+  enqueueMessage: (content: string) => void
+  dequeueMessage: () => QueuedMessage | undefined
+  clearQueue: () => void
 }
 
 export const useChatStore = create<ChatStore>((set, get) => ({
   messages: [],
+  messageQueue: [],
   sessionId: null,
   agentId: 'mo',
   isStreaming: false,
@@ -60,9 +73,28 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const { abortController } = get()
     if (abortController) {
       abortController.abort()
-      set({ isStreaming: false, abortController: null })
+      set({ isStreaming: false, isThinking: false, abortController: null })
     }
   },
+  
+  // Queue management
+  enqueueMessage: (content) => set((state) => ({
+    messageQueue: [...state.messageQueue, {
+      id: crypto.randomUUID(),
+      content,
+      timestamp: new Date(),
+    }],
+  })),
+  
+  dequeueMessage: () => {
+    const { messageQueue } = get()
+    if (messageQueue.length === 0) return undefined
+    const [first, ...rest] = messageQueue
+    set({ messageQueue: rest })
+    return first
+  },
+  
+  clearQueue: () => set({ messageQueue: [] }),
   
   addMessage: (message) => set((state) => ({
     messages: [...state.messages, {
@@ -110,5 +142,5 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   
   clearSubagents: () => set({ activeSubagents: [], isOrchestrating: false }),
   
-  clearMessages: () => set({ messages: [], sessionId: null, isThinking: false, isOrchestrating: false, activeSubagents: [] }),
+  clearMessages: () => set({ messages: [], messageQueue: [], sessionId: null, isThinking: false, isOrchestrating: false, activeSubagents: [] }),
 }))
