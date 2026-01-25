@@ -12,7 +12,7 @@ from app.agents.base import Agent, AgentConfig
 class KiroAgentConfig(AgentConfig):
     """Configuration for Kiro agent."""
 
-    model: str = "claude-sonnet"  # claude-opus or claude-sonnet
+    model: str = "claude-sonnet-4"  # claude-opus-4.5, claude-sonnet-4, claude-sonnet-4.5, claude-haiku-4.5
     trust_tools: bool = True  # --trust-all-tools flag
 
 

@@ -98,13 +98,13 @@ kiro_sonnet = create_kiro_agent(
     agent_id="kiro-sonnet",
     name="Kiro (Sonnet)",
     description="Claude Sonnet 4 via Kiro CLI",
-    model="claude-sonnet",
+    model="claude-sonnet-4",
 )
 kiro_opus = create_kiro_agent(
     agent_id="kiro-opus",
     name="Kiro (Opus)",
     description="Claude Opus 4.5 via Kiro CLI",
-    model="claude-opus",
+    model="claude-opus-4.5",
 )
 
 # If Kiro is available and no Anthropic key, make Kiro the default
