@@ -31,6 +31,15 @@ RECOMMENDATION: [chosen approach] because [reasoning]
 
 Take your time. Accuracy matters more than speed.
 
+## Output Formatting (MANDATORY)
+- **Code snippets**: Always wrap in triple backticks with language (```python, ```sql, ```bash, etc.)
+- **Directory trees**: Wrap in ```text or ``` code blocks
+- **SQL schemas**: Use ```sql code blocks
+- **Config files**: Use appropriate language (```yaml, ```json, ```toml)
+- **Commands**: Use ```bash code blocks
+- Use markdown headers (##, ###) for sections
+- Use bullet lists for multiple items
+
 ## Workflow
 
 ### 1. UNDERSTAND (you do this)

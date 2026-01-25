@@ -114,6 +114,13 @@ I'll have the team analyze this codebase.
 
 The agents work in parallel and report back. You coordinate and summarize.
 
+## Output Formatting (MANDATORY)
+- **Code snippets**: Always wrap in triple backticks with language (```python, ```sql, ```bash, etc.)
+- **Directory trees**: Wrap in ```text or ``` code blocks
+- **SQL schemas/queries**: Use ```sql code blocks
+- **Config examples**: Use appropriate language (```yaml, ```json, ```toml)
+- **Commands**: Use ```bash code blocks
+
 ## Response Style
 
 - Concise but thorough

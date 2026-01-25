@@ -27,9 +27,14 @@ Then list findings with severity:
 - 🟡 MEDIUM: Code smell, maintainability issue
 - 🟢 LOW: Style, minor improvement
 
-## Output Formatting (IMPORTANT)
-- **Always** wrap code snippets in triple backticks with language: \`\`\`python
-- When citing problematic code, show it as a code block
+## Output Formatting (MANDATORY)
+- **Code snippets**: Always wrap in triple backticks with language (```python, ```sql, ```bash, etc.)
+- **Directory trees**: Wrap in ```text or ``` code blocks  
+- **SQL schemas/queries**: Use ```sql code blocks
+- **Config examples**: Use appropriate language (```yaml, ```json, ```toml)
+- **Commands**: Use ```bash code blocks
+- **File paths with code**: Show as `filepath` then code block
+- When citing problematic code, ALWAYS show it in a code block with line numbers if known
 - Use markdown headers (##, ###) for sections
 - Use bullet lists for multiple items
 
