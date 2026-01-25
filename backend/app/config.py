@@ -37,6 +37,24 @@ class Settings(BaseSettings):
     # Limits
     max_context_tokens: int = 100000
     max_response_tokens: int = 8192
+    
+    # === Channel Settings ===
+    
+    # Telegram
+    telegram_enabled: bool = False
+    telegram_token: str | None = None
+    telegram_allowed_users: str = ""  # Comma-separated user IDs
+    
+    # iMessage
+    imessage_enabled: bool = False
+    imessage_allowed_senders: str = ""  # Comma-separated phone/email
+    
+    # Webex
+    webex_enabled: bool = False
+    webex_token: str | None = None
+    webex_webhook_secret: str | None = None
+    webex_allowed_users: str = ""  # Comma-separated user IDs
+    webex_allowed_rooms: str = ""  # Comma-separated room IDs
 
 
 settings = Settings()
@@ -51,6 +69,35 @@ def get_config_dict() -> dict[str, Any]:
         "max_context_tokens": settings.max_context_tokens,
         "max_response_tokens": settings.max_response_tokens,
     }
+
+
+def get_channel_config() -> dict[str, Any]:
+    """Get channel configuration."""
+    config = {}
+    
+    if settings.telegram_enabled and settings.telegram_token:
+        config["telegram"] = {
+            "enabled": True,
+            "token": settings.telegram_token,
+            "allowed_users": [u.strip() for u in settings.telegram_allowed_users.split(",") if u.strip()],
+        }
+    
+    if settings.imessage_enabled:
+        config["imessage"] = {
+            "enabled": True,
+            "allowed_senders": [s.strip() for s in settings.imessage_allowed_senders.split(",") if s.strip()],
+        }
+    
+    if settings.webex_enabled and settings.webex_token:
+        config["webex"] = {
+            "enabled": True,
+            "token": settings.webex_token,
+            "webhook_secret": settings.webex_webhook_secret,
+            "allowed_users": [u.strip() for u in settings.webex_allowed_users.split(",") if u.strip()],
+            "allowed_rooms": [r.strip() for r in settings.webex_allowed_rooms.split(",") if r.strip()],
+        }
+    
+    return config
 
 
 def update_config(updates: dict[str, Any]) -> None:

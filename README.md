@@ -125,6 +125,45 @@ When you ask MO to modify external code, it copies the files to workspace first,
 
 ---
 
+## Messaging Channels
+
+MO can be reached via multiple channels:
+
+| Channel | Description | Setup |
+|---------|-------------|-------|
+| **Web UI** | Built-in chat interface | Default at :5173 |
+| **Telegram** | Telegram Bot API | Get token from @BotFather |
+| **iMessage** | macOS only via AppleScript | Just enable in config |
+| **Webex** | Cisco Webex Teams | Create bot at developer.webex.com |
+
+### Enable Channels
+
+Edit `.env`:
+
+```bash
+# Telegram
+MARATOS_TELEGRAM_ENABLED=true
+MARATOS_TELEGRAM_TOKEN=your-bot-token
+MARATOS_TELEGRAM_ALLOWED_USERS=123456789  # Optional: restrict access
+
+# iMessage (macOS only)
+MARATOS_IMESSAGE_ENABLED=true
+MARATOS_IMESSAGE_ALLOWED_SENDERS=+1234567890
+
+# Webex
+MARATOS_WEBEX_ENABLED=true
+MARATOS_WEBEX_TOKEN=your-bot-token
+```
+
+### Webex Setup
+
+1. Create a bot at [developer.webex.com/my-apps](https://developer.webex.com/my-apps)
+2. Add the token to `.env`
+3. Set up webhook: `POST /api/channels/webex/setup` with your public URL
+4. Add the bot to rooms you want it to respond in
+
+---
+
 ## Configuration
 
 Environment variables (prefix with `MARATOS_`):
