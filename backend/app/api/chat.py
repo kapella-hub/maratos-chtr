@@ -177,9 +177,12 @@ async def chat(
                     logger.warning(f"Unknown agent in SPAWN: {agent_id_spawn}")
                     continue
                 
+                # Generate task ID upfront for consistent tracking
+                preliminary_task_id = str(uuid.uuid4())[:8]
+                
                 # Notify client about spawned task
                 escaped_task = task_desc[:100].replace("\n", " ").replace('"', '\\"')
-                yield f'data: {{"subagent": "{agent_id_spawn}", "task": "{escaped_task}", "status": "spawning"}}\n\n'
+                yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{preliminary_task_id}", "task": "{escaped_task}", "status": "spawning"}}\n\n'
                 
                 try:
                     # Spawn the subagent task
@@ -190,7 +193,8 @@ async def chat(
                         callback_session=session.id,
                     )
                     
-                    yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "running"}}\n\n'
+                    # Update with actual task ID (should match preliminary in most cases)
+                    yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "prev_task_id": "{preliminary_task_id}", "status": "running"}}\n\n'
                     
                     # Wait for completion (no timeout - run until done)
                     last_progress = 0.0

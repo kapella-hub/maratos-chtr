@@ -131,7 +131,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   setOrchestrating: (orchestrating) => set({ isOrchestrating: orchestrating }),
   
   updateSubagent: (task) => set((state) => {
-    const existing = state.activeSubagents.findIndex(t => t.id === task.id)
+    // First try to match by id, then by agent name (for when id changes between spawning/running)
+    let existing = state.activeSubagents.findIndex(t => t.id === task.id)
+    if (existing < 0) {
+      existing = state.activeSubagents.findIndex(t => t.agent === task.agent)
+    }
     if (existing >= 0) {
       const updated = [...state.activeSubagents]
       updated[existing] = task
