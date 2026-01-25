@@ -50,7 +50,6 @@ class KiroAgentConfig(AgentConfig):
 
     model: str = "claude-sonnet-4.5"  # claude-opus-4.5, claude-sonnet-4.5, claude-haiku-4.5
     trust_tools: bool = True  # --trust-all-tools flag
-    thinking: bool = True  # Enable extended thinking for deeper analysis
 
 
 class KiroAgent(Agent):
@@ -122,10 +121,6 @@ class KiroAgent(Agent):
         # Add trust-all-tools if enabled
         if hasattr(self.config, 'trust_tools') and self.config.trust_tools:
             cmd.append("--trust-all-tools")
-        
-        # Add extended thinking for deeper analysis
-        if hasattr(self.config, 'thinking') and self.config.thinking:
-            cmd.append("--thinking")
 
         # Add the prompt
         cmd.append(full_prompt)
