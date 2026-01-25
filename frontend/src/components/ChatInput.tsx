@@ -1,14 +1,15 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react'
-import { Send, Loader2 } from 'lucide-react'
+import { Send, Loader2, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface ChatInputProps {
   onSend: (message: string) => void
+  onStop?: () => void
   isLoading?: boolean
   placeholder?: string
 }
 
-export default function ChatInput({ onSend, isLoading, placeholder = 'Type a message...' }: ChatInputProps) {
+export default function ChatInput({ onSend, onStop, isLoading, placeholder = 'Type a message...' }: ChatInputProps) {
   const [input, setInput] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -55,21 +56,29 @@ export default function ChatInput({ onSend, isLoading, placeholder = 'Type a mes
             )}
           />
         </div>
-        <button
-          onClick={handleSubmit}
-          disabled={!input.trim() || isLoading}
-          className={cn(
-            'p-3 rounded-lg bg-primary text-primary-foreground',
-            'hover:bg-primary/90 transition-colors',
-            'disabled:opacity-50 disabled:cursor-not-allowed'
-          )}
-        >
-          {isLoading ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
+        {isLoading ? (
+          <button
+            onClick={onStop}
+            className={cn(
+              'p-3 rounded-lg bg-destructive text-destructive-foreground',
+              'hover:bg-destructive/90 transition-colors'
+            )}
+          >
+            <Square className="w-5 h-5" />
+          </button>
+        ) : (
+          <button
+            onClick={handleSubmit}
+            disabled={!input.trim()}
+            className={cn(
+              'p-3 rounded-lg bg-primary text-primary-foreground',
+              'hover:bg-primary/90 transition-colors',
+              'disabled:opacity-50 disabled:cursor-not-allowed'
+            )}
+          >
             <Send className="w-5 h-5" />
-          )}
-        </button>
+          </button>
+        )}
       </div>
     </div>
   )

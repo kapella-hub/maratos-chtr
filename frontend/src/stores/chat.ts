@@ -13,6 +13,7 @@ interface ChatStore {
   sessionId: string | null
   agentId: string
   isStreaming: boolean
+  abortController: AbortController | null
   
   setSessionId: (id: string | null) => void
   setAgentId: (id: string) => void
@@ -20,17 +21,29 @@ interface ChatStore {
   appendToLastMessage: (content: string) => void
   setLastMessageAgent: (agentId: string) => void
   setStreaming: (streaming: boolean) => void
+  setAbortController: (controller: AbortController | null) => void
+  stopGeneration: () => void
   clearMessages: () => void
 }
 
-export const useChatStore = create<ChatStore>((set) => ({
+export const useChatStore = create<ChatStore>((set, get) => ({
   messages: [],
   sessionId: null,
   agentId: 'mo',
   isStreaming: false,
+  abortController: null,
 
   setSessionId: (id) => set({ sessionId: id }),
   setAgentId: (id) => set({ agentId: id }),
+  setAbortController: (controller) => set({ abortController: controller }),
+  
+  stopGeneration: () => {
+    const { abortController } = get()
+    if (abortController) {
+      abortController.abort()
+      set({ isStreaming: false, abortController: null })
+    }
+  },
   
   addMessage: (message) => set((state) => ({
     messages: [...state.messages, {

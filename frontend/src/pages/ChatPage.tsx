@@ -21,6 +21,7 @@ export default function ChatPage() {
     appendToLastMessage,
     setLastMessageAgent,
     setStreaming,
+    stopGeneration,
     clearMessages,
   } = useChatStore()
 
@@ -129,6 +130,7 @@ export default function ChatPage() {
 
       <ChatInput
         onSend={handleSend}
+        onStop={stopGeneration}
         isLoading={isStreaming}
         placeholder={`Message ${agentId === 'mo' ? 'MO' : agentId === 'architect' ? 'Architect' : 'Reviewer'}...`}
       />
