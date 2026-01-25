@@ -99,14 +99,56 @@ class Agent:
         # Collect for tool calls
         full_content = ""
         tool_calls: list[dict] = []
+        
+        # Buffer for filtering <thinking> blocks
+        buffer = ""
+        in_thinking = False
 
         async for chunk in response:
             delta = chunk.choices[0].delta
 
-            # Stream content
+            # Stream content (filter out <thinking> blocks)
             if delta.content:
                 full_content += delta.content
-                yield delta.content
+                buffer += delta.content
+                
+                # Process buffer to filter thinking blocks
+                while True:
+                    if in_thinking:
+                        # Look for closing tag
+                        end_idx = buffer.find("</thinking>")
+                        if end_idx != -1:
+                            # Discard everything up to and including </thinking>
+                            buffer = buffer[end_idx + 11:]
+                            in_thinking = False
+                        else:
+                            # Still in thinking, keep buffering (don't yield)
+                            break
+                    else:
+                        # Look for opening tag
+                        start_idx = buffer.find("<thinking>")
+                        if start_idx != -1:
+                            # Yield content before the tag
+                            if start_idx > 0:
+                                yield buffer[:start_idx]
+                            buffer = buffer[start_idx + 10:]
+                            in_thinking = True
+                        else:
+                            # No thinking tag, but keep potential partial tag in buffer
+                            # Only yield up to last '<' to avoid splitting a tag
+                            last_lt = buffer.rfind("<")
+                            if last_lt > 0:
+                                yield buffer[:last_lt]
+                                buffer = buffer[last_lt:]
+                            elif last_lt == -1:
+                                # No '<' at all, safe to yield everything
+                                yield buffer
+                                buffer = ""
+                            break
+        
+        # Flush remaining buffer (if not in thinking block)
+        if buffer and not in_thinking:
+            yield buffer
 
             # Collect tool calls
             if delta.tool_calls:
