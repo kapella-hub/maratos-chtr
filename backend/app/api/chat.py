@@ -192,19 +192,26 @@ async def chat(
                     
                     yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "running"}}\n\n'
                     
-                    # Wait for completion (with timeout)
-                    timeout = 120
+                    # Wait for completion (with timeout - 5 min for complex tasks)
+                    timeout = 300
                     elapsed = 0
+                    last_progress = 0.0
                     while elapsed < timeout:
                         current = subagent_manager.get(task.id)
                         if current and current.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+                            logger.info(f"Subagent {agent_id_spawn} finished with status: {current.status}")
                             break
                         await asyncio.sleep(2)
                         elapsed += 2
                         
-                        # Send progress updates
-                        if current:
+                        # Send progress updates (only when changed)
+                        if current and current.progress != last_progress:
+                            last_progress = current.progress
+                            logger.info(f"Subagent {agent_id_spawn} progress: {current.progress:.0%}")
                             yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "progress": {current.progress:.2f}}}\n\n'
+                    
+                    if elapsed >= timeout:
+                        logger.warning(f"Subagent {agent_id_spawn} timed out after {timeout}s")
                     
                     # Get result
                     final_task = subagent_manager.get(task.id)

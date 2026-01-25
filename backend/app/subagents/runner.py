@@ -71,13 +71,19 @@ class SubagentRunner:
             task.progress = 0.3
             
             response_text = ""
+            chunk_count = 0
             try:
                 async for chunk in agent.chat(messages, full_context):
                     response_text += chunk
+                    chunk_count += 1
                     # Update progress based on response length (rough estimate)
                     task.progress = min(0.9, 0.3 + len(response_text) / 5000)
+                    # Log periodically
+                    if chunk_count % 50 == 0:
+                        task.log(f"Streaming: {len(response_text)} chars, {chunk_count} chunks")
             except Exception as e:
                 task.log(f"Agent error: {e}")
+                logger.error(f"Subagent agent.chat error: {e}", exc_info=True)
                 raise
             
             task.log(f"Agent response: {len(response_text)} chars")
