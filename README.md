@@ -46,10 +46,14 @@ MaratOS is a self-hostable AI platform with a beautiful web interface and multi-
 ### Features
 
 - 🤖 **MO Agent** — Capable AI with real personality
+- 🏗️ **Multi-Agent** — MO, Architect, Reviewer (Kiro-powered)
 - 🎨 **Beautiful UI** — Modern dark-mode web interface
 - 💬 **Multi-Channel** — Web, Telegram, iMessage, Webex
-- 🔧 **Powerful Tools** — Files, shell, web search, Kiro AI
-- 🔒 **Sandboxed Writes** — Read anywhere, write only to workspace
+- 🔧 **Kiro Integration** — Enterprise AI for quality coding
+- 🧩 **Skills System** — Reusable Kiro workflows
+- 🚀 **Subagents** — Background task execution
+- 🧠 **Infinite Memory** — Semantic search, auto-compaction
+- 🔒 **Sandboxed Writes** — Read anywhere, write to workspace
 - ⚙️ **Easy Config** — Visual settings
 
 ---
@@ -379,10 +383,27 @@ docker run -p 8000:8000 \
 
 | Endpoint | Description |
 |----------|-------------|
+| **Chat** |
 | `POST /api/chat` | Chat with MO (SSE streaming) |
 | `GET /api/chat/sessions` | List conversations |
-| `GET /api/config` | Get configuration |
+| **Agents** |
+| `GET /api/agents` | List available agents |
+| `POST /api/chat` + `agent_id` | Use specific agent |
+| **Skills** |
+| `GET /api/skills` | List available skills |
+| `POST /api/skills/{id}/execute` | Execute a skill |
+| **Subagents** |
+| `POST /api/subagents/spawn` | Spawn background task |
+| `GET /api/subagents/tasks` | List tasks |
+| `GET /api/subagents/tasks/{id}` | Get task status |
+| **Memory** |
+| `POST /api/memory/remember` | Store a memory |
+| `POST /api/memory/recall` | Search memories |
+| `GET /api/memory/stats` | Memory statistics |
+| **Channels** |
 | `GET /api/channels` | List messaging channels |
+| **Config** |
+| `GET /api/config` | Get configuration |
 | `GET /docs` | Swagger API docs |
 
 ---
@@ -393,14 +414,21 @@ docker run -p 8000:8000 \
 maratos/
 ├── backend/
 │   └── app/
-│       ├── agents/      # MO implementation
+│       ├── agents/      # MO, Architect, Reviewer
 │       ├── channels/    # Telegram, iMessage, Webex
+│       ├── memory/      # Infinite memory system
+│       ├── skills/      # Skill execution engine
+│       ├── subagents/   # Background task runner
 │       ├── tools/       # filesystem, shell, web, kiro
 │       └── api/         # REST endpoints
 ├── frontend/
 │   └── src/
 │       ├── pages/       # Chat, History, Settings
 │       └── components/
+├── skills/              # Built-in skill definitions
+│   ├── api-endpoint.yaml
+│   ├── refactor.yaml
+│   └── security-review.yaml
 ├── install.sh           # macOS/Linux installer
 ├── install.ps1          # Windows installer
 └── docker-compose.yml
