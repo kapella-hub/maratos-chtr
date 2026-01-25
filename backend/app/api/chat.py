@@ -1,6 +1,9 @@
 """Chat API endpoints."""
 
+import re
 import uuid
+import asyncio
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -15,6 +18,13 @@ from app.agents.base import Message
 from app.database import Message as DBMessage
 from app.database import Session as DBSession
 from app.database import get_db
+from app.subagents.runner import subagent_runner
+from app.subagents.manager import subagent_manager, TaskStatus
+
+logger = logging.getLogger(__name__)
+
+# Pattern to match [SPAWN:agent_id] task description
+SPAWN_PATTERN = re.compile(r'\[SPAWN:(\w+)\]\s*(.+?)(?=\[SPAWN:|\Z)', re.DOTALL)
 
 router = APIRouter(prefix="/chat")
 
@@ -147,6 +157,81 @@ async def chat(
                 content=full_response,
             )
             db.add(db_assistant_msg)
+
+        # Check for [SPAWN:agent] markers and auto-orchestrate
+        spawn_matches = SPAWN_PATTERN.findall(full_response)
+        if spawn_matches:
+            yield 'data: {"orchestrating": true}\n\n'
+            
+            for agent_id_spawn, task_desc in spawn_matches:
+                task_desc = task_desc.strip()
+                if not task_desc:
+                    continue
+                
+                # Validate agent exists
+                if agent_id_spawn not in ("architect", "reviewer", "mo"):
+                    logger.warning(f"Unknown agent in SPAWN: {agent_id_spawn}")
+                    continue
+                
+                # Notify client about spawned task
+                escaped_task = task_desc[:100].replace("\n", " ").replace('"', '\\"')
+                yield f'data: {{"subagent": "{agent_id_spawn}", "task": "{escaped_task}", "status": "spawning"}}\n\n'
+                
+                try:
+                    # Spawn the subagent task
+                    task = await subagent_runner.run_task(
+                        task_description=task_desc,
+                        agent_id=agent_id_spawn,
+                        context=request.context,
+                        callback_session=session.id,
+                    )
+                    
+                    yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "running"}}\n\n'
+                    
+                    # Wait for completion (with timeout)
+                    timeout = 120
+                    elapsed = 0
+                    while elapsed < timeout:
+                        current = subagent_manager.get(task.id)
+                        if current and current.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+                            break
+                        await asyncio.sleep(2)
+                        elapsed += 2
+                        
+                        # Send progress updates
+                        if current:
+                            yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "progress": {current.progress:.2f}}}\n\n'
+                    
+                    # Get result
+                    final_task = subagent_manager.get(task.id)
+                    if final_task and final_task.status == TaskStatus.COMPLETED:
+                        result_text = final_task.result.get("response", "") if final_task.result else ""
+                        # Stream the subagent result
+                        yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "completed"}}\n\n'
+                        
+                        # Stream result content
+                        escaped_result = result_text.replace("\n", "\\n").replace('"', '\\"')
+                        yield f'data: {{"subagent_result": "{agent_id_spawn}", "content": "{escaped_result}"}}\n\n'
+                        
+                        # Save subagent result as a message
+                        async with db.begin():
+                            subagent_msg = DBMessage(
+                                id=str(uuid.uuid4()),
+                                session_id=session.id,
+                                role="assistant",
+                                content=f"**[{agent_id_spawn.upper()}]**\n\n{result_text}",
+                            )
+                            db.add(subagent_msg)
+                    else:
+                        error = final_task.error if final_task else "timeout"
+                        yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "failed", "error": "{error}"}}\n\n'
+                        
+                except Exception as e:
+                    logger.error(f"Failed to spawn subagent {agent_id_spawn}: {e}")
+                    escaped_err = str(e).replace('"', '\\"')
+                    yield f'data: {{"subagent": "{agent_id_spawn}", "status": "error", "error": "{escaped_err}"}}\n\n'
+            
+            yield 'data: {"orchestrating": false}\n\n'
 
         yield "data: [DONE]\n\n"
 

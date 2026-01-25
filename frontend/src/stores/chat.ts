@@ -6,6 +6,15 @@ export interface ChatMessage {
   content: string
   timestamp: Date
   agentId?: string
+  isSubagentResult?: boolean
+}
+
+export interface SubagentTask {
+  id: string
+  agent: string
+  status: 'spawning' | 'running' | 'completed' | 'failed'
+  progress: number
+  error?: string
 }
 
 interface ChatStore {
@@ -14,6 +23,8 @@ interface ChatStore {
   agentId: string
   isStreaming: boolean
   isThinking: boolean
+  isOrchestrating: boolean
+  activeSubagents: SubagentTask[]
   abortController: AbortController | null
   
   setSessionId: (id: string | null) => void
@@ -23,6 +34,9 @@ interface ChatStore {
   setLastMessageAgent: (agentId: string) => void
   setStreaming: (streaming: boolean) => void
   setThinking: (thinking: boolean) => void
+  setOrchestrating: (orchestrating: boolean) => void
+  updateSubagent: (task: SubagentTask) => void
+  clearSubagents: () => void
   setAbortController: (controller: AbortController | null) => void
   stopGeneration: () => void
   clearMessages: () => void
@@ -34,6 +48,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   agentId: 'mo',
   isStreaming: false,
   isThinking: false,
+  isOrchestrating: false,
+  activeSubagents: [],
   abortController: null,
 
   setSessionId: (id) => set({ sessionId: id }),
@@ -80,6 +96,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setThinking: (thinking) => set({ isThinking: thinking }),
+  setOrchestrating: (orchestrating) => set({ isOrchestrating: orchestrating }),
   
-  clearMessages: () => set({ messages: [], sessionId: null, isThinking: false }),
+  updateSubagent: (task) => set((state) => {
+    const existing = state.activeSubagents.findIndex(t => t.id === task.id)
+    if (existing >= 0) {
+      const updated = [...state.activeSubagents]
+      updated[existing] = task
+      return { activeSubagents: updated }
+    }
+    return { activeSubagents: [...state.activeSubagents, task] }
+  }),
+  
+  clearSubagents: () => set({ activeSubagents: [], isOrchestrating: false }),
+  
+  clearMessages: () => set({ messages: [], sessionId: null, isThinking: false, isOrchestrating: false, activeSubagents: [] }),
 }))

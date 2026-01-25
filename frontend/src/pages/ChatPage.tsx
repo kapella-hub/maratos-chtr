@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import ChatInput from '@/components/ChatInput'
 import ChatMessage from '@/components/ChatMessage'
 import ThinkingIndicator from '@/components/ThinkingIndicator'
+import SubagentStatus from '@/components/SubagentStatus'
 import { useChatStore } from '@/stores/chat'
 import { streamChat, fetchConfig } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -17,6 +18,8 @@ export default function ChatPage() {
     agentId,
     isStreaming,
     isThinking,
+    isOrchestrating,
+    activeSubagents,
     setSessionId,
     setAgentId,
     addMessage,
@@ -24,6 +27,9 @@ export default function ChatPage() {
     setLastMessageAgent,
     setStreaming,
     setThinking,
+    setOrchestrating,
+    updateSubagent,
+    clearSubagents,
     stopGeneration,
     clearMessages,
   } = useChatStore()
@@ -60,6 +66,23 @@ export default function ChatPage() {
           setLastMessageAgent(event.data as string)
         } else if (event.type === 'thinking') {
           setThinking(event.data as boolean)
+        } else if (event.type === 'orchestrating') {
+          setOrchestrating(event.data as boolean)
+        } else if (event.type === 'subagent' && event.subagent) {
+          updateSubagent({
+            id: event.taskId || event.subagent,
+            agent: event.subagent,
+            status: (event.status as 'spawning' | 'running' | 'completed' | 'failed') || 'running',
+            progress: event.progress || 0,
+            error: event.error,
+          })
+        } else if (event.type === 'subagent_result' && event.data) {
+          // Add subagent result as a new message
+          addMessage({ 
+            role: 'assistant', 
+            content: event.data as string, 
+            agentId: event.subagent,
+          })
         } else if (event.type === 'content' && event.data) {
           appendToLastMessage(event.data as string)
         }
@@ -70,6 +93,7 @@ export default function ChatPage() {
     } finally {
       setStreaming(false)
       setThinking(false)
+      clearSubagents()
     }
   }
 
@@ -135,6 +159,10 @@ export default function ChatPage() {
           </div>
         )}
       </div>
+
+      {isOrchestrating && activeSubagents.length > 0 && (
+        <SubagentStatus tasks={activeSubagents} />
+      )}
 
       <ChatInput
         onSend={handleSend}

@@ -58,12 +58,33 @@ export async function deleteSession(id: string): Promise<void> {
   if (!res.ok) throw new Error('Failed to delete session')
 }
 
+// Chat event types
+export type ChatEventType = 
+  | 'session_id' 
+  | 'content' 
+  | 'done' 
+  | 'agent' 
+  | 'thinking'
+  | 'orchestrating'
+  | 'subagent'
+  | 'subagent_result'
+
+export interface ChatEvent {
+  type: ChatEventType
+  data?: string | boolean | number
+  subagent?: string
+  taskId?: string
+  status?: string
+  progress?: number
+  error?: string
+}
+
 // Chat
 export async function* streamChat(
   message: string,
   agentId: string = 'mo',
   sessionId?: string
-): AsyncGenerator<{ type: 'session_id' | 'content' | 'done' | 'agent' | 'thinking'; data?: string | boolean }> {
+): AsyncGenerator<ChatEvent> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -102,6 +123,26 @@ export async function* streamChat(
             }
             if (parsed.thinking !== undefined) {
               yield { type: 'thinking', data: parsed.thinking }
+            }
+            if (parsed.orchestrating !== undefined) {
+              yield { type: 'orchestrating', data: parsed.orchestrating }
+            }
+            if (parsed.subagent) {
+              yield { 
+                type: 'subagent', 
+                subagent: parsed.subagent,
+                taskId: parsed.task_id,
+                status: parsed.status,
+                progress: parsed.progress,
+                error: parsed.error,
+              }
+            }
+            if (parsed.subagent_result) {
+              yield { 
+                type: 'subagent_result', 
+                subagent: parsed.subagent_result,
+                data: parsed.content?.replace(/\\n/g, '\n'),
+              }
             }
             if (parsed.content) {
               yield { type: 'content', data: parsed.content.replace(/\\n/g, '\n') }
