@@ -11,25 +11,33 @@ from app.agents.base import Agent, AgentConfig
 # Regex to strip ANSI escape codes
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
-# Patterns for verbose tool logs to filter out
+# Patterns for verbose tool logs to filter out (line-based)
 TOOL_LOG_PATTERNS = [
-    re.compile(r'^\s*Reading (?:directory|file):.*$', re.MULTILINE),
-    re.compile(r'^\s*Batch \w+ operation.*$', re.MULTILINE),
-    re.compile(r'^\s*↱ Operation \d+:.*$', re.MULTILINE),
-    re.compile(r'^\s*[✓✗] (?:Successfully|Failed).*$', re.MULTILINE),
-    re.compile(r'^\s*⋮ • Summary:.*$', re.MULTILINE),
-    re.compile(r'^\s*• Completed in.*$', re.MULTILINE),
-    re.compile(r'^\s*\(using tool:.*\).*$', re.MULTILINE),
-    re.compile(r'^\s*\d+;\d+m\(\d+ entries\).*$', re.MULTILINE),  # ANSI remnants
+    r'^\s*Reading (?:directory|file):.*',
+    r'^\s*Batch \w+ operation.*',
+    r'^\s*↱ Operation \d+:.*',
+    r'^\s*[✓✗] (?:Successfully|Failed).*',
+    r'^\s*⋮\s*•\s*Summary:.*',
+    r'^\s*•\s*Completed in.*',
+    r'.*\(using tool:.*\).*',
+    r'^\s*\d+;\d+m.*entries\).*',
 ]
+
+def is_tool_log_line(line: str) -> bool:
+    """Check if a line is a tool execution log."""
+    for pattern in TOOL_LOG_PATTERNS:
+        if re.match(pattern, line):
+            return True
+    return False
 
 def filter_tool_logs(text: str) -> str:
     """Remove verbose tool execution logs from output."""
-    for pattern in TOOL_LOG_PATTERNS:
-        text = pattern.sub('', text)
+    lines = text.split('\n')
+    filtered = [line for line in lines if not is_tool_log_line(line)]
+    result = '\n'.join(filtered)
     # Clean up multiple blank lines
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    return text
+    result = re.sub(r'\n{3,}', '\n\n', result)
+    return result
 
 
 @dataclass
@@ -121,35 +129,29 @@ class KiroAgent(Agent):
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            # Stream stdout with buffering for better filtering
+            # Stream stdout with line-based filtering
             buffer = ""
             while True:
-                chunk = await process.stdout.read(256)
+                chunk = await process.stdout.read(512)
                 if not chunk:
                     # Flush remaining buffer
-                    if buffer:
+                    if buffer.strip():
                         buffer = ANSI_ESCAPE.sub('', buffer)
-                        buffer = filter_tool_logs(buffer)
-                        if buffer.strip():
+                        if not is_tool_log_line(buffer.strip()):
                             yield buffer
                     break
                 
                 text = chunk.decode("utf-8", errors="replace")
                 buffer += text
                 
-                # Process complete lines
-                if '\n' in buffer:
-                    lines = buffer.split('\n')
-                    # Keep the last incomplete line in buffer
-                    buffer = lines[-1]
-                    complete = '\n'.join(lines[:-1]) + '\n'
+                # Process complete lines only
+                while '\n' in buffer:
+                    line, buffer = buffer.split('\n', 1)
+                    line = ANSI_ESCAPE.sub('', line)
                     
-                    # Strip ANSI and filter tool logs
-                    complete = ANSI_ESCAPE.sub('', complete)
-                    complete = filter_tool_logs(complete)
-                    
-                    if complete.strip():
-                        yield complete
+                    # Skip tool log lines, keep everything else
+                    if not is_tool_log_line(line):
+                        yield line + '\n'
 
             # Wait for completion
             await process.wait()
