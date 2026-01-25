@@ -10,13 +10,13 @@ Your personal AI operating system, powered by **MO** — a capable, opinionated 
 ### macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yourusername/maratos/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kapella-hub/maratos/main/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/yourusername/maratos/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/kapella-hub/maratos/main/install.ps1 | iex
 ```
 
 Then add your [Anthropic API key](https://console.anthropic.com/) and run:
@@ -67,7 +67,7 @@ MaratOS is a self-hostable AI platform with a beautiful web interface. At its co
 
 ```bash
 # Clone
-git clone https://github.com/yourusername/maratos.git
+git clone https://github.com/kapella-hub/maratos.git
 cd maratos
 
 # Backend

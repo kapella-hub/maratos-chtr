@@ -1,6 +1,6 @@
 #
 # MaratOS Installer for Windows
-# Usage: irm https://raw.githubusercontent.com/yourusername/maratos/main/install.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/kapella-hub/maratos/main/install.ps1 | iex
 #
 
 $ErrorActionPreference = "Stop"
@@ -81,7 +81,7 @@ if (Test-Path $InstallDir) {
 
 Write-Info "Downloading MaratOS..."
 if ($hasGit) {
-    git clone --depth 1 https://github.com/yourusername/maratos.git $InstallDir 2>$null
+    git clone --depth 1 https://github.com/kapella-hub/maratos.git $InstallDir 2>$null
     if (-not $?) {
         # Fallback: copy from current directory
         if (Test-Path ".\backend\app\main.py") {
@@ -93,7 +93,7 @@ if ($hasGit) {
     }
 } else {
     # Download as ZIP
-    $zipUrl = "https://github.com/yourusername/maratos/archive/main.zip"
+    $zipUrl = "https://github.com/kapella-hub/maratos/archive/main.zip"
     $zipPath = "$env:TEMP\maratos.zip"
     Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
     Expand-Archive -Path $zipPath -DestinationPath $env:TEMP -Force

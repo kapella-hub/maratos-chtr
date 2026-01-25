@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # MaratOS Installer for macOS/Linux
-# Usage: curl -fsSL https://raw.githubusercontent.com/yourusername/maratos/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/kapella-hub/maratos/main/install.sh | bash
 #
 
 set -e
@@ -92,7 +92,7 @@ fi
 
 info "Downloading MaratOS..."
 if check_cmd git; then
-    git clone --depth 1 https://github.com/yourusername/maratos.git "$INSTALL_DIR" 2>/dev/null || {
+    git clone --depth 1 https://github.com/kapella-hub/maratos.git "$INSTALL_DIR" 2>/dev/null || {
         # Fallback: copy from current directory if we're in the repo
         if [ -f "./backend/app/main.py" ]; then
             info "Copying from local directory..."
