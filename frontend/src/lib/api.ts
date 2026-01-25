@@ -140,7 +140,11 @@ export async function* streamChat(
               }
             }
             if (parsed.subagent_result) {
-              console.log('Received subagent_result:', parsed.subagent_result, 'content length:', parsed.content?.length)
+              console.log('🎯 subagent_result event:', {
+                agent: parsed.subagent_result,
+                contentLength: parsed.content?.length,
+                contentPreview: parsed.content?.slice(0, 100),
+              })
               yield { 
                 type: 'subagent_result', 
                 subagent: parsed.subagent_result,

@@ -209,6 +209,8 @@ async def chat(
                     # Get result
                     final_task = subagent_manager.get(task.id)
                     logger.info(f"Final task status: {final_task.status if final_task else 'None'}")
+                    if final_task:
+                        logger.info(f"Final task result: {final_task.result is not None}, error: {final_task.error}")
                     
                     if final_task and final_task.status == TaskStatus.COMPLETED:
                         result_text = final_task.result.get("response", "") if final_task.result else ""
@@ -223,9 +225,10 @@ async def chat(
                             "subagent_result": agent_id_spawn,
                             "content": result_text
                         })
+                        logger.info(f"Sending subagent_result: agent={agent_id_spawn}, content_len={len(result_text)}")
                         yield f'data: {result_event}\n\n'
                         
-                        logger.info(f"Sent subagent_result event")
+                        logger.info(f"Sent subagent_result event successfully")
                         
                         # Save subagent result as a message
                         async with db.begin():

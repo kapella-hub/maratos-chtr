@@ -87,12 +87,17 @@ export default function ChatPage() {
             error: event.error,
           })
         } else if (event.type === 'subagent_result' && event.data) {
-          console.log('Adding subagent message:', event.subagent, 'length:', (event.data as string).length)
+          console.log('📝 Adding subagent message:', {
+            agent: event.subagent,
+            length: (event.data as string).length,
+            preview: (event.data as string).slice(0, 100),
+          })
           addMessage({ 
             role: 'assistant', 
             content: event.data as string, 
             agentId: event.subagent,
           })
+          console.log('✅ Message added to store')
         } else if (event.type === 'content' && event.data) {
           appendToLastMessage(event.data as string)
         }
