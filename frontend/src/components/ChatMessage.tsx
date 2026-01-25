@@ -93,13 +93,16 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
   )
 }
 
-// Code block with copy button and syntax highlighting
+// Code block with copy button, syntax highlighting, and line numbers
 function CodeBlock({ children, className }: { children: string; className?: string }) {
   const language = className?.replace('language-', '') || ''
+  const lines = children.split('\n')
+  // Remove trailing empty line if present
+  if (lines[lines.length - 1] === '') lines.pop()
   
   return (
     <div className="relative group my-3">
-      <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
         <CopyButton text={children} />
       </div>
       {language && (
@@ -108,12 +111,19 @@ function CodeBlock({ children, className }: { children: string; className?: stri
         </div>
       )}
       <pre className={cn(
-        'bg-zinc-900 dark:bg-zinc-950 rounded-lg p-4 overflow-x-auto text-sm',
+        'bg-zinc-900 dark:bg-zinc-950 rounded-lg overflow-x-auto text-sm',
         'border border-border',
-        language && 'pt-8'
+        language ? 'pt-8 pb-3' : 'py-3'
       )}>
-        <code className={cn('font-mono text-zinc-100', className)}>
-          {children}
+        <code className={cn('font-mono text-zinc-100 block', className)}>
+          {lines.map((line, i) => (
+            <div key={i} className="flex hover:bg-white/5">
+              <span className="select-none text-zinc-600 text-right pr-4 pl-3 min-w-[3rem] border-r border-zinc-800">
+                {i + 1}
+              </span>
+              <span className="pl-4 pr-4 flex-1">{line || ' '}</span>
+            </div>
+          ))}
         </code>
       </pre>
     </div>
