@@ -53,9 +53,13 @@ async def chat(
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     """Send a message and stream the response."""
-    # Get agent (default to MO, or use specified)
-    agent_id = request.agent_id or "mo"
-    agent = agent_registry.get(agent_id)
+    # Get agent (use specified or registry default)
+    if request.agent_id:
+        agent = agent_registry.get(request.agent_id)
+        agent_id = request.agent_id
+    else:
+        agent = agent_registry.get_default()
+        agent_id = agent.id if agent else "mo"
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 

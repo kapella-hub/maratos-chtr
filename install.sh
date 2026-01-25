@@ -135,23 +135,27 @@ cat > "$INSTALL_DIR/start.sh" << 'EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
 
-# Load API key from .env if exists
+# Load env from .env if exists
 if [ -f .env ]; then
-    export $(cat .env | grep -v '^#' | xargs)
+    export $(cat .env | grep -v '^#' | xargs 2>/dev/null)
 fi
 
-# Check for API key
-if [ -z "$MARATOS_ANTHROPIC_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
-    echo "⚠️  No API key found!"
-    echo "Set MARATOS_ANTHROPIC_API_KEY in .env or environment"
-    echo ""
-    read -p "Enter your Anthropic API key: " API_KEY
-    echo "MARATOS_ANTHROPIC_API_KEY=$API_KEY" >> .env
-    export MARATOS_ANTHROPIC_API_KEY=$API_KEY
-fi
-
-# Export for MaratOS
+# Export API key if set
 export MARATOS_ANTHROPIC_API_KEY="${MARATOS_ANTHROPIC_API_KEY:-$ANTHROPIC_API_KEY}"
+
+# Check for Kiro CLI as fallback
+KIRO_PATH="${HOME}/.local/bin/kiro-cli"
+if [ -z "$MARATOS_ANTHROPIC_API_KEY" ]; then
+    if [ -x "$KIRO_PATH" ]; then
+        echo "ℹ️  No Anthropic API key - using Kiro CLI for Claude models"
+    else
+        echo "⚠️  No API key and Kiro CLI not found."
+        echo "Either:"
+        echo "  1. Set MARATOS_ANTHROPIC_API_KEY in .env"
+        echo "  2. Install Kiro CLI: curl -fsSL https://cli.kiro.dev/install | bash"
+        echo ""
+    fi
+fi
 
 echo "🖥️  Starting MaratOS..."
 
