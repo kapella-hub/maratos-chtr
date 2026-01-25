@@ -26,6 +26,37 @@ logger = logging.getLogger(__name__)
 # Pattern to match [SPAWN:agent_id] task description
 SPAWN_PATTERN = re.compile(r'\[SPAWN:(\w+)\]\s*(.+?)(?=\[SPAWN:|\Z)', re.DOTALL)
 
+
+async def generate_title(user_message: str, assistant_response: str) -> str:
+    """Generate a concise title for the chat session."""
+    import litellm
+    from app.config import settings
+    
+    try:
+        response = await litellm.acompletion(
+            model=settings.default_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Generate a brief, descriptive title (max 50 chars) for this conversation. Return ONLY the title, no quotes or explanation."
+                },
+                {
+                    "role": "user", 
+                    "content": f"User: {user_message[:500]}\n\nAssistant: {assistant_response[:500]}"
+                }
+            ],
+            max_tokens=60,
+            temperature=0.3,
+        )
+        title = response.choices[0].message.content.strip()
+        # Clean up any quotes
+        title = title.strip('"\'')
+        return title[:100]  # Safety limit
+    except Exception as e:
+        logger.warning(f"Failed to generate title: {e}")
+        # Fallback to simple extraction
+        return user_message[:50].split('\n')[0] + "..." if len(user_message) > 50 else user_message.split('\n')[0]
+
 router = APIRouter(prefix="/chat")
 
 
@@ -170,6 +201,16 @@ async def chat(
                 content=full_response,
             )
             db.add(db_assistant_msg)
+        
+        # Generate better title for new sessions (first message)
+        if len(db_messages) == 0 and full_response:
+            try:
+                new_title = await generate_title(request.message, full_response)
+                async with db.begin():
+                    session.title = new_title
+                logger.info(f"Generated session title: {new_title}")
+            except Exception as e:
+                logger.warning(f"Failed to update title: {e}")
 
         # Check for [SPAWN:agent] markers and auto-orchestrate
         spawn_matches = SPAWN_PATTERN.findall(full_response)
