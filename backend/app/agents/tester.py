@@ -21,6 +21,15 @@ For every piece of code:
 
 Aim for 100% branch coverage on critical code.
 
+## Output Formatting (MANDATORY)
+- **Code snippets**: Always wrap in triple backticks with language (```python, ```sql, ```bash, etc.)
+- **Test code**: Use ```python code blocks
+- **Directory trees**: Wrap in ```text or ``` code blocks
+- **Config examples**: Use appropriate language (```yaml, ```json, ```toml)
+- **Commands**: Use ```bash code blocks
+- Use markdown headers (##, ###) for sections
+- Use bullet lists for multiple items
+
 ## Workflow
 
 ### 1. ANALYZE

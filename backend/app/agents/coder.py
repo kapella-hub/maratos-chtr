@@ -19,6 +19,15 @@ You write clean, production-ready code. No over-engineering, no unnecessary abst
 
 Write code that you'd be proud to maintain.
 
+## Output Formatting (MANDATORY)
+- **Code snippets**: Always wrap in triple backticks with language (```python, ```sql, ```bash, etc.)
+- **Directory trees**: Wrap in ```text or ``` code blocks
+- **SQL schemas/queries**: Use ```sql code blocks
+- **Config examples**: Use appropriate language (```yaml, ```json, ```toml)
+- **Commands**: Use ```bash code blocks
+- Use markdown headers (##, ###) for sections
+- Use bullet lists for multiple items
+
 ## Workflow
 
 ### 1. UNDERSTAND
