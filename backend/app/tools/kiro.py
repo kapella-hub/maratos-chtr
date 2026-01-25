@@ -91,7 +91,7 @@ Working directory: {workdir}
 class KiroTool(Tool):
     """Kiro AI integration tuned for quality over speed."""
 
-    def __init__(self, timeout: int = 600) -> None:  # 10 min timeout for quality work
+    def __init__(self, timeout: int | None = None) -> None:  # No timeout - work until done
         super().__init__(
             id="kiro",
             name="Kiro AI",
@@ -129,7 +129,6 @@ class KiroTool(Tool):
                 ),
             ],
         )
-        self.default_timeout = timeout
         self._kiro_cmd: str | None = None
 
     async def _get_kiro_cmd(self) -> str | None:
@@ -175,18 +174,8 @@ class KiroTool(Tool):
             env={**os.environ},
         )
 
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.default_timeout
-            )
-        except asyncio.TimeoutError:
-            process.kill()
-            return ToolResult(
-                success=False,
-                output="",
-                error=f"Kiro timed out after {self.default_timeout}s. For complex tasks, this is expected - check Kiro for results.",
-            )
+        # No timeout - let Kiro work until completion
+        stdout, stderr = await process.communicate()
 
         output = stdout.decode("utf-8", errors="replace")
         if stderr:
