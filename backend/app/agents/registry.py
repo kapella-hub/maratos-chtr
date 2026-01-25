@@ -185,7 +185,7 @@ kiro_mo = create_kiro_agent(
     agent_id="mo",  # Replace the default MO with Kiro-powered MO
     name="MO",
     description="Your AI partner, powered by Kiro CLI",
-    model=settings.default_model or "claude-sonnet-4",
+    model=settings.default_model or "claude-sonnet-4.5",
     system_prompt=MO_SYSTEM_PROMPT,
 )
 

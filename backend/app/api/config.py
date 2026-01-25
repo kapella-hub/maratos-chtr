@@ -53,11 +53,9 @@ async def get_schema() -> dict[str, Any]:
                 "title": "Default Model",
                 "description": "Default LLM model to use",
                 "enum": [
-                    "claude-sonnet-4-20250514",
-                    "claude-3-5-haiku-20241022",
-                    "claude-opus-4-20250514",
-                    "gpt-4o",
-                    "gpt-4o-mini",
+                    "claude-sonnet-4.5",
+                    "claude-haiku-4.5",
+                    "claude-opus-4.5",
                 ],
             },
             "max_context_tokens": {

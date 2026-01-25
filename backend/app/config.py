@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/maratos.db"
 
     # LLM
-    default_model: str = "claude-sonnet-4-20250514"
+    default_model: str = "claude-sonnet-4.5"
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
 

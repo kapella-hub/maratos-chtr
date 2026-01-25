@@ -36,7 +36,7 @@ def filter_tool_logs(text: str) -> str:
 class KiroAgentConfig(AgentConfig):
     """Configuration for Kiro agent."""
 
-    model: str = "claude-sonnet-4"  # claude-opus-4.5, claude-sonnet-4, claude-sonnet-4.5, claude-haiku-4.5
+    model: str = "claude-sonnet-4.5"  # claude-opus-4.5, claude-sonnet-4.5, claude-haiku-4.5
     trust_tools: bool = True  # --trust-all-tools flag
 
 
@@ -92,7 +92,7 @@ class KiroAgent(Agent):
 
         # Get model from settings (dynamic) or fall back to config
         from app.config import settings
-        model = settings.default_model or self.config.model or "claude-sonnet-4"
+        model = settings.default_model or self.config.model or "claude-sonnet-4.5"
         
         # Build kiro-cli command
         cmd = [
