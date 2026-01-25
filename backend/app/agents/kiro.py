@@ -70,6 +70,10 @@ class KiroAgent(Agent):
 
         full_prompt = "\n\n".join(prompt_parts)
 
+        # Get model from settings (dynamic) or fall back to config
+        from app.config import settings
+        model = settings.default_model or self.config.model or "claude-sonnet-4"
+        
         # Build kiro-cli command
         cmd = [
             self._kiro_path,
@@ -78,9 +82,9 @@ class KiroAgent(Agent):
             "--wrap", "never",
         ]
 
-        # Add model if specified
-        if hasattr(self.config, 'model') and self.config.model:
-            cmd.extend(["--model", self.config.model])
+        # Add model
+        if model:
+            cmd.extend(["--model", model])
 
         # Add trust-all-tools if enabled
         if hasattr(self.config, 'trust_tools') and self.config.trust_tools:

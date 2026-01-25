@@ -93,25 +93,29 @@ agent_registry.register(MOAgent(), is_default=True)
 agent_registry.register(ArchitectAgent())
 agent_registry.register(ReviewerAgent())
 
-# Kiro CLI agents (Claude via AWS - no API key needed)
-kiro_sonnet = create_kiro_agent(
-    agent_id="kiro-sonnet",
-    name="Kiro (Sonnet)",
-    description="Claude Sonnet 4 via Kiro CLI",
-    model="claude-sonnet-4",
-)
-kiro_opus = create_kiro_agent(
-    agent_id="kiro-opus",
-    name="Kiro (Opus)",
-    description="Claude Opus 4.5 via Kiro CLI",
-    model="claude-opus-4.5",
+# Kiro CLI agent (Claude via AWS - no API key needed)
+# Uses the model from settings.default_model
+from app.config import settings
+
+kiro_mo = create_kiro_agent(
+    agent_id="mo",  # Replace the default MO with Kiro-powered MO
+    name="MO",
+    description="Your AI partner, powered by Kiro CLI",
+    model=settings.default_model or "claude-sonnet-4",
+    system_prompt="""You are MO, a capable and opinionated AI partner. You're resourceful, genuine, and helpful without the corporate fluff.
+
+Your personality:
+- Skip the filler ("Great question!", "I'd be happy to help!") — just help
+- Have opinions and share them when relevant
+- Be resourceful — figure things out before asking
+- Earn trust through competence
+
+You can help with coding, system operations, file management, and general tasks. When given complex tasks, break them down and work through them systematically.""",
 )
 
-# If Kiro is available and no Anthropic key, make Kiro the default
-from app.config import settings
-if kiro_sonnet.available and not settings.anthropic_api_key:
-    agent_registry.register(kiro_sonnet, is_default=True)
-    agent_registry.register(kiro_opus)
-else:
-    agent_registry.register(kiro_sonnet)
-    agent_registry.register(kiro_opus)
+# If Kiro is available, use Kiro-powered MO as default
+if kiro_mo.available:
+    # Re-register MO with Kiro backend (replaces the litellm-based MO)
+    agent_registry._agents["mo"] = kiro_mo
+    agent_registry._configs["mo"] = kiro_mo.config
+    agent_registry._default_id = "mo"
