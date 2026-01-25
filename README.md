@@ -24,7 +24,27 @@ irm https://cdn.jsdelivr.net/gh/kapella-hub/maratos@main/install.ps1 | iex
 > curl -X PURGE https://purge.jsdelivr.net/gh/kapella-hub/maratos@main/install.sh
 > ```
 
-**No API key?** Install [Kiro CLI](https://kiro.dev/cli/) — MaratOS will use it automatically for Claude models.
+**No API key?** Install [Kiro CLI](https://kiro.dev/cli/) — MaratOS will use it automatically for Claude models via AWS.
+
+### Kiro CLI Setup (No API Key Needed)
+
+If you have Kiro CLI installed and authenticated, MaratOS automatically uses it for Claude models:
+
+```bash
+# Install Kiro CLI
+curl -fsSL https://cli.kiro.dev/install | bash
+
+# Authenticate with AWS
+~/.local/bin/kiro-cli login
+
+# Now install MaratOS - it will detect Kiro CLI
+curl -fsSL https://cdn.jsdelivr.net/gh/kapella-hub/maratos@main/install.sh | bash
+```
+
+Available Kiro models:
+- **claude-sonnet-4** — Balanced reasoning and coding (1.3x credits)
+- **claude-opus-4.5** — Maximum capability (2.2x credits)
+- **claude-haiku-4.5** — Fast responses (0.4x credits)
 
 Then run:
 
