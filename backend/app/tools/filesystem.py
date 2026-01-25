@@ -62,8 +62,9 @@ class FilesystemTool(Tool):
                 ),
             ],
         )
-        # Default workspace - can be configured
-        self.workspace = workspace or Path.home() / "maratos-workspace"
+        # Use configured workspace
+        from app.config import settings
+        self.workspace = workspace or settings.workspace_dir
         self.workspace.mkdir(parents=True, exist_ok=True)
 
     def _is_in_workspace(self, path: Path) -> bool:

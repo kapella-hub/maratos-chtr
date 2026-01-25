@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     # Paths
     data_dir: Path = Field(default_factory=lambda: Path("./data"))
+    workspace_dir: Path = Field(default_factory=lambda: Path.home() / "maratos-workspace")
 
     # Limits
     max_context_tokens: int = 100000
