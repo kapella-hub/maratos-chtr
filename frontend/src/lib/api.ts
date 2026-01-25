@@ -65,6 +65,7 @@ export type ChatEventType =
   | 'done' 
   | 'agent' 
   | 'thinking'
+  | 'model_thinking'
   | 'orchestrating'
   | 'subagent'
   | 'subagent_result'
@@ -125,6 +126,9 @@ export async function* streamChat(
             }
             if (parsed.thinking !== undefined) {
               yield { type: 'thinking', data: parsed.thinking }
+            }
+            if (parsed.model_thinking !== undefined) {
+              yield { type: 'model_thinking', data: parsed.model_thinking }
             }
             if (parsed.orchestrating !== undefined) {
               yield { type: 'orchestrating', data: parsed.orchestrating }

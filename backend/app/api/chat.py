@@ -134,9 +134,20 @@ async def chat(
         yield 'data: {"thinking": true}\n\n'
 
         first_chunk = True
+        in_model_thinking = False
         async for chunk in agent.chat(messages, request.context):
-            # Signal thinking done on first content
-            if first_chunk:
+            # Handle thinking block markers
+            if chunk == "__THINKING_START__":
+                in_model_thinking = True
+                yield 'data: {"model_thinking": true}\n\n'
+                continue
+            elif chunk == "__THINKING_END__":
+                in_model_thinking = False
+                yield 'data: {"model_thinking": false}\n\n'
+                continue
+            
+            # Signal initial thinking done on first real content
+            if first_chunk and chunk.strip():
                 yield 'data: {"thinking": false}\n\n'
                 first_chunk = False
             
@@ -147,6 +158,8 @@ async def chat(
         # If no content was streamed, still signal thinking done
         if first_chunk:
             yield 'data: {"thinking": false}\n\n'
+        if in_model_thinking:
+            yield 'data: {"model_thinking": false}\n\n'
 
         # Save assistant message
         async with db.begin():

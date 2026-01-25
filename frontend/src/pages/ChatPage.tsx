@@ -20,6 +20,7 @@ export default function ChatPage() {
     agentId,
     isStreaming,
     isThinking,
+    isModelThinking,
     isOrchestrating,
     activeSubagents,
     setSessionId,
@@ -29,6 +30,7 @@ export default function ChatPage() {
     setLastMessageAgent,
     setStreaming,
     setThinking,
+    setModelThinking,
     setOrchestrating,
     updateSubagent,
     clearSubagents,
@@ -76,6 +78,8 @@ export default function ChatPage() {
           setLastMessageAgent(event.data as string)
         } else if (event.type === 'thinking') {
           setThinking(event.data as boolean)
+        } else if (event.type === 'model_thinking') {
+          setModelThinking(event.data as boolean)
         } else if (event.type === 'orchestrating') {
           setOrchestrating(event.data as boolean)
         } else if (event.type === 'subagent' && event.subagent) {
@@ -112,10 +116,11 @@ export default function ChatPage() {
     } finally {
       setStreaming(false)
       setThinking(false)
+      setModelThinking(false)
       setAbortController(null)
       clearSubagents()
     }
-  }, [agentId, sessionId, addMessage, appendToLastMessage, setSessionId, setLastMessageAgent, setStreaming, setThinking, setOrchestrating, updateSubagent, clearSubagents, setAbortController])
+  }, [agentId, sessionId, addMessage, appendToLastMessage, setSessionId, setLastMessageAgent, setStreaming, setThinking, setModelThinking, setOrchestrating, updateSubagent, clearSubagents, setAbortController])
 
   // Process queue after each message
   const processQueue = useCallback(async () => {
@@ -201,6 +206,16 @@ export default function ChatPage() {
                 isThinking={isThinking && index === messages.length - 1 && message.role === 'assistant' && !message.content}
               />
             ))}
+            {isModelThinking && (
+              <div className="px-4 py-3 flex items-center gap-3 text-muted-foreground animate-pulse">
+                <div className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <div className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <div className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+                <span className="text-sm">Thinking...</span>
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
         )}

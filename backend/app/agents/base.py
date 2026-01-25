@@ -113,7 +113,7 @@ class Agent:
                 full_content += delta.content
                 buffer += delta.content
                 
-                # Hidden tags to filter out
+                # Hidden tags to filter out (thinking shows indicator, analysis is silent)
                 hidden_tags = ["thinking", "analysis"]
                 
                 # Process buffer to filter hidden blocks
@@ -125,6 +125,9 @@ class Agent:
                         if end_idx != -1:
                             # Discard everything up to and including closing tag
                             buffer = buffer[end_idx + len(end_tag):]
+                            # Signal end of thinking block
+                            if hidden_tag == "thinking":
+                                yield "__THINKING_END__"
                             in_hidden_block = False
                             hidden_tag = ""
                         else:
@@ -147,6 +150,9 @@ class Agent:
                             buffer = buffer[found_idx + len(found_tag) + 2:]  # +2 for < and >
                             in_hidden_block = True
                             hidden_tag = found_tag
+                            # Signal start of thinking block
+                            if found_tag == "thinking":
+                                yield "__THINKING_START__"
                         else:
                             # No hidden tag, but keep potential partial tag in buffer
                             # Only yield up to last '<' to avoid splitting a tag

@@ -30,6 +30,7 @@ interface ChatStore {
   agentId: string
   isStreaming: boolean
   isThinking: boolean
+  isModelThinking: boolean
   isOrchestrating: boolean
   activeSubagents: SubagentTask[]
   abortController: AbortController | null
@@ -41,6 +42,7 @@ interface ChatStore {
   setLastMessageAgent: (agentId: string) => void
   setStreaming: (streaming: boolean) => void
   setThinking: (thinking: boolean) => void
+  setModelThinking: (thinking: boolean) => void
   setOrchestrating: (orchestrating: boolean) => void
   updateSubagent: (task: SubagentTask) => void
   clearSubagents: () => void
@@ -61,6 +63,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   agentId: 'mo',
   isStreaming: false,
   isThinking: false,
+  isModelThinking: false,
   isOrchestrating: false,
   activeSubagents: [],
   abortController: null,
@@ -128,6 +131,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setThinking: (thinking) => set({ isThinking: thinking }),
+  setModelThinking: (thinking) => set({ isModelThinking: thinking }),
   setOrchestrating: (orchestrating) => set({ isOrchestrating: orchestrating }),
   
   updateSubagent: (task) => set((state) => {
@@ -146,5 +150,5 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   
   clearSubagents: () => set({ activeSubagents: [], isOrchestrating: false }),
   
-  clearMessages: () => set({ messages: [], messageQueue: [], sessionId: null, isThinking: false, isOrchestrating: false, activeSubagents: [] }),
+  clearMessages: () => set({ messages: [], messageQueue: [], sessionId: null, isThinking: false, isModelThinking: false, isOrchestrating: false, activeSubagents: [] }),
 }))
