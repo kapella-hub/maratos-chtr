@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  maratos:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MARATOS_ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - MARATOS_OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MARATOS_DEBUG=false
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
