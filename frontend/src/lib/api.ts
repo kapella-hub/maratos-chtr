@@ -1,7 +1,17 @@
 const API_BASE = '/api'
 
+export interface Agent {
+  id: string
+  name: string
+  description: string
+  icon: string
+  model: string
+  is_default?: boolean
+}
+
 export interface Session {
   id: string
+  agent_id: string
   title: string | null
   created_at: string
   updated_at: string
@@ -23,6 +33,13 @@ export interface Config {
   workspace: string
 }
 
+// Agents
+export async function fetchAgents(): Promise<Agent[]> {
+  const res = await fetch(`${API_BASE}/agents`)
+  if (!res.ok) throw new Error('Failed to fetch agents')
+  return res.json()
+}
+
 // Sessions
 export async function fetchSessions(): Promise<Session[]> {
   const res = await fetch(`${API_BASE}/chat/sessions`)
@@ -41,15 +58,16 @@ export async function deleteSession(id: string): Promise<void> {
   if (!res.ok) throw new Error('Failed to delete session')
 }
 
-// Chat with MO
+// Chat
 export async function* streamChat(
   message: string,
+  agentId: string = 'mo',
   sessionId?: string
-): AsyncGenerator<{ type: 'session_id' | 'content' | 'done'; data?: string }> {
+): AsyncGenerator<{ type: 'session_id' | 'content' | 'done' | 'agent'; data?: string }> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, session_id: sessionId }),
+    body: JSON.stringify({ message, agent_id: agentId, session_id: sessionId }),
   })
 
   if (!res.ok) throw new Error('Failed to send message')
@@ -78,7 +96,11 @@ export async function* streamChat(
             const parsed = JSON.parse(data)
             if (parsed.session_id) {
               yield { type: 'session_id', data: parsed.session_id }
-            } else if (parsed.content) {
+            }
+            if (parsed.agent) {
+              yield { type: 'agent', data: parsed.agent }
+            }
+            if (parsed.content) {
               yield { type: 'content', data: parsed.content.replace(/\\n/g, '\n') }
             }
           } catch {

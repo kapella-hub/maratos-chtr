@@ -4,7 +4,6 @@ from app.tools.base import Tool, ToolResult, registry
 from app.tools.filesystem import FilesystemTool
 from app.tools.shell import ShellTool
 from app.tools.web import WebSearchTool, WebFetchTool
-from app.tools.kiro import KiroTool
 
 __all__ = [
     "Tool", 
@@ -14,5 +13,4 @@ __all__ = [
     "ShellTool", 
     "WebSearchTool",
     "WebFetchTool",
-    "KiroTool",
 ]

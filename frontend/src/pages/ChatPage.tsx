@@ -2,6 +2,7 @@ import { useRef, useEffect } from 'react'
 import { Plus } from 'lucide-react'
 import ChatInput from '@/components/ChatInput'
 import ChatMessage from '@/components/ChatMessage'
+import AgentSelector from '@/components/AgentSelector'
 import { useChatStore } from '@/stores/chat'
 import { streamChat } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -11,32 +12,33 @@ export default function ChatPage() {
   const {
     messages,
     sessionId,
+    agentId,
     isStreaming,
     setSessionId,
+    setAgentId,
     addMessage,
     appendToLastMessage,
+    setLastMessageAgent,
     setStreaming,
     clearMessages,
   } = useChatStore()
 
-  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   const handleSend = async (content: string) => {
-    // Add user message
     addMessage({ role: 'user', content })
-
-    // Add empty assistant message for streaming
-    addMessage({ role: 'assistant', content: '' })
+    addMessage({ role: 'assistant', content: '', agentId })
 
     setStreaming(true)
 
     try {
-      for await (const event of streamChat(content, sessionId || undefined)) {
+      for await (const event of streamChat(content, agentId, sessionId || undefined)) {
         if (event.type === 'session_id' && event.data) {
           setSessionId(event.data)
+        } else if (event.type === 'agent' && event.data) {
+          setLastMessageAgent(event.data)
         } else if (event.type === 'content' && event.data) {
           appendToLastMessage(event.data)
         }
@@ -49,26 +51,21 @@ export default function ChatPage() {
     }
   }
 
-  const handleNewChat = () => {
-    clearMessages()
+  const agentInfo: Record<string, { gradient: string; tagline: string }> = {
+    mo: { gradient: 'from-violet-500 to-purple-600', tagline: 'Your capable AI partner' },
+    architect: { gradient: 'from-blue-500 to-cyan-600', tagline: 'Senior engineer for complex tasks' },
+    reviewer: { gradient: 'from-amber-500 to-orange-600', tagline: 'Code quality guardian' },
   }
+
+  const current = agentInfo[agentId] || agentInfo.mo
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white font-bold">
-            MO
-          </div>
-          <div>
-            <h2 className="font-semibold">MO</h2>
-            <p className="text-xs text-muted-foreground">Your AI partner</p>
-          </div>
-        </div>
+        <AgentSelector value={agentId} onChange={setAgentId} />
         
         <button
-          onClick={handleNewChat}
+          onClick={clearMessages}
           className={cn(
             'flex items-center gap-2 px-3 py-2 rounded-lg',
             'bg-secondary text-secondary-foreground',
@@ -81,19 +78,25 @@ export default function ChatPage() {
         </button>
       </header>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         {messages.length === 0 ? (
           <div className="flex items-center justify-center h-full text-muted-foreground">
             <div className="text-center max-w-md">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white text-2xl font-bold mx-auto mb-4">
-                MO
+              <div className={cn(
+                'w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-bold mx-auto mb-4',
+                `bg-gradient-to-br ${current.gradient}`
+              )}>
+                {agentId === 'mo' ? 'MO' : agentId === 'architect' ? '🏗️' : '🔍'}
               </div>
-              <h2 className="text-xl font-semibold text-foreground mb-2">Hey, I'm MO</h2>
-              <p className="text-sm">
-                Your capable AI partner. I can help with coding, research, file operations, 
-                and pretty much anything you throw at me. What's on your mind?
-              </p>
+              <h2 className="text-xl font-semibold text-foreground mb-2">
+                {agentId === 'mo' ? "Hey, I'm MO" : agentId === 'architect' ? "Architect Mode" : "Reviewer Mode"}
+              </h2>
+              <p className="text-sm">{current.tagline}</p>
+              {agentId !== 'mo' && (
+                <p className="text-xs mt-2 text-muted-foreground/70">
+                  Using Claude Opus for maximum quality
+                </p>
+              )}
             </div>
           </div>
         ) : (
@@ -106,11 +109,10 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Input */}
       <ChatInput
         onSend={handleSend}
         isLoading={isStreaming}
-        placeholder="Message MO..."
+        placeholder={`Message ${agentId === 'mo' ? 'MO' : agentId === 'architect' ? 'Architect' : 'Reviewer'}...`}
       />
     </div>
   )

@@ -229,6 +229,25 @@ When you ask MO to modify external code, it copies the files to workspace first,
 
 ---
 
+## Agents
+
+MaratOS includes specialized agents optimized for different tasks:
+
+| Agent | Model | Use For |
+|-------|-------|---------|
+| 🤖 **MO** | Claude Sonnet | General tasks, quick edits, research |
+| 🏗️ **Architect** | Claude Opus | Complex architecture, system design, quality-critical code |
+| 🔍 **Reviewer** | Claude Opus | Code review, validation, security audits |
+
+**MO** is fast and capable for everyday tasks. When you need maximum quality — architecture decisions, complex refactoring, thorough reviews — switch to **Architect** or **Reviewer** mode.
+
+Select the agent in the UI or specify in API:
+```bash
+curl -X POST /api/chat -d '{"message": "...", "agent_id": "architect"}'
+```
+
+---
+
 ## Tools
 
 | Tool | Description |
@@ -237,7 +256,6 @@ When you ask MO to modify external code, it copies the files to workspace first,
 | **Shell** | Execute commands |
 | **Web Search** | Search the internet |
 | **Web Fetch** | Read web pages |
-| **Kiro AI** | Delegate to Kiro for complex coding |
 
 ---
 

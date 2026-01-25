@@ -24,6 +24,7 @@ class ChatRequest(BaseModel):
 
     message: str
     session_id: str | None = None
+    agent_id: str | None = None  # Optional: specify agent (mo, architect, reviewer)
     context: dict[str, Any] | None = None
 
 
@@ -31,6 +32,7 @@ class SessionResponse(BaseModel):
     """Session response."""
 
     id: str
+    agent_id: str
     title: str | None
     created_at: datetime
     updated_at: datetime
@@ -50,9 +52,12 @@ async def chat(
     request: ChatRequest,
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
-    """Send a message to MO and stream the response."""
-    # Get MO (the only agent)
-    agent = agent_registry.get_default()
+    """Send a message and stream the response."""
+    # Get agent (default to MO, or use specified)
+    agent_id = request.agent_id or "mo"
+    agent = agent_registry.get(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     # Get or create session
     if request.session_id:
@@ -62,10 +67,15 @@ async def chat(
         session = result.scalar_one_or_none()
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Update agent if changed
+        if session.agent_id != agent_id:
+            session.agent_id = agent_id
+            await db.commit()
     else:
         session = DBSession(
             id=str(uuid.uuid4()),
-            agent_id="mo",
+            agent_id=agent_id,
             title=request.message[:100] if request.message else None,
         )
         db.add(session)
@@ -103,12 +113,11 @@ async def chat(
         """Generate streaming response."""
         full_response = ""
 
-        # Yield session ID first
-        yield f"data: {{'session_id': '{session.id}'}}\n\n"
+        # Yield session ID and agent info first
+        yield f"data: {{\"session_id\": \"{session.id}\", \"agent\": \"{agent_id}\"}}\n\n"
 
         async for chunk in agent.chat(messages, request.context):
             full_response += chunk
-            # Escape for SSE
             escaped = chunk.replace("\n", "\\n").replace('"', '\\"')
             yield f'data: {{"content": "{escaped}"}}\n\n'
 
@@ -131,6 +140,7 @@ async def chat(
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Session-ID": session.id,
+            "X-Agent-ID": agent_id,
         },
     )
 
@@ -148,6 +158,7 @@ async def list_sessions(
     return [
         SessionResponse(
             id=s.id,
+            agent_id=s.agent_id,
             title=s.title,
             created_at=s.created_at,
             updated_at=s.updated_at,
@@ -177,6 +188,7 @@ async def get_session(
     return {
         "session": SessionResponse(
             id=session.id,
+            agent_id=session.agent_id,
             title=session.title,
             created_at=session.created_at,
             updated_at=session.updated_at,
@@ -204,14 +216,12 @@ async def delete_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Delete messages
     result = await db.execute(
         select(DBMessage).where(DBMessage.session_id == session_id)
     )
     for msg in result.scalars().all():
         await db.delete(msg)
 
-    # Delete session
     await db.delete(session)
     await db.commit()
 
