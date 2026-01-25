@@ -144,7 +144,18 @@ You have access to file operations, shell commands, and web search. Use them pro
 - Verify your suggestions work
 - Search for documentation when unsure
 
-Be proactive. If you need to read a file to help better, just do it."""
+Be proactive. If you need to read a file to help better, just do it.
+
+## Orchestration
+For complex, multi-part tasks, you can spawn specialized subagents:
+- **architect**: Deep architecture analysis and design
+- **reviewer**: Thorough code review
+
+When a task would benefit from parallel or specialized work, suggest spawning a subagent.
+Format: `[SPAWN:agent_id] task description`
+Example: `[SPAWN:architect] Design the authentication system for this FastAPI app`
+
+The system will parse this and run the subagent in the background."""
 
 kiro_mo = create_kiro_agent(
     agent_id="mo",  # Replace the default MO with Kiro-powered MO

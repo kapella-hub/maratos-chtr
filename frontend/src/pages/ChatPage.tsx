@@ -4,6 +4,7 @@ import { Plus, Settings } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import ChatInput from '@/components/ChatInput'
 import ChatMessage from '@/components/ChatMessage'
+import ThinkingIndicator from '@/components/ThinkingIndicator'
 import { useChatStore } from '@/stores/chat'
 import { streamChat, fetchConfig } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -15,12 +16,14 @@ export default function ChatPage() {
     sessionId,
     agentId,
     isStreaming,
+    isThinking,
     setSessionId,
     setAgentId,
     addMessage,
     appendToLastMessage,
     setLastMessageAgent,
     setStreaming,
+    setThinking,
     stopGeneration,
     clearMessages,
   } = useChatStore()
@@ -47,15 +50,18 @@ export default function ChatPage() {
     addMessage({ role: 'assistant', content: '', agentId })
 
     setStreaming(true)
+    setThinking(true)
 
     try {
       for await (const event of streamChat(content, agentId, sessionId || undefined)) {
         if (event.type === 'session_id' && event.data) {
-          setSessionId(event.data)
+          setSessionId(event.data as string)
         } else if (event.type === 'agent' && event.data) {
-          setLastMessageAgent(event.data)
+          setLastMessageAgent(event.data as string)
+        } else if (event.type === 'thinking') {
+          setThinking(event.data as boolean)
         } else if (event.type === 'content' && event.data) {
-          appendToLastMessage(event.data)
+          appendToLastMessage(event.data as string)
         }
       }
     } catch (error) {
@@ -63,6 +69,7 @@ export default function ChatPage() {
       appendToLastMessage('\n\n❌ Error: Failed to get response')
     } finally {
       setStreaming(false)
+      setThinking(false)
     }
   }
 
@@ -117,8 +124,12 @@ export default function ChatPage() {
           </div>
         ) : (
           <div className="max-w-4xl mx-auto">
-            {messages.map((message) => (
-              <ChatMessage key={message.id} message={message} />
+            {messages.map((message, index) => (
+              <ChatMessage 
+                key={message.id} 
+                message={message} 
+                isThinking={isThinking && index === messages.length - 1 && message.role === 'assistant' && !message.content}
+              />
             ))}
             <div ref={messagesEndRef} />
           </div>

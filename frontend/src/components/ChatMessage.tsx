@@ -2,10 +2,12 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { User } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import ThinkingIndicator from '@/components/ThinkingIndicator'
 import type { ChatMessage as ChatMessageType } from '@/stores/chat'
 
 interface ChatMessageProps {
   message: ChatMessageType
+  isThinking?: boolean
 }
 
 // Strip ANSI escape codes from terminal output
@@ -38,7 +40,7 @@ const agentIcons: Record<string, string> = {
   'kiro-opus': '🦜',
 }
 
-export default function ChatMessage({ message }: ChatMessageProps) {
+export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
   const isUser = message.role === 'user'
   const agentId = message.agentId || 'mo'
 
@@ -67,6 +69,9 @@ export default function ChatMessage({ message }: ChatMessageProps) {
             <span className="ml-2 text-[10px] opacity-60">(Opus)</span>
           )}
         </div>
+        {isThinking ? (
+          <ThinkingIndicator />
+        ) : (
         <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-li:text-foreground">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
@@ -115,6 +120,7 @@ export default function ChatMessage({ message }: ChatMessageProps) {
             {stripAnsi(message.content)}
           </ReactMarkdown>
         </div>
+        )}
       </div>
     </div>
   )

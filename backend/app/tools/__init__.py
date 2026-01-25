@@ -5,6 +5,7 @@ from app.tools.filesystem import FilesystemTool
 from app.tools.shell import ShellTool
 from app.tools.web import WebSearchTool, WebFetchTool
 from app.tools.kiro import KiroTool
+from app.tools.orchestrate import OrchestrateTool
 
 __all__ = [
     "Tool", 
@@ -15,4 +16,5 @@ __all__ = [
     "WebSearchTool",
     "WebFetchTool",
     "KiroTool",
+    "OrchestrateTool",
 ]

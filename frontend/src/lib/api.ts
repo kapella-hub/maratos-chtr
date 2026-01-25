@@ -63,7 +63,7 @@ export async function* streamChat(
   message: string,
   agentId: string = 'mo',
   sessionId?: string
-): AsyncGenerator<{ type: 'session_id' | 'content' | 'done' | 'agent'; data?: string }> {
+): AsyncGenerator<{ type: 'session_id' | 'content' | 'done' | 'agent' | 'thinking'; data?: string | boolean }> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -99,6 +99,9 @@ export async function* streamChat(
             }
             if (parsed.agent) {
               yield { type: 'agent', data: parsed.agent }
+            }
+            if (parsed.thinking !== undefined) {
+              yield { type: 'thinking', data: parsed.thinking }
             }
             if (parsed.content) {
               yield { type: 'content', data: parsed.content.replace(/\\n/g, '\n') }

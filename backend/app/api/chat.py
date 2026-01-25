@@ -120,10 +120,23 @@ async def chat(
         # Yield session ID and agent info first
         yield f"data: {{\"session_id\": \"{session.id}\", \"agent\": \"{agent_id}\"}}\n\n"
 
+        # Signal thinking started
+        yield 'data: {"thinking": true}\n\n'
+
+        first_chunk = True
         async for chunk in agent.chat(messages, request.context):
+            # Signal thinking done on first content
+            if first_chunk:
+                yield 'data: {"thinking": false}\n\n'
+                first_chunk = False
+            
             full_response += chunk
             escaped = chunk.replace("\n", "\\n").replace('"', '\\"')
             yield f'data: {{"content": "{escaped}"}}\n\n'
+
+        # If no content was streamed, still signal thinking done
+        if first_chunk:
+            yield 'data: {"thinking": false}\n\n'
 
         # Save assistant message
         async with db.begin():
