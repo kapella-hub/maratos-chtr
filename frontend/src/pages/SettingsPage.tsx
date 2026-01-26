@@ -1,9 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings, Save, Loader2, MessageSquare, Phone, Building2, ToggleLeft, ToggleRight, FolderOpen, Plus, Trash2, Edit3, X, Check, Link, ExternalLink, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch, GitCommit, GitPullRequest, Wand2, ChevronRight } from 'lucide-react'
+import { Settings, Save, Loader2, MessageSquare, Phone, Building2, ToggleLeft, ToggleRight, FolderOpen, Plus, Trash2, Edit3, X, Check, Link, ExternalLink, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch, GitCommit, GitPullRequest, Wand2, ChevronRight, Activity, HardDrive } from 'lucide-react'
 import { fetchConfig, updateConfig, type Config, fetchProjects, createProject, updateProject, deleteProject, analyzeProject, removeAllowedDirectory, addAllowedDirectory, testGitLabConnection, fetchSkills, type Project, type Skill } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useState, useEffect } from 'react'
 import FolderBrowser from '@/components/FolderBrowser'
+import AgentMetrics from '@/components/AgentMetrics'
+import WorkspaceManager from '@/components/WorkspaceManager'
 
 // Setup Webex webhook
 async function setupWebexWebhook(targetUrl: string): Promise<{ status: string; webhook_id?: string; error?: string }> {
@@ -1468,6 +1470,30 @@ export default function SettingsPage() {
                 matching skills are automatically activated. Their quality checklists and best practices are injected into the agent's context.
               </p>
             </div>
+          </section>
+
+          {/* Agent Metrics */}
+          <section>
+            <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-blue-500" />
+              Agent Performance
+            </h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Monitor agent success rates, task durations, and rate limits
+            </p>
+            <AgentMetrics />
+          </section>
+
+          {/* Workspace Management */}
+          <section>
+            <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+              <HardDrive className="w-5 h-5 text-emerald-500" />
+              Workspace Management
+            </h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Monitor and clean up workspace files
+            </p>
+            <WorkspaceManager />
           </section>
 
           {/* Debug Mode */}

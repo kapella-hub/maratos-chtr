@@ -137,6 +137,10 @@ tags_metadata = [
         "description": "Project management and workspace operations",
     },
     {
+        "name": "workspace",
+        "description": "Workspace cleanup, archival, and maintenance",
+    },
+    {
         "name": "channels",
         "description": "Multi-channel messaging (Telegram, iMessage, Webex)",
     },

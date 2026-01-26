@@ -238,13 +238,92 @@ class SubagentTask:
         return self.checkpoints[-1] if self.checkpoints else None
 
 
+class AgentRateLimiter:
+    """Rate limiter for concurrent agent tasks."""
+
+    def __init__(
+        self,
+        max_total_concurrent: int = 10,
+        max_per_agent: int = 3,
+    ) -> None:
+        self.max_total_concurrent = max_total_concurrent
+        self.max_per_agent = max_per_agent
+        self._running_by_agent: dict[str, int] = {}
+        self._queue: list[tuple[str, asyncio.Event]] = []  # (agent_id, ready_event)
+        self._total_running = 0
+        self._lock = asyncio.Lock()
+
+    async def acquire(self, agent_id: str) -> bool:
+        """Try to acquire a slot for an agent. Returns True if acquired, False if queued."""
+        async with self._lock:
+            current_for_agent = self._running_by_agent.get(agent_id, 0)
+
+            if self._total_running < self.max_total_concurrent and current_for_agent < self.max_per_agent:
+                # Can run immediately
+                self._running_by_agent[agent_id] = current_for_agent + 1
+                self._total_running += 1
+                return True
+
+            # Need to queue
+            return False
+
+    async def wait_for_slot(self, agent_id: str) -> None:
+        """Wait until a slot is available."""
+        ready_event = asyncio.Event()
+        self._queue.append((agent_id, ready_event))
+        logger.info(f"Agent {agent_id} queued. Queue size: {len(self._queue)}")
+
+        # Wait for the event to be set
+        await ready_event.wait()
+
+        # Acquire the slot
+        async with self._lock:
+            self._running_by_agent[agent_id] = self._running_by_agent.get(agent_id, 0) + 1
+            self._total_running += 1
+
+    async def release(self, agent_id: str) -> None:
+        """Release a slot when task completes."""
+        async with self._lock:
+            current = self._running_by_agent.get(agent_id, 0)
+            if current > 0:
+                self._running_by_agent[agent_id] = current - 1
+                self._total_running -= 1
+
+            # Check queue and wake up next waiting task
+            if self._queue:
+                # Find a task that can run
+                for i, (queued_agent, event) in enumerate(self._queue):
+                    queued_current = self._running_by_agent.get(queued_agent, 0)
+                    if self._total_running < self.max_total_concurrent and queued_current < self.max_per_agent:
+                        self._queue.pop(i)
+                        event.set()
+                        logger.info(f"Agent {queued_agent} released from queue. Remaining: {len(self._queue)}")
+                        break
+
+    def get_status(self) -> dict[str, Any]:
+        """Get current rate limiter status."""
+        return {
+            "total_running": self._total_running,
+            "max_total_concurrent": self.max_total_concurrent,
+            "running_by_agent": dict(self._running_by_agent),
+            "max_per_agent": self.max_per_agent,
+            "queue_size": len(self._queue),
+            "queued_agents": [agent_id for agent_id, _ in self._queue],
+        }
+
+
 class SubagentManager:
     """Manages subagent tasks."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        max_total_concurrent: int = 10,
+        max_per_agent: int = 3,
+    ) -> None:
         self._tasks: dict[str, SubagentTask] = {}
         self._running: dict[str, asyncio.Task] = {}
         self._fallback_tasks: dict[str, str] = {}  # original_task_id -> fallback_task_id
+        self._rate_limiter = AgentRateLimiter(max_total_concurrent, max_per_agent)
 
     async def spawn(
         self,
@@ -287,13 +366,19 @@ class SubagentManager:
 
         self._tasks[task.id] = task
 
+        # Check rate limit before starting
+        can_run = await self._rate_limiter.acquire(agent_id)
+        if not can_run:
+            task.status = TaskStatus.PENDING
+            task.log("Queued - waiting for available slot")
+
         # Start the task in background with retry/timeout handling
         async_task = asyncio.create_task(
-            self._run_task_with_recovery(task, work_fn, enable_fallback)
+            self._run_task_with_rate_limit(task, work_fn, enable_fallback, not can_run)
         )
         self._running[task.id] = async_task
 
-        logger.info(f"Spawned subagent task: {task.id} - {name}")
+        logger.info(f"Spawned subagent task: {task.id} - {name} (queued={not can_run})")
         return task
 
     async def spawn_fallback(
@@ -339,6 +424,23 @@ class SubagentManager:
 
         logger.info(f"Spawned fallback task: {fallback_task.id} for {original_task.id}")
         return fallback_task
+
+    async def _run_task_with_rate_limit(
+        self,
+        task: SubagentTask,
+        work_fn: Callable[[SubagentTask], Coroutine[Any, Any, Any]],
+        enable_fallback: bool,
+        needs_to_wait: bool,
+    ) -> None:
+        """Run task with rate limiting - waits for slot if needed."""
+        if needs_to_wait:
+            await self._rate_limiter.wait_for_slot(task.agent_id)
+            task.log("Slot acquired - starting execution")
+
+        try:
+            await self._run_task_with_recovery(task, work_fn, enable_fallback)
+        finally:
+            await self._rate_limiter.release(task.agent_id)
 
     async def _run_task_with_recovery(
         self,
@@ -639,6 +741,25 @@ class SubagentManager:
         """Get the fallback task for an original task, if any."""
         fallback_id = self._fallback_tasks.get(original_task_id)
         return self._tasks.get(fallback_id) if fallback_id else None
+
+    def get_rate_limit_status(self) -> dict[str, Any]:
+        """Get current rate limiter status."""
+        return self._rate_limiter.get_status()
+
+    def configure_rate_limits(
+        self,
+        max_total_concurrent: int | None = None,
+        max_per_agent: int | None = None,
+    ) -> None:
+        """Configure rate limits."""
+        if max_total_concurrent is not None:
+            self._rate_limiter.max_total_concurrent = max_total_concurrent
+        if max_per_agent is not None:
+            self._rate_limiter.max_per_agent = max_per_agent
+        logger.info(
+            f"Rate limits configured: total={self._rate_limiter.max_total_concurrent}, "
+            f"per_agent={self._rate_limiter.max_per_agent}"
+        )
 
 
 # Global subagent manager

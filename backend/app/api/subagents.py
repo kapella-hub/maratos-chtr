@@ -100,6 +100,28 @@ async def get_running_count() -> dict[str, int]:
     return {"running": subagent_manager.get_running_count()}
 
 
+@router.get("/rate-limit")
+async def get_rate_limit_status() -> dict[str, Any]:
+    """Get current rate limit status including queue information."""
+    return subagent_manager.get_rate_limit_status()
+
+
+class RateLimitConfig(BaseModel):
+    """Rate limit configuration."""
+    max_total_concurrent: int | None = None
+    max_per_agent: int | None = None
+
+
+@router.put("/rate-limit")
+async def configure_rate_limits(config: RateLimitConfig) -> dict[str, Any]:
+    """Configure rate limits for agent spawning."""
+    subagent_manager.configure_rate_limits(
+        max_total_concurrent=config.max_total_concurrent,
+        max_per_agent=config.max_per_agent,
+    )
+    return subagent_manager.get_rate_limit_status()
+
+
 @router.post("/cleanup")
 async def cleanup_old_tasks(max_age_hours: int = 24) -> dict[str, int]:
     """Clean up old completed tasks."""

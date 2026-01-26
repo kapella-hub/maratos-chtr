@@ -800,3 +800,166 @@ export async function createGitLabProject(data: {
   }
   return res.json()
 }
+
+// Agent Metrics
+export interface AgentMetrics {
+  total_tasks: number
+  successful_tasks: number
+  failed_tasks: number
+  success_rate: number
+  avg_duration_seconds: number
+  total_goals: number
+  completed_goals: number
+  goal_completion_rate: number
+}
+
+export interface TaskSizingRecommendation {
+  agent_id: string
+  sample_size: number
+  recommended_max_goals: number
+  recommended_timeout_seconds: number
+  confidence: string
+  avg_goals_per_task: number
+  avg_duration_seconds: number
+  success_rate: number
+}
+
+export interface TaskMetric {
+  task_id: string
+  agent_id: string
+  description: string
+  status: string
+  duration_seconds: number | null
+  goals_total: number
+  goals_completed: number
+  goal_completion_rate: number
+  started_at: string
+  completed_at: string | null
+}
+
+export interface AllMetrics {
+  agents: Record<string, AgentMetrics>
+  recent_tasks: TaskMetric[]
+  failure_patterns: Record<string, number>
+}
+
+export async function fetchAllAgentMetrics(): Promise<AllMetrics> {
+  const res = await fetch(`${API_BASE}/subagents/metrics`)
+  if (!res.ok) throw new Error('Failed to fetch metrics')
+  return res.json()
+}
+
+export async function fetchAgentMetrics(agentId: string): Promise<{
+  metrics: AgentMetrics
+  sizing_recommendation: TaskSizingRecommendation
+  failure_patterns: Record<string, number>
+}> {
+  const res = await fetch(`${API_BASE}/subagents/metrics/${agentId}`)
+  if (!res.ok) throw new Error('Failed to fetch agent metrics')
+  return res.json()
+}
+
+// Rate Limiting
+export interface RateLimitStatus {
+  max_total_concurrent: number
+  max_per_agent: number
+  current_running: number
+  per_agent_running: Record<string, number>
+  queue_size: number
+  available_slots: number
+}
+
+export async function fetchRateLimitStatus(): Promise<RateLimitStatus> {
+  const res = await fetch(`${API_BASE}/subagents/rate-limit`)
+  if (!res.ok) throw new Error('Failed to fetch rate limit status')
+  return res.json()
+}
+
+export async function updateRateLimits(config: {
+  max_total_concurrent?: number
+  max_per_agent?: number
+}): Promise<RateLimitStatus> {
+  const res = await fetch(`${API_BASE}/subagents/rate-limit`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  })
+  if (!res.ok) throw new Error('Failed to update rate limits')
+  return res.json()
+}
+
+// Workspace Management
+export interface WorkspaceStats {
+  workspace_path: string
+  total_size_mb: number
+  total_size_bytes: number
+  file_count: number
+  dir_count: number
+  oldest_file_age_days: number
+  newest_file_age_days: number
+}
+
+export interface CleanupResult {
+  files_deleted: number
+  mb_freed: number
+  bytes_freed: number
+  errors: string[]
+}
+
+export interface FullCleanupResult {
+  temp_files?: CleanupResult
+  old_files?: CleanupResult
+  empty_dirs?: CleanupResult
+  kiro_temp_files?: { files_deleted: number }
+  summary: {
+    total_items_deleted: number
+    total_mb_freed: number
+    total_errors: number
+  }
+}
+
+export interface LargeFile {
+  path: string
+  size_mb: number
+  size_bytes: number
+}
+
+export async function fetchWorkspaceStats(): Promise<WorkspaceStats> {
+  const res = await fetch(`${API_BASE}/workspace/stats`)
+  if (!res.ok) throw new Error('Failed to fetch workspace stats')
+  return res.json()
+}
+
+export async function cleanupWorkspace(options: {
+  max_age_days?: number
+  cleanup_temp?: boolean
+  cleanup_old?: boolean
+  cleanup_empty?: boolean
+  cleanup_kiro_temp?: boolean
+}): Promise<FullCleanupResult> {
+  const res = await fetch(`${API_BASE}/workspace/cleanup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options),
+  })
+  if (!res.ok) throw new Error('Failed to cleanup workspace')
+  return res.json()
+}
+
+export async function fetchLargeFiles(minSizeMb: number = 10): Promise<LargeFile[]> {
+  const res = await fetch(`${API_BASE}/workspace/large-files?min_size_mb=${minSizeMb}`)
+  if (!res.ok) throw new Error('Failed to fetch large files')
+  return res.json()
+}
+
+export async function archiveProject(projectName: string): Promise<{
+  project: string
+  archive_path: string
+  archive_size_mb: number
+}> {
+  const res = await fetch(`${API_BASE}/workspace/archive/${encodeURIComponent(projectName)}`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Failed to archive project')
+  return res.json()
+}
