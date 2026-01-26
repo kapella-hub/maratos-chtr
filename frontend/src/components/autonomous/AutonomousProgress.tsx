@@ -55,32 +55,42 @@ export default function AutonomousProgress({
           </span>
 
           {(isActive || isPaused) && (
-            <div className="flex gap-1">
+            <div className="flex gap-2">
               {isPaused && onResume && (
                 <button
                   onClick={onResume}
-                  className="p-2 rounded bg-green-600 hover:bg-green-700 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-green-600 hover:bg-green-700 transition-colors text-sm font-medium"
                   title="Resume"
                 >
-                  ▶️
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M6.3 2.84A1.5 1.5 0 004 4.11v11.78a1.5 1.5 0 002.3 1.27l9.344-5.891a1.5 1.5 0 000-2.538L6.3 2.841z" />
+                  </svg>
+                  Resume
                 </button>
               )}
               {isActive && onPause && (
                 <button
                   onClick={onPause}
-                  className="p-2 rounded bg-yellow-600 hover:bg-yellow-700 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-yellow-600 hover:bg-yellow-700 transition-colors text-sm font-medium"
                   title="Pause"
                 >
-                  ⏸️
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <rect x="5" y="3" width="4" height="14" rx="1" />
+                    <rect x="11" y="3" width="4" height="14" rx="1" />
+                  </svg>
+                  Pause
                 </button>
               )}
               {(isActive || isPaused) && onCancel && (
                 <button
                   onClick={onCancel}
-                  className="p-2 rounded bg-red-600 hover:bg-red-700 transition-colors"
-                  title="Cancel"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-red-600 hover:bg-red-700 transition-colors text-sm font-medium"
+                  title="Stop"
                 >
-                  ⏹️
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <rect x="4" y="4" width="12" height="12" rx="1" />
+                  </svg>
+                  Stop
                 </button>
               )}
             </div>

@@ -4,14 +4,20 @@ Selects the most appropriate model based on:
 - Agent type (architect, coder, reviewer, tester, docs, devops)
 - Task complexity (inferred from description or explicit)
 - Quality gate requirements
+
+Models are dynamically discovered from kiro-cli to ensure compatibility.
 """
 
+import logging
 import re
+import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ModelTier(str, Enum):
@@ -28,28 +34,122 @@ class ModelConfig:
     description: str
     max_tokens: int = 8192
     temperature: float = 0.7
+    credit_multiplier: float = 1.0  # Cost relative to base
+
+
+# Kiro-cli model names and their credit multipliers
+# Based on: Auto (1x), claude-sonnet-4.5 (1.3x), claude-sonnet-4 (1.3x),
+#           claude-haiku-4.5 (0.4x), claude-opus-4.5 (2.2x)
+KIRO_MODEL_CREDITS = {
+    "Auto": 1.0,
+    "claude-opus-4.5": 2.2,
+    "claude-sonnet-4.5": 1.3,
+    "claude-sonnet-4": 1.3,
+    "claude-haiku-4.5": 0.4,
+}
+
+
+def discover_available_models() -> list[str]:
+    """Discover available models by querying kiro-cli.
+
+    Executes `kiro-cli chat --model invalid "test"` and parses the error
+    message to extract available model names. This ensures future compatibility
+    when new models are added.
+
+    Returns:
+        List of available model names
+    """
+    try:
+        # Run kiro-cli with an invalid model to get the error with available models
+        result = subprocess.run(
+            ["kiro-cli", "chat", "--model", "__invalid_model__", "test"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        # Parse the error message for available models
+        # Expected format: "error: Model '__invalid_model__' does not exist. Available models: Auto, claude-sonnet-4.5, ..."
+        output = result.stderr or result.stdout
+
+        # Look for "Available models:" in the output
+        match = re.search(r"Available models?:\s*(.+?)(?:\n|$)", output, re.IGNORECASE)
+        if match:
+            models_str = match.group(1).strip()
+            # Split by comma and clean up
+            models = [m.strip() for m in models_str.split(",") if m.strip()]
+            logger.info(f"Discovered kiro-cli models: {models}")
+            return models
+
+        logger.warning(f"Could not parse models from kiro-cli output: {output}")
+        return []
+
+    except FileNotFoundError:
+        logger.warning("kiro-cli not found in PATH, using default models")
+        return []
+    except subprocess.TimeoutExpired:
+        logger.warning("kiro-cli timed out, using default models")
+        return []
+    except Exception as e:
+        logger.warning(f"Error discovering models from kiro-cli: {e}")
+        return []
+
+
+def _get_available_models() -> list[str]:
+    """Get available models, with caching."""
+    if not hasattr(_get_available_models, "_cache"):
+        discovered = discover_available_models()
+        # Use discovered models or fall back to known defaults
+        _get_available_models._cache = discovered if discovered else list(KIRO_MODEL_CREDITS.keys())
+    return _get_available_models._cache
+
+
+def _select_best_model(preference_order: list[str]) -> str:
+    """Select the best available model from a preference order.
+
+    Args:
+        preference_order: List of model names in order of preference
+
+    Returns:
+        The first available model, or "Auto" as fallback
+    """
+    available = _get_available_models()
+
+    for model in preference_order:
+        if model in available:
+            return model
+
+    # Fallback to Auto if available
+    if "Auto" in available:
+        return "Auto"
+
+    # Last resort: return first available
+    return available[0] if available else "claude-sonnet-4"
 
 
 # Default model configurations for each tier
-# These can be customized via environment or settings
+# Using kiro-cli model names with dynamic selection
 DEFAULT_MODELS = {
     ModelTier.TIER_1_ADVANCED: ModelConfig(
-        model_id="claude-opus-4",
-        description="Most capable - complex architecture, critical decisions",
+        model_id=_select_best_model(["claude-opus-4.5"]),
+        description="Most capable - complex architecture, critical decisions (2.2x credits)",
         max_tokens=8192,
         temperature=0.7,
+        credit_multiplier=2.2,
     ),
     ModelTier.TIER_2_BALANCED: ModelConfig(
-        model_id="claude-sonnet-4",
-        description="Balanced - coding, review, testing",
+        model_id=_select_best_model(["claude-sonnet-4.5", "claude-sonnet-4"]),
+        description="Balanced - coding, review, testing (1.3x credits)",
         max_tokens=8192,
         temperature=0.7,
+        credit_multiplier=1.3,
     ),
     ModelTier.TIER_3_FAST: ModelConfig(
-        model_id="claude-3-5-haiku-latest",
-        description="Fast - documentation, simple fixes",
+        model_id=_select_best_model(["claude-haiku-4.5"]),
+        description="Fast - documentation, simple fixes (0.4x credits)",
         max_tokens=4096,
         temperature=0.5,
+        credit_multiplier=0.4,
     ),
 }
 
@@ -191,24 +291,28 @@ class ModelSelector:
     ) -> dict[str, Any]:
         """Estimate cost savings from tiered model selection vs using top tier for all.
 
-        This is an approximation based on typical pricing ratios.
+        Uses actual kiro-cli credit multipliers:
+        - opus-4.5: 2.2x credits
+        - sonnet-4.5/4: 1.3x credits
+        - haiku-4.5: 0.4x credits
         """
-        # Approximate cost ratios (tier 1 = 1.0)
+        # Get actual credit multipliers from model configs
         cost_ratios = {
-            ModelTier.TIER_1_ADVANCED: 1.0,
-            ModelTier.TIER_2_BALANCED: 0.2,   # ~5x cheaper
-            ModelTier.TIER_3_FAST: 0.04,      # ~25x cheaper
+            tier: config.credit_multiplier
+            for tier, config in self.models.items()
         }
 
         # Typical task distribution
         tier_distribution = {
-            ModelTier.TIER_1_ADVANCED: 0.15,  # 15% need top tier
-            ModelTier.TIER_2_BALANCED: 0.60,  # 60% balanced
-            ModelTier.TIER_3_FAST: 0.25,      # 25% can use fast
+            ModelTier.TIER_1_ADVANCED: 0.15,  # 15% need top tier (architecture, critical)
+            ModelTier.TIER_2_BALANCED: 0.60,  # 60% balanced (coding, testing, review)
+            ModelTier.TIER_3_FAST: 0.25,      # 25% can use fast (docs, simple fixes)
         }
 
+        # Cost if using top tier (opus) for everything
         all_top_tier_cost = task_count * avg_tokens_per_task * cost_ratios[ModelTier.TIER_1_ADVANCED]
 
+        # Cost with tiered selection
         tiered_cost = sum(
             task_count * pct * avg_tokens_per_task * cost_ratios[tier]
             for tier, pct in tier_distribution.items()
@@ -217,10 +321,14 @@ class ModelSelector:
         savings_pct = (1 - tiered_cost / all_top_tier_cost) * 100
 
         return {
-            "all_top_tier_relative_cost": all_top_tier_cost,
-            "tiered_relative_cost": tiered_cost,
+            "all_top_tier_relative_cost": round(all_top_tier_cost, 2),
+            "tiered_relative_cost": round(tiered_cost, 2),
             "savings_percent": round(savings_pct, 1),
             "tier_distribution": {t.value: f"{p*100:.0f}%" for t, p in tier_distribution.items()},
+            "models_used": {
+                t.value: f"{self.models[t].model_id} ({self.models[t].credit_multiplier}x)"
+                for t in ModelTier
+            },
         }
 
 
@@ -271,3 +379,38 @@ def get_model_config_for_task(
         task_description=task_description,
         quality_gates=quality_gates,
     )
+
+
+def refresh_available_models() -> list[str]:
+    """Force refresh the available models cache by re-querying kiro-cli.
+
+    Returns:
+        Updated list of available model names
+    """
+    if hasattr(_get_available_models, "_cache"):
+        delattr(_get_available_models, "_cache")
+    return _get_available_models()
+
+
+def get_available_models_info() -> dict[str, Any]:
+    """Get information about available models and current tier assignments.
+
+    Returns:
+        Dict with available models, tier assignments, and credit info
+    """
+    available = _get_available_models()
+
+    return {
+        "available_models": available,
+        "tier_assignments": {
+            tier.value: {
+                "model": config.model_id,
+                "description": config.description,
+                "credit_multiplier": config.credit_multiplier,
+                "max_tokens": config.max_tokens,
+                "temperature": config.temperature,
+            }
+            for tier, config in model_selector.models.items()
+        },
+        "known_credits": KIRO_MODEL_CREDITS,
+    }

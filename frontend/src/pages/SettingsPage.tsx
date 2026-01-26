@@ -1,8 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings, Save, Loader2, MessageSquare, Phone, Building2, ToggleLeft, ToggleRight, FolderOpen, Plus, Trash2, Edit3, X, Check, Link, ExternalLink } from 'lucide-react'
-import { fetchConfig, updateConfig, type Config, fetchProjects, createProject, updateProject, deleteProject, type Project } from '@/lib/api'
+import { Settings, Save, Loader2, MessageSquare, Phone, Building2, ToggleLeft, ToggleRight, FolderOpen, Plus, Trash2, Edit3, X, Check, Link, ExternalLink, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch, GitCommit, GitPullRequest, Wand2, ChevronRight } from 'lucide-react'
+import { fetchConfig, updateConfig, type Config, fetchProjects, createProject, updateProject, deleteProject, analyzeProject, removeAllowedDirectory, addAllowedDirectory, testGitLabConnection, fetchSkills, type Project, type Skill } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useState, useEffect } from 'react'
+import FolderBrowser from '@/components/FolderBrowser'
 
 // Setup Webex webhook
 async function setupWebexWebhook(targetUrl: string): Promise<{ status: string; webhook_id?: string; error?: string }> {
@@ -42,6 +43,19 @@ interface ChannelConfig {
   telegram_allowed_users?: string
   allowed_write_dirs?: string
   all_allowed_dirs?: string[]
+  // Git settings
+  git_auto_commit?: boolean
+  git_push_to_remote?: boolean
+  git_create_pr?: boolean
+  git_default_branch?: string
+  git_commit_prefix?: string
+  git_remote_name?: string
+  // GitLab integration
+  gitlab_url?: string
+  gitlab_token?: string
+  gitlab_namespace?: string
+  gitlab_skip_ssl?: boolean
+  gitlab_configured?: boolean
 }
 
 // Empty project template
@@ -54,6 +68,7 @@ const emptyProject: Project = {
   patterns: [],
   dependencies: [],
   notes: '',
+  auto_add_filesystem: true,
 }
 
 export default function SettingsPage() {
@@ -62,10 +77,15 @@ export default function SettingsPage() {
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [isAddingProject, setIsAddingProject] = useState(false)
   const [projectError, setProjectError] = useState<string | null>(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [webexWebhookUrl, setWebexWebhookUrl] = useState('')
   const [webexWebhookStatus, setWebexWebhookStatus] = useState<string | null>(null)
   const [webexWebhookLoading, setWebexWebhookLoading] = useState(false)
   const [newAllowedDir, setNewAllowedDir] = useState('')
+  const [showFolderBrowser, setShowFolderBrowser] = useState(false)
+  const [folderBrowserTarget, setFolderBrowserTarget] = useState<'project' | 'allowedDir'>('project')
+  const [removingDir, setRemovingDir] = useState<string | null>(null)
+  const [gitlabTestStatus, setGitlabTestStatus] = useState<{ status: 'idle' | 'testing' | 'success' | 'error'; message?: string }>({ status: 'idle' })
 
   const { data: config, isLoading } = useQuery({
     queryKey: ['config'],
@@ -75,6 +95,11 @@ export default function SettingsPage() {
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
     queryKey: ['projects'],
     queryFn: fetchProjects,
+  })
+
+  const { data: skills = [] } = useQuery({
+    queryKey: ['skills'],
+    queryFn: fetchSkills,
   })
 
   const createProjectMutation = useMutation({
@@ -127,6 +152,40 @@ export default function SettingsPage() {
   }
 
   const hasChanges = JSON.stringify(config) !== JSON.stringify(localConfig)
+
+  // Handle project analysis
+  const handleAnalyzeProject = async () => {
+    if (!editingProject?.path) {
+      setProjectError('Please enter a project path first')
+      return
+    }
+
+    setIsAnalyzing(true)
+    setProjectError(null)
+
+    try {
+      console.log('Analyzing project:', editingProject.path)
+      const analysis = await analyzeProject(editingProject.path)
+      console.log('Analysis result:', analysis)
+
+      setEditingProject({
+        ...editingProject,
+        description: analysis.description || editingProject.description,
+        tech_stack: analysis.tech_stack.length > 0 ? analysis.tech_stack : editingProject.tech_stack,
+        conventions: analysis.conventions.length > 0 ? analysis.conventions : editingProject.conventions,
+        patterns: analysis.patterns.length > 0 ? analysis.patterns : editingProject.patterns,
+        dependencies: analysis.dependencies.length > 0 ? analysis.dependencies : editingProject.dependencies,
+        notes: analysis.notes || editingProject.notes,
+        // Auto-derive name from path if not set
+        name: editingProject.name || editingProject.path.split('/').pop()?.toLowerCase().replace(/[^a-z0-9-_]/g, '-') || '',
+      })
+    } catch (e) {
+      console.error('Analyze error:', e)
+      setProjectError(e instanceof Error ? e.message : 'Failed to analyze project')
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -526,15 +585,32 @@ export default function SettingsPage() {
               MO can read files anywhere. Writes are only allowed in these directories.
             </p>
 
+            {/* Default Projects Folder - informational, links to Projects section */}
+            <div className="p-4 rounded-lg bg-gradient-to-br from-violet-500/10 to-purple-600/10 border border-violet-500/20 mb-4">
+              <div className="flex items-start gap-3">
+                <FolderOpen className="w-5 h-5 text-violet-400 mt-0.5" />
+                <div className="flex-1">
+                  <div className="font-medium text-violet-200">Project Folders</div>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    When you add a project below, its folder is automatically granted write access.
+                    This lets MO modify code directly in your project.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {/* Default Workspace */}
             <div className="p-3 rounded-lg bg-muted/50 border border-border mb-3">
               <div className="flex items-center gap-2">
                 <FolderOpen className="w-5 h-5 text-primary" />
                 <span className="font-mono text-sm">{config?.workspace || '~/maratos-workspace'}</span>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary ml-auto">
-                  default
+                  workspace
                 </span>
               </div>
+              <p className="text-xs text-muted-foreground mt-2 ml-7">
+                Default workspace for file operations when no project is specified
+              </p>
             </div>
 
             {/* Custom Allowed Directories */}
@@ -543,22 +619,28 @@ export default function SettingsPage() {
               .map((dir) => (
                 <div key={dir} className="p-3 rounded-lg bg-muted/50 border border-border mb-2 flex items-center gap-2">
                   <FolderOpen className="w-5 h-5 text-green-500" />
-                  <span className="font-mono text-sm flex-1">{dir}</span>
+                  <span className="font-mono text-sm flex-1 truncate">{dir}</span>
                   <button
-                    onClick={() => {
-                      const currentDirs = (localConfig.allowed_write_dirs || config?.allowed_write_dirs || '')
-                        .split(',')
-                        .map(d => d.trim())
-                        .filter(d => d && d !== dir)
-                      setLocalConfig({
-                        ...localConfig,
-                        allowed_write_dirs: currentDirs.join(',')
-                      })
+                    onClick={async () => {
+                      setRemovingDir(dir)
+                      try {
+                        await removeAllowedDirectory(dir)
+                        queryClient.invalidateQueries({ queryKey: ['config'] })
+                      } catch (e) {
+                        console.error('Failed to remove directory:', e)
+                      } finally {
+                        setRemovingDir(null)
+                      }
                     }}
-                    className="p-1.5 rounded hover:bg-red-500/10 transition-colors"
+                    disabled={removingDir === dir}
+                    className="p-1.5 rounded hover:bg-red-500/10 transition-colors disabled:opacity-50"
                     title="Remove directory"
                   >
-                    <Trash2 className="w-4 h-4 text-red-400" />
+                    {removingDir === dir ? (
+                      <Loader2 className="w-4 h-4 text-red-400 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4 text-red-400" />
+                    )}
                   </button>
                 </div>
               ))}
@@ -579,19 +661,28 @@ export default function SettingsPage() {
               />
               <button
                 onClick={() => {
+                  setFolderBrowserTarget('allowedDir')
+                  setShowFolderBrowser(true)
+                }}
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium',
+                  'bg-muted border border-input',
+                  'hover:bg-muted/80 transition-colors'
+                )}
+                title="Browse folders"
+              >
+                <FolderSearch className="w-4 h-4" />
+              </button>
+              <button
+                onClick={async () => {
                   if (!newAllowedDir.trim()) return
-                  const currentDirs = (localConfig.allowed_write_dirs || config?.allowed_write_dirs || '')
-                    .split(',')
-                    .map(d => d.trim())
-                    .filter(Boolean)
-                  if (!currentDirs.includes(newAllowedDir.trim())) {
-                    currentDirs.push(newAllowedDir.trim())
+                  try {
+                    await addAllowedDirectory(newAllowedDir.trim())
+                    queryClient.invalidateQueries({ queryKey: ['config'] })
+                    setNewAllowedDir('')
+                  } catch (e) {
+                    console.error('Failed to add directory:', e)
                   }
-                  setLocalConfig({
-                    ...localConfig,
-                    allowed_write_dirs: currentDirs.join(',')
-                  })
-                  setNewAllowedDir('')
                 }}
                 disabled={!newAllowedDir.trim()}
                 className={cn(
@@ -611,13 +702,314 @@ export default function SettingsPage() {
             </p>
           </section>
 
+          {/* Git Integration */}
+          <section>
+            <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+              <GitBranch className="w-5 h-5" />
+              Git Integration
+            </h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Default settings for Autonomous Development git operations. These can be overridden per project.
+            </p>
+
+            <div className="space-y-4">
+              {/* Auto-commit */}
+              <div className="p-4 rounded-lg border border-border">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
+                      <GitCommit className="w-5 h-5 text-green-500" />
+                    </div>
+                    <div>
+                      <div className="font-medium">Auto-commit Changes</div>
+                      <div className="text-xs text-muted-foreground">Automatically commit after completing tasks</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLocalConfig({ ...localConfig, git_auto_commit: localConfig.git_auto_commit === false ? true : false })}
+                    className="text-2xl"
+                  >
+                    {localConfig.git_auto_commit !== false ? (
+                      <ToggleRight className="w-10 h-10 text-green-500" />
+                    ) : (
+                      <ToggleLeft className="w-10 h-10 text-muted-foreground" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Push to Remote */}
+              <div className="p-4 rounded-lg border border-border">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                      <GitBranch className="w-5 h-5 text-blue-500" />
+                    </div>
+                    <div>
+                      <div className="font-medium">Push to Remote</div>
+                      <div className="text-xs text-muted-foreground">Push commits to remote repository</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLocalConfig({ ...localConfig, git_push_to_remote: !localConfig.git_push_to_remote })}
+                    className="text-2xl"
+                  >
+                    {localConfig.git_push_to_remote ? (
+                      <ToggleRight className="w-10 h-10 text-blue-500" />
+                    ) : (
+                      <ToggleLeft className="w-10 h-10 text-muted-foreground" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Create PR */}
+              <div className="p-4 rounded-lg border border-border">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                      <GitPullRequest className="w-5 h-5 text-purple-500" />
+                    </div>
+                    <div>
+                      <div className="font-medium">Create Pull Request</div>
+                      <div className="text-xs text-muted-foreground">Create a PR when project completes</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLocalConfig({ ...localConfig, git_create_pr: !localConfig.git_create_pr })}
+                    className="text-2xl"
+                  >
+                    {localConfig.git_create_pr ? (
+                      <ToggleRight className="w-10 h-10 text-purple-500" />
+                    ) : (
+                      <ToggleLeft className="w-10 h-10 text-muted-foreground" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Git Settings Details */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Default Branch</label>
+                  <input
+                    type="text"
+                    placeholder="main"
+                    value={localConfig.git_default_branch || ''}
+                    onChange={(e) => setLocalConfig({ ...localConfig, git_default_branch: e.target.value })}
+                    className={cn(
+                      'w-full px-3 py-2 rounded-lg text-sm',
+                      'bg-muted border border-input',
+                      'focus:outline-none focus:ring-2 focus:ring-ring',
+                      'font-mono'
+                    )}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Base branch for PRs</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Remote Name</label>
+                  <input
+                    type="text"
+                    placeholder="origin"
+                    value={localConfig.git_remote_name || ''}
+                    onChange={(e) => setLocalConfig({ ...localConfig, git_remote_name: e.target.value })}
+                    className={cn(
+                      'w-full px-3 py-2 rounded-lg text-sm',
+                      'bg-muted border border-input',
+                      'focus:outline-none focus:ring-2 focus:ring-ring',
+                      'font-mono'
+                    )}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Git remote to push to</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Commit Message Prefix (optional)</label>
+                <input
+                  type="text"
+                  placeholder="[AUTO]"
+                  value={localConfig.git_commit_prefix || ''}
+                  onChange={(e) => setLocalConfig({ ...localConfig, git_commit_prefix: e.target.value })}
+                  className={cn(
+                    'w-full px-3 py-2 rounded-lg text-sm',
+                    'bg-muted border border-input',
+                    'focus:outline-none focus:ring-2 focus:ring-ring'
+                  )}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Prefix added to auto-generated commit messages (e.g., "[AUTO]" or "[MO]")
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* GitLab Integration */}
+          <section>
+            <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+              <svg className="w-5 h-5 text-orange-500" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 0 1-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 0 1 4.82 2a.43.43 0 0 1 .58 0 .42.42 0 0 1 .11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0 1 18.6 2a.43.43 0 0 1 .58 0 .42.42 0 0 1 .11.18l2.44 7.51L23 13.45a.84.84 0 0 1-.35.94z"/>
+              </svg>
+              GitLab Integration
+            </h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Connect to GitLab to create new projects directly from Autonomous Development
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">GitLab URL</label>
+                <input
+                  type="text"
+                  placeholder="https://gitlab.example.com"
+                  value={localConfig.gitlab_url || ''}
+                  onChange={(e) => setLocalConfig({ ...localConfig, gitlab_url: e.target.value })}
+                  className={cn(
+                    'w-full px-3 py-2 rounded-lg text-sm',
+                    'bg-muted border border-input',
+                    'focus:outline-none focus:ring-2 focus:ring-ring',
+                    'font-mono'
+                  )}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Your GitLab instance URL (e.g., https://gitlab.com or self-hosted)
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Personal Access Token</label>
+                <input
+                  type="password"
+                  placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
+                  value={localConfig.gitlab_token === '***' ? '' : (localConfig.gitlab_token || '')}
+                  onChange={(e) => setLocalConfig({ ...localConfig, gitlab_token: e.target.value })}
+                  className={cn(
+                    'w-full px-3 py-2 rounded-lg text-sm',
+                    'bg-muted border border-input',
+                    'focus:outline-none focus:ring-2 focus:ring-ring',
+                    'font-mono'
+                  )}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Create at GitLab → Preferences → Access Tokens. Needs <code className="px-1 bg-muted rounded">api</code> scope.
+                  {localConfig.gitlab_token === '***' && (
+                    <span className="text-green-400 ml-2">Token configured (hidden)</span>
+                  )}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Default Namespace / Group</label>
+                <input
+                  type="text"
+                  placeholder="group/subgroup"
+                  value={localConfig.gitlab_namespace || ''}
+                  onChange={(e) => setLocalConfig({ ...localConfig, gitlab_namespace: e.target.value })}
+                  className={cn(
+                    'w-full px-3 py-2 rounded-lg text-sm',
+                    'bg-muted border border-input',
+                    'focus:outline-none focus:ring-2 focus:ring-ring',
+                    'font-mono'
+                  )}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Default group path for new projects (e.g., <code className="px-1 bg-muted rounded">myteam/projects</code>)
+                </p>
+              </div>
+
+              {/* Skip SSL Verification */}
+              <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={localConfig.gitlab_skip_ssl || false}
+                    onChange={(e) => setLocalConfig({ ...localConfig, gitlab_skip_ssl: e.target.checked })}
+                    className="w-4 h-4 rounded border-input"
+                  />
+                  <div>
+                    <div className="font-medium text-yellow-200 text-sm">Skip SSL Verification</div>
+                    <p className="text-xs text-muted-foreground">
+                      Enable for internal GitLab servers with self-signed certificates.
+                      Not recommended for public servers.
+                    </p>
+                  </div>
+                </label>
+              </div>
+
+              {/* Test Connection Button */}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    // Save current settings first (including skip_ssl)
+                    if (localConfig.gitlab_url) {
+                      const configToSave: Record<string, unknown> = {
+                        gitlab_url: localConfig.gitlab_url,
+                        gitlab_namespace: localConfig.gitlab_namespace,
+                        gitlab_skip_ssl: localConfig.gitlab_skip_ssl,
+                      }
+                      if (localConfig.gitlab_token && localConfig.gitlab_token !== '***') {
+                        configToSave.gitlab_token = localConfig.gitlab_token
+                      }
+                      await updateConfig(configToSave)
+                    }
+                    setGitlabTestStatus({ status: 'testing' })
+                    try {
+                      const result = await testGitLabConnection()
+                      setGitlabTestStatus({
+                        status: 'success',
+                        message: `Connected as ${result.name} (@${result.user})`,
+                      })
+                    } catch (e) {
+                      setGitlabTestStatus({
+                        status: 'error',
+                        message: e instanceof Error ? e.message : 'Connection failed',
+                      })
+                    }
+                  }}
+                  disabled={!localConfig.gitlab_url || (!localConfig.gitlab_token && !config?.gitlab_configured) || gitlabTestStatus.status === 'testing'}
+                  className={cn(
+                    'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium',
+                    'bg-orange-500 text-white',
+                    'hover:bg-orange-600 transition-colors',
+                    'disabled:opacity-50 disabled:cursor-not-allowed'
+                  )}
+                >
+                  {gitlabTestStatus.status === 'testing' ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ExternalLink className="w-4 h-4" />
+                  )}
+                  Test Connection
+                </button>
+
+                {gitlabTestStatus.status === 'success' && (
+                  <span className="text-sm text-green-400 flex items-center gap-1">
+                    <Check className="w-4 h-4" />
+                    {gitlabTestStatus.message}
+                  </span>
+                )}
+                {gitlabTestStatus.status === 'error' && (
+                  <span className="text-sm text-red-400">
+                    {gitlabTestStatus.message}
+                  </span>
+                )}
+              </div>
+            </div>
+          </section>
+
           {/* Projects */}
           <section>
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-lg font-semibold">Projects</h2>
                 <p className="text-sm text-muted-foreground">
-                  Project profiles provide context to MO about your codebase
+                  Add your projects so MO knows their tech stack and can work on them directly.
+                  Reference by name in chat: "add auth to <span className="text-primary">my-project</span>"
                 </p>
               </div>
               <button
@@ -664,38 +1056,88 @@ export default function SettingsPage() {
                   </button>
                 </div>
 
+                {/* Error display inside editor */}
+                {projectError && (
+                  <div className="p-3 mb-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                    {projectError}
+                  </div>
+                )}
+
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Name</label>
-                      <input
-                        type="text"
-                        placeholder="my-project"
-                        value={editingProject.name}
-                        onChange={(e) => setEditingProject({ ...editingProject, name: e.target.value })}
-                        disabled={!isAddingProject}
-                        className={cn(
-                          'w-full px-3 py-2 rounded-lg text-sm',
-                          'bg-muted border border-input',
-                          'focus:outline-none focus:ring-2 focus:ring-ring',
-                          !isAddingProject && 'opacity-60'
-                        )}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Path</label>
+                  {/* Path with Browse and Analyze buttons */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Project Path</label>
+                    <div className="flex gap-2">
                       <input
                         type="text"
                         placeholder="/path/to/project"
                         value={editingProject.path}
                         onChange={(e) => setEditingProject({ ...editingProject, path: e.target.value })}
                         className={cn(
-                          'w-full px-3 py-2 rounded-lg text-sm',
+                          'flex-1 px-3 py-2 rounded-lg text-sm',
                           'bg-muted border border-input',
-                          'focus:outline-none focus:ring-2 focus:ring-ring'
+                          'focus:outline-none focus:ring-2 focus:ring-ring',
+                          'font-mono'
                         )}
                       />
+                      <button
+                        onClick={() => {
+                          setFolderBrowserTarget('project')
+                          setShowFolderBrowser(true)
+                        }}
+                        className={cn(
+                          'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium',
+                          'bg-muted border border-input',
+                          'hover:bg-muted/80 transition-colors'
+                        )}
+                        title="Browse folders"
+                      >
+                        <FolderSearch className="w-4 h-4" />
+                        Browse
+                      </button>
+                      <button
+                        onClick={handleAnalyzeProject}
+                        disabled={!editingProject.path || isAnalyzing}
+                        className={cn(
+                          'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium',
+                          'bg-violet-500 text-white',
+                          'hover:bg-violet-600 transition-colors',
+                          'disabled:opacity-50 disabled:cursor-not-allowed'
+                        )}
+                        title="Analyze project to auto-detect tech stack, patterns, etc."
+                      >
+                        {isAnalyzing ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-4 h-4" />
+                        )}
+                        Analyze
+                      </button>
                     </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Browse to select folder, then click Analyze to auto-detect project settings
+                    </p>
+                  </div>
+
+                  {/* Name field */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Name</label>
+                    <input
+                      type="text"
+                      placeholder="my-project"
+                      value={editingProject.name}
+                      onChange={(e) => setEditingProject({ ...editingProject, name: e.target.value })}
+                      disabled={!isAddingProject}
+                      className={cn(
+                        'w-full px-3 py-2 rounded-lg text-sm',
+                        'bg-muted border border-input',
+                        'focus:outline-none focus:ring-2 focus:ring-ring',
+                        !isAddingProject && 'opacity-60'
+                      )}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Use this name to reference the project in chat (e.g., "work on my-project")
+                    </p>
                   </div>
 
                   <div>
@@ -783,6 +1225,28 @@ export default function SettingsPage() {
                     />
                   </div>
 
+                  {/* Filesystem Access Option */}
+                  <div className="p-3 rounded-lg bg-muted/50 border border-border">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editingProject.auto_add_filesystem ?? true}
+                        onChange={(e) => setEditingProject({ ...editingProject, auto_add_filesystem: e.target.checked })}
+                        className="w-5 h-5 mt-0.5 rounded border-input"
+                      />
+                      <div>
+                        <div className="font-medium flex items-center gap-2">
+                          <ShieldCheck className="w-4 h-4 text-green-500" />
+                          Grant Write Access
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Allow MO to modify files directly in this project folder.
+                          Required for coding tasks.
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+
                   <div className="flex justify-end gap-2">
                     <button
                       onClick={() => {
@@ -831,9 +1295,24 @@ export default function SettingsPage() {
               <div className="p-8 rounded-lg border border-dashed border-border text-center">
                 <FolderOpen className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
                 <p className="text-muted-foreground">No projects configured</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Add a project to help MO understand your codebase
+                <p className="text-sm text-muted-foreground mt-1 mb-4">
+                  Add a project to let MO understand and work on your codebase
                 </p>
+                <button
+                  onClick={() => {
+                    setIsAddingProject(true)
+                    setEditingProject({ ...emptyProject })
+                    setProjectError(null)
+                  }}
+                  className={cn(
+                    'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm',
+                    'bg-primary text-primary-foreground',
+                    'hover:bg-primary/90 transition-colors'
+                  )}
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Your First Project
+                </button>
               </div>
             ) : (
               <div className="space-y-2">
@@ -850,6 +1329,17 @@ export default function SettingsPage() {
                         <div className="flex items-center gap-2">
                           <FolderOpen className="w-5 h-5 text-primary" />
                           <span className="font-medium">{project.name}</span>
+                          {project.filesystem_access ? (
+                            <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">
+                              <ShieldCheck className="w-3 h-3" />
+                              Write
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">
+                              <Shield className="w-3 h-3" />
+                              Read-only
+                            </span>
+                          )}
                         </div>
                         <p className="text-sm text-muted-foreground mt-1 truncate">
                           {project.description || project.path}
@@ -875,7 +1365,7 @@ export default function SettingsPage() {
                       <div className="flex items-center gap-1 ml-4">
                         <button
                           onClick={() => {
-                            setEditingProject({ ...project })
+                            setEditingProject({ ...project, auto_add_filesystem: true })
                             setIsAddingProject(false)
                             setProjectError(null)
                           }}
@@ -903,6 +1393,83 @@ export default function SettingsPage() {
             )}
           </section>
 
+          {/* Skills */}
+          <section>
+            <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+              <Wand2 className="w-5 h-5 text-violet-500" />
+              Skills
+            </h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Skills are automatically selected based on task keywords. They inject quality guidelines and best practices.
+            </p>
+
+            {skills.length === 0 ? (
+              <div className="p-6 rounded-lg border border-dashed border-border text-center">
+                <Wand2 className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
+                <p className="text-muted-foreground">No skills loaded</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Add YAML skill files to <code className="px-1 bg-muted rounded">~/.maratos/skills/</code>
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {skills.map((skill: Skill) => (
+                  <details key={skill.id} className="group">
+                    <summary className="p-3 rounded-lg border border-border hover:border-violet-500/30 cursor-pointer transition-colors list-none">
+                      <div className="flex items-center gap-3">
+                        <ChevronRight className="w-4 h-4 text-muted-foreground group-open:rotate-90 transition-transform" />
+                        <div className="w-8 h-8 rounded-lg bg-violet-500/20 flex items-center justify-center">
+                          <Wand2 className="w-4 h-4 text-violet-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium">{skill.name}</div>
+                          <div className="text-xs text-muted-foreground truncate">{skill.description}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                            {skill.workflow_steps} steps
+                          </span>
+                          <span className="text-xs text-muted-foreground">v{skill.version}</span>
+                        </div>
+                      </div>
+                    </summary>
+                    <div className="mt-2 ml-7 p-3 rounded-lg bg-muted/50 border border-border">
+                      <div className="mb-3">
+                        <span className="text-xs font-medium text-muted-foreground">TRIGGERS:</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {skill.triggers.map((trigger) => (
+                            <span key={trigger} className="text-xs px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300">
+                              {trigger}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      {skill.tags.length > 0 && (
+                        <div>
+                          <span className="text-xs font-medium text-muted-foreground">TAGS:</span>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {skill.tags.map((tag) => (
+                              <span key={tag} className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            )}
+
+            <div className="mt-4 p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
+              <p className="text-sm text-violet-200">
+                <strong>Auto-selection:</strong> When you send a message containing trigger keywords (e.g., "create api endpoint"),
+                matching skills are automatically activated. Their quality checklists and best practices are injected into the agent's context.
+              </p>
+            </div>
+          </section>
+
           {/* Debug Mode */}
           <section>
             <h2 className="text-lg font-semibold mb-4">Developer</h2>
@@ -923,6 +1490,25 @@ export default function SettingsPage() {
           </section>
         </div>
       </div>
+
+      {/* Folder Browser Modal */}
+      <FolderBrowser
+        isOpen={showFolderBrowser}
+        onClose={() => setShowFolderBrowser(false)}
+        onSelect={(path) => {
+          if (folderBrowserTarget === 'project' && editingProject) {
+            setEditingProject({ ...editingProject, path })
+          } else if (folderBrowserTarget === 'allowedDir') {
+            setNewAllowedDir(path)
+          }
+        }}
+        initialPath={
+          folderBrowserTarget === 'project' && editingProject?.path
+            ? editingProject.path
+            : '~'
+        }
+        title={folderBrowserTarget === 'project' ? 'Select Project Folder' : 'Select Directory'}
+      />
     </div>
   )
 }

@@ -107,6 +107,16 @@ Without it, nothing happens. The agents work in parallel and report back.
 - Show what Kiro produced
 - Explain architectural decisions
 - Highlight any concerns from validation
+
+## 🎯 Skills System
+
+**Skills are automatically detected and applied.** When you receive a task, the system checks for matching skills based on keywords (e.g., "create api", "refactor", "security review"). If a skill matches:
+
+1. Skill quality checklists and test requirements are injected into the context
+2. Agents follow the skill's workflow guidelines
+3. No action needed from you — it's automatic
+
+**Available skills are loaded from `~/.maratos/skills/`**. Users can create custom YAML skills.
 """
 
 

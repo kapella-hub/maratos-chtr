@@ -33,6 +33,7 @@ class EventType(str, Enum):
     """Orchestrator event types."""
     PROJECT_STARTED = "project_started"
     PLANNING_STARTED = "planning_started"
+    MODEL_SELECTED = "model_selected"
     TASK_CREATED = "task_created"
     PLANNING_COMPLETED = "planning_completed"
     TASK_STARTED = "task_started"
@@ -205,6 +206,13 @@ Be thorough but practical. Include testing and documentation tasks. Number depen
         # Get the most capable model for planning (critical phase)
         planning_model = model_selector.models[ModelTier.TIER_1_ADVANCED]
         logger.info(f"Planning with model: {planning_model.model_id}")
+
+        # Emit model selection event
+        yield self._event(EventType.MODEL_SELECTED, {
+            "phase": "planning",
+            "model": planning_model.model_id,
+            "reason": "Architecture planning requires advanced reasoning",
+        })
 
         # Run architect with advanced model
         response_text = ""
@@ -380,11 +388,26 @@ Be thorough but practical. Include testing and documentation tasks. Number depen
         task.status = AutonomousTaskStatus.IN_PROGRESS
         task.started_at = datetime.now()
 
+        # Get model info for this task
+        gate_types = [g.type.value for g in task.quality_gates]
+        task_model = get_model_config_for_task(
+            agent_type=task.agent_type,
+            task_description=task.description,
+            quality_gates=gate_types,
+        )
+
         yield self._event(EventType.TASK_STARTED, {
             "task_id": task.id,
             "title": task.title,
             "agent_type": task.agent_type,
             "attempt": task.current_attempt + 1,
+            "model": task_model.model_id,
+        })
+
+        yield self._event(EventType.MODEL_SELECTED, {
+            "task_id": task.id,
+            "model": task_model.model_id,
+            "reason": f"{task.agent_type} agent for: {task.title[:50]}",
         })
 
         for attempt in range(task.max_attempts):
@@ -718,8 +741,20 @@ Provide a verdict: APPROVED or CHANGES_REQUESTED with specific feedback.
 """
         messages = [Message(role="user", content=prompt)]
 
+        # Get model for review (balanced tier - needs good understanding)
+        review_model = get_model_config_for_task(
+            agent_type="reviewer",
+            task_description=f"Review: {task.title}",
+            quality_gates=["review_approved"],
+        )
+
         response = ""
-        async for chunk in reviewer.chat(messages, {"workspace": self.project.workspace_path}):
+        async for chunk in reviewer.chat(
+            messages,
+            {"workspace": self.project.workspace_path},
+            model_override=review_model.model_id,
+            temperature_override=review_model.temperature,
+        ):
             if not chunk.startswith("__THINKING"):
                 response += chunk
 

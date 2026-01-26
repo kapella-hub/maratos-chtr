@@ -33,6 +33,19 @@ export interface Config {
   workspace: string
   allowed_write_dirs: string
   all_allowed_dirs: string[]
+  // Git settings
+  git_auto_commit: boolean
+  git_push_to_remote: boolean
+  git_create_pr: boolean
+  git_default_branch: string
+  git_commit_prefix: string
+  git_remote_name: string
+  // GitLab integration
+  gitlab_url: string
+  gitlab_token: string
+  gitlab_namespace: string
+  gitlab_skip_ssl: boolean
+  gitlab_configured: boolean
 }
 
 // Agents
@@ -186,6 +199,17 @@ export interface Project {
   patterns: string[]
   dependencies: string[]
   notes: string
+  filesystem_access?: boolean
+  auto_add_filesystem?: boolean
+}
+
+export interface ProjectAnalysis {
+  tech_stack: string[]
+  conventions: string[]
+  patterns: string[]
+  dependencies: string[]
+  description: string
+  notes: string
 }
 
 export async function fetchProjects(): Promise<Project[]> {
@@ -200,11 +224,27 @@ export async function fetchProject(name: string): Promise<Project> {
   return res.json()
 }
 
+export async function analyzeProject(path: string): Promise<ProjectAnalysis> {
+  const res = await fetch(`${API_BASE}/projects/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Failed to analyze project' }))
+    throw new Error(error.detail || 'Failed to analyze project')
+  }
+  return res.json()
+}
+
 export async function createProject(project: Project): Promise<Project> {
   const res = await fetch(`${API_BASE}/projects`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(project),
+    body: JSON.stringify({
+      ...project,
+      auto_add_filesystem: project.auto_add_filesystem ?? true,
+    }),
   })
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: 'Failed to create project' }))
@@ -217,7 +257,10 @@ export async function updateProject(name: string, project: Project): Promise<Pro
   const res = await fetch(`${API_BASE}/projects/${encodeURIComponent(name)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(project),
+    body: JSON.stringify({
+      ...project,
+      auto_add_filesystem: project.auto_add_filesystem ?? true,
+    }),
   })
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: 'Failed to update project' }))
@@ -240,6 +283,55 @@ export async function updateConfig(data: Partial<Config>): Promise<Config> {
     body: JSON.stringify(data),
   })
   if (!res.ok) throw new Error('Failed to update config')
+  return res.json()
+}
+
+// Directory browsing
+export interface DirectoryEntry {
+  name: string
+  path: string
+  is_dir: boolean
+  is_project: boolean
+}
+
+export interface BrowseResponse {
+  current_path: string
+  parent_path: string | null
+  entries: DirectoryEntry[]
+}
+
+export async function browseDirectory(path: string = '~'): Promise<BrowseResponse> {
+  const res = await fetch(`${API_BASE}/config/browse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Failed to browse directory' }))
+    throw new Error(error.detail || 'Failed to browse directory')
+  }
+  return res.json()
+}
+
+export async function addAllowedDirectory(path: string): Promise<{ added: string; all_allowed: string[] }> {
+  const res = await fetch(`${API_BASE}/config/allowed-dirs/add?path=${encodeURIComponent(path)}`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Failed to add directory' }))
+    throw new Error(error.detail || error.error || 'Failed to add directory')
+  }
+  return res.json()
+}
+
+export async function removeAllowedDirectory(path: string): Promise<{ removed?: string; error?: string; all_allowed: string[] }> {
+  const res = await fetch(`${API_BASE}/config/allowed-dirs/remove?path=${encodeURIComponent(path)}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Failed to remove directory' }))
+    throw new Error(error.detail || 'Failed to remove directory')
+  }
   return res.json()
 }
 
@@ -298,6 +390,10 @@ export interface StartProjectRequest {
   max_runtime_hours?: number
   max_total_iterations?: number
   parallel_tasks?: number
+  // Git repository options
+  git_mode?: 'new' | 'existing' | 'none'  // Create new repo, use existing, or no git
+  git_remote_url?: string  // Remote URL for push (e.g., git@github.com:user/repo.git)
+  git_init_repo?: boolean  // Initialize git repo if not exists
 }
 
 export interface AutonomousEvent {
@@ -407,5 +503,98 @@ export async function fetchAutonomousStats(): Promise<{
 }> {
   const res = await fetch(`${API_BASE}/autonomous/stats`)
   if (!res.ok) throw new Error('Failed to fetch autonomous stats')
+  return res.json()
+}
+
+// Skills
+export interface Skill {
+  id: string
+  name: string
+  description: string
+  version: string
+  triggers: string[]
+  tags: string[]
+  workflow_steps: number
+}
+
+export interface SkillDetail extends Skill {
+  system_context: string
+  quality_checklist: string[]
+  test_requirements: string[]
+  workflow: Array<{
+    name: string
+    action: string
+    description: string
+  }>
+}
+
+export async function fetchSkills(): Promise<Skill[]> {
+  const res = await fetch(`${API_BASE}/skills`)
+  if (!res.ok) throw new Error('Failed to fetch skills')
+  return res.json()
+}
+
+export async function fetchSkill(id: string): Promise<SkillDetail> {
+  const res = await fetch(`${API_BASE}/skills/${encodeURIComponent(id)}`)
+  if (!res.ok) throw new Error('Failed to fetch skill')
+  return res.json()
+}
+
+// GitLab Integration
+export interface GitLabNamespace {
+  id: number
+  name: string
+  path: string
+  web_url: string
+}
+
+export interface GitLabProject {
+  id: number
+  name: string
+  path: string
+  path_with_namespace: string
+  ssh_url_to_repo: string
+  http_url_to_repo: string
+  web_url: string
+}
+
+export async function testGitLabConnection(): Promise<{
+  status: string
+  user: string
+  name: string
+  gitlab_url: string
+}> {
+  const res = await fetch(`${API_BASE}/config/gitlab/test`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Connection failed' }))
+    throw new Error(error.detail || 'Failed to connect to GitLab')
+  }
+  return res.json()
+}
+
+export async function fetchGitLabNamespaces(): Promise<GitLabNamespace[]> {
+  const res = await fetch(`${API_BASE}/config/gitlab/namespaces`)
+  if (!res.ok) throw new Error('Failed to fetch namespaces')
+  return res.json()
+}
+
+export async function createGitLabProject(data: {
+  name: string
+  description?: string
+  namespace?: string
+  visibility?: 'private' | 'internal' | 'public'
+  initialize_with_readme?: boolean
+}): Promise<GitLabProject> {
+  const res = await fetch(`${API_BASE}/config/gitlab/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Failed to create project' }))
+    throw new Error(error.detail || 'Failed to create GitLab project')
+  }
   return res.json()
 }

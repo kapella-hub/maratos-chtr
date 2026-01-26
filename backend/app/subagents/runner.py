@@ -48,21 +48,29 @@ class SubagentRunner:
             memory_context = None
             try:
                 from app.memory.manager import memory_manager
+                from app.memory import MemoryStorageError
                 task.log("Retrieving relevant memories...")
                 memory_context = await memory_manager.get_context(
                     query=task_description,
                     max_tokens=1000,
                 )
+            except MemoryStorageError as e:
+                task.log(f"Memory storage error: {e}")
+                logger.error(f"Subagent memory storage error: {e}", exc_info=True)
+            except ImportError:
+                task.log("Memory module not available")
             except Exception as e:
-                task.log(f"Memory retrieval skipped: {e}")
+                task.log(f"Memory retrieval failed: {e}")
+                logger.warning(f"Subagent memory retrieval error: {e}")
             
             # Build messages
             messages = [
                 Message(role="user", content=task_description)
             ]
             
-            # Build context
+            # Build context - include task for skill auto-detection
             full_context = context or {}
+            full_context["task"] = task_description  # For skill auto-selection
             if memory_context:
                 full_context["memory"] = memory_context
             
@@ -92,6 +100,7 @@ class SubagentRunner:
             # Store learnings in memory (optional)
             try:
                 from app.memory.manager import memory_manager
+                from app.memory import MemoryStorageError
                 task.log("Storing learnings...")
                 await memory_manager.remember(
                     content=f"Task: {task_description}\nResult: {response_text[:500]}",
@@ -99,8 +108,14 @@ class SubagentRunner:
                     tags=["subagent", agent_id],
                     importance=0.5,
                 )
+            except MemoryStorageError as e:
+                task.log(f"Memory storage error: {e}")
+                logger.error(f"Subagent memory storage error: {e}", exc_info=True)
+            except ImportError:
+                pass  # Memory module not available
             except Exception as e:
-                task.log(f"Memory storage skipped: {e}")
+                task.log(f"Memory storage failed: {e}")
+                logger.warning(f"Subagent memory storage error: {e}")
             
             return {
                 "response": response_text,

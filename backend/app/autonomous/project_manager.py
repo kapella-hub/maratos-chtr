@@ -21,7 +21,7 @@ class ProjectManager:
 
     def __init__(self) -> None:
         self._projects: dict[str, ProjectPlan] = {}
-        self._running_orchestrators: dict[str, asyncio.Task] = {}
+        self._running_orchestrators: dict[str, Any] = {}  # Orchestrator objects
         self._lock = asyncio.Lock()
 
     async def create_project(
@@ -115,13 +115,20 @@ class ProjectManager:
     async def cancel_project(self, project_id: str) -> bool:
         """Cancel a project."""
         project = self.get(project_id)
-        if not project:
-            return False
+        orchestrator_cancelled = False
 
-        # Cancel the orchestrator if running
+        # Cancel the orchestrator if running (even if project not in memory)
         if project_id in self._running_orchestrators:
-            self._running_orchestrators[project_id].cancel()
+            orchestrator = self._running_orchestrators[project_id]
+            if hasattr(orchestrator, 'cancel'):
+                orchestrator.cancel()
             del self._running_orchestrators[project_id]
+            orchestrator_cancelled = True
+            logger.info(f"Cancelled orchestrator for project: {project_id}")
+
+        if not project:
+            # Project not in memory - return True if we at least cancelled the orchestrator
+            return orchestrator_cancelled
 
         project.status = ProjectStatus.CANCELLED
         project.completed_at = datetime.now()
@@ -129,9 +136,15 @@ class ProjectManager:
         logger.info(f"Cancelled project: {project_id}")
         return True
 
-    def register_orchestrator(self, project_id: str, task: asyncio.Task) -> None:
-        """Register a running orchestrator task."""
-        self._running_orchestrators[project_id] = task
+    def register_orchestrator(self, project_id: str, orchestrator: Any) -> None:
+        """Register a running orchestrator.
+
+        Args:
+            project_id: The project ID
+            orchestrator: The Orchestrator object (has .cancel() method)
+        """
+        self._running_orchestrators[project_id] = orchestrator
+        logger.info(f"Registered orchestrator for project: {project_id}")
 
     def unregister_orchestrator(self, project_id: str) -> None:
         """Unregister an orchestrator task."""

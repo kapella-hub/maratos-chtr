@@ -4,13 +4,14 @@ import asyncio
 import os
 from typing import Any
 
+from app.config import settings
 from app.tools.base import Tool, ToolParameter, ToolResult, registry
 
 
 class ShellTool(Tool):
     """Tool for executing shell commands."""
 
-    def __init__(self, timeout: int = 60) -> None:
+    def __init__(self, timeout: int | None = None) -> None:
         super().__init__(
             id="shell",
             name="Shell",
@@ -32,11 +33,11 @@ class ShellTool(Tool):
                     type="number",
                     description="Timeout in seconds",
                     required=False,
-                    default=60,
+                    default=settings.tool_timeout,
                 ),
             ],
         )
-        self.default_timeout = timeout
+        self.default_timeout = timeout or settings.tool_timeout
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         """Execute shell command."""

@@ -1,6 +1,8 @@
 """Base agent interface."""
 
+import asyncio
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
@@ -9,6 +11,8 @@ import litellm
 
 from app.config import settings
 from app.tools import ToolResult, registry as tool_registry
+
+logger = logging.getLogger(__name__)
 
 
 # Regex to detect numbered line format: "1: code", "• 1: code", "1, 1: code" (diff), "  220: code" (indented)
@@ -134,10 +138,18 @@ class Agent:
         return self.config.name
 
     def get_system_prompt(self, context: dict[str, Any] | None = None) -> str:
-        """Get system prompt, optionally with context."""
+        """Get system prompt, optionally with context.
+
+        Automatically detects and injects matching skills based on task/query.
+        """
         prompt = self.config.system_prompt
 
         if context:
+            # AUTO-SELECT SKILLS: Check for matching skills based on task/query
+            skill_context = self._get_skill_context(context)
+            if skill_context:
+                prompt += f"\n\n{skill_context}"
+
             # Inject project context (conventions, patterns, tech stack)
             if "project" in context and context["project"]:
                 prompt += f"\n\n{context['project']}\n"
@@ -155,6 +167,63 @@ class Agent:
                 prompt += f"\n\n## Files to Work With\n{context['files']}\n"
 
         return prompt
+
+    def _get_skill_context(self, context: dict[str, Any]) -> str:
+        """Find matching skills and generate context to inject.
+
+        Searches for skills based on:
+        1. Explicit skill_id in context
+        2. Task description triggers
+        3. Query/message triggers
+        """
+        try:
+            from app.skills.base import skill_registry
+        except ImportError:
+            return ""
+
+        matched_skills = []
+
+        # Check for explicit skill
+        if "skill_id" in context:
+            skill = skill_registry.get(context["skill_id"])
+            if skill:
+                matched_skills.append(skill)
+
+        # Check task description for triggers
+        if "task" in context and context["task"]:
+            matches = skill_registry.find_by_trigger(context["task"])
+            for skill in matches:
+                if skill not in matched_skills:
+                    matched_skills.append(skill)
+
+        # Check query/message for triggers
+        if "query" in context and context["query"]:
+            matches = skill_registry.find_by_trigger(context["query"])
+            for skill in matches:
+                if skill not in matched_skills:
+                    matched_skills.append(skill)
+
+        # Check user message for triggers
+        if "user_message" in context and context["user_message"]:
+            matches = skill_registry.find_by_trigger(context["user_message"])
+            for skill in matches:
+                if skill not in matched_skills:
+                    matched_skills.append(skill)
+
+        if not matched_skills:
+            return ""
+
+        # Generate skill context
+        parts = ["## 🎯 Applicable Skills Detected"]
+        parts.append("The following skills have been auto-selected based on your task. Follow their guidelines:\n")
+
+        for skill in matched_skills:
+            logger.info(f"Auto-selected skill: {skill.id} for agent {self.id}")
+            parts.append(f"### {skill.name}")
+            parts.append(skill.to_kiro_context())
+            parts.append("")  # blank line between skills
+
+        return "\n".join(parts)
 
     async def chat(
         self,
@@ -189,15 +258,21 @@ class Agent:
         temperature = temperature_override if temperature_override is not None else self.config.temperature
         max_tokens = max_tokens_override or settings.max_response_tokens
 
-        # Make API call with streaming
-        response = await litellm.acompletion(
-            model=model,
-            messages=api_messages,
-            tools=self._tool_schemas if self._tool_schemas else None,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=True,
-        )
+        # Make API call with streaming and timeout
+        try:
+            async with asyncio.timeout(settings.llm_timeout):
+                response = await litellm.acompletion(
+                    model=model,
+                    messages=api_messages,
+                    tools=self._tool_schemas if self._tool_schemas else None,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                )
+        except asyncio.TimeoutError:
+            logger.error(f"LLM call timed out after {settings.llm_timeout}s for agent {self.id}")
+            yield f"\n\n⚠️ **Request timed out** after {settings.llm_timeout} seconds. The model took too long to respond. Please try again or simplify your request.\n"
+            return
 
         # Collect for tool calls
         full_content = ""

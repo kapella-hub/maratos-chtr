@@ -45,6 +45,104 @@ User Prompt
 3. Click **Start Autonomous Development**
 4. Watch as the AI team plans, implements, tests, and delivers
 
+## Auto Model Selection
+
+The autonomous system automatically selects the most appropriate model for each task based on complexity and requirements. This optimizes both quality and cost.
+
+### Dynamic Model Discovery
+
+Models are discovered dynamically from **kiro-cli** to ensure future compatibility when new models are added:
+
+```python
+# Models are discovered by querying kiro-cli
+available_models = discover_available_models()
+# Returns: ["Auto", "claude-opus-4.5", "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5"]
+```
+
+To refresh models after updating kiro-cli:
+```bash
+# API endpoint
+POST /api/autonomous/models/refresh
+```
+
+### Model Tiers
+
+| Tier | Model | Use Cases | Credits |
+|------|-------|-----------|---------|
+| **Tier 1 - Advanced** | `claude-opus-4.5` | Architecture, complex reasoning, security-critical code | 2.2x |
+| **Tier 2 - Balanced** | `claude-sonnet-4.5` | General coding, testing, code review | 1.3x |
+| **Tier 3 - Fast** | `claude-haiku-4.5` | Documentation, simple fixes, formatting | 0.4x |
+
+### Agent Default Tiers
+
+| Agent | Default Tier | Rationale |
+|-------|--------------|-----------|
+| `architect` | Tier 1 (Advanced) | Architecture requires deep reasoning |
+| `coder` | Tier 2 (Balanced) | General coding is balanced |
+| `reviewer` | Tier 2 (Balanced) | Review needs good understanding |
+| `tester` | Tier 2 (Balanced) | Testing needs precision |
+| `docs` | Tier 3 (Fast) | Documentation is simpler |
+| `devops` | Tier 2 (Balanced) | DevOps needs reliability |
+
+### Dynamic Tier Adjustment
+
+The system analyzes task descriptions to adjust tiers dynamically:
+
+**Upgrade to Tier 1 (Advanced)** when task contains:
+- Architecture, design, security keywords
+- Database schema, API design
+- Complex refactoring, optimization
+- Concurrency, distributed systems
+
+**Downgrade to Tier 3 (Fast)** when task contains:
+- Documentation, README, comments
+- Formatting, linting, style fixes
+- Simple renames, trivial changes
+
+**Stay at Tier 2 (Balanced)** for:
+- Standard implementations
+- Feature additions
+- Bug fixes
+- Test writing
+
+### Quality Gate Impact
+
+Tasks with critical quality gates are never downgraded below Tier 2:
+- `tests_pass` - Tests must pass
+- `review_approved` - Code review required
+- `type_check` - Type checking required
+
+### API Endpoints for Model Info
+
+```bash
+# Get available models and tier assignments
+GET /api/autonomous/models
+
+# Refresh models from kiro-cli
+POST /api/autonomous/models/refresh
+
+# Get cost estimate for a project
+GET /api/autonomous/models/cost-estimate?task_count=10&avg_tokens_per_task=2000
+```
+
+### Cost Optimization
+
+Auto model selection can reduce costs by 60-70% compared to using the top-tier model for all tasks:
+
+```
+Kiro-CLI Credit Multipliers:
+- claude-opus-4.5: 2.2x credits (most capable)
+- claude-sonnet-4.5: 1.3x credits (balanced)
+- claude-haiku-4.5: 0.4x credits (fast/cheap)
+
+Typical Task Distribution:
+- 15% use Tier 1 (Advanced) - architecture, security
+- 60% use Tier 2 (Balanced) - coding, review, testing
+- 25% use Tier 3 (Fast) - documentation, simple fixes
+
+Cost Savings: ~65% vs using opus for everything
+```
+
 ## Architecture
 
 ### Backend Components
@@ -362,6 +460,48 @@ class GitOperations:
     async def get_last_commit_sha() -> str | None
     async def get_changed_files(since_commit) -> list[str]
     async def log(count, oneline) -> list[dict]
+```
+
+---
+
+#### Model Selector (`backend/app/autonomous/model_selector.py`)
+
+Automatic model selection based on task complexity.
+
+```python
+class ModelTier(str, Enum):
+    TIER_1_ADVANCED = "tier_1"    # Most capable - complex reasoning
+    TIER_2_BALANCED = "tier_2"    # Balanced - general coding
+    TIER_3_FAST = "tier_3"        # Fast/cheap - documentation
+
+@dataclass
+class ModelConfig:
+    model_id: str           # e.g., "claude-opus-4"
+    description: str
+    max_tokens: int = 8192
+    temperature: float = 0.7
+
+class ModelSelector:
+    def get_model_for_agent(
+        agent_type: str,
+        task_description: str | None = None,
+        quality_gates: list[str] | None = None,
+        force_tier: ModelTier | None = None,
+    ) -> ModelConfig
+
+    def get_tier_for_phase(phase: str) -> ModelTier
+
+    def estimate_cost_savings(
+        task_count: int,
+        avg_tokens_per_task: int = 2000,
+    ) -> dict
+
+# Convenience functions
+def get_model_for_task(agent_type, task_description, quality_gates) -> str
+def get_model_config_for_task(...) -> ModelConfig
+
+# Global instance
+model_selector = ModelSelector()
 ```
 
 ---

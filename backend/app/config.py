@@ -48,6 +48,15 @@ class Settings(BaseSettings):
     # Limits
     max_context_tokens: int = 100000
     max_response_tokens: int = 8192
+
+    # Timeouts (seconds)
+    llm_timeout: int = 120  # 2 minutes for LLM calls
+    tool_timeout: int = 60  # 1 minute for tool execution
+    http_timeout: int = 30  # 30 seconds for HTTP requests
+
+    # Message history settings
+    max_history_messages: int = 50  # Max messages to load from history
+    summarize_after_messages: int = 30  # Summarize older messages after this threshold
     
     # === Channel Settings ===
     
@@ -66,6 +75,20 @@ class Settings(BaseSettings):
     webex_webhook_secret: str | None = None
     webex_allowed_users: str = ""  # Comma-separated user IDs
     webex_allowed_rooms: str = ""  # Comma-separated room IDs
+
+    # === Git Settings ===
+    git_auto_commit: bool = True  # Auto-commit changes after tasks
+    git_push_to_remote: bool = False  # Push to remote after commits
+    git_create_pr: bool = False  # Create PR when project completes
+    git_default_branch: str = "main"  # Default base branch for PRs
+    git_commit_prefix: str = ""  # Optional prefix for commit messages (e.g., "[AUTO]")
+    git_remote_name: str = "origin"  # Git remote name
+
+    # === GitLab Integration ===
+    gitlab_url: str = ""  # GitLab instance URL (e.g., https://gitlab.example.com)
+    gitlab_token: str = ""  # Personal access token with api scope
+    gitlab_namespace: str = ""  # Default namespace/group for new projects (e.g., group/subgroup)
+    gitlab_skip_ssl: bool = False  # Skip SSL verification (for internal servers with self-signed certs)
 
 
 settings = Settings()
@@ -130,6 +153,11 @@ def save_settings() -> None:
         "imessage_enabled", "imessage_allowed_senders",
         "webex_enabled", "webex_token", "webex_webhook_secret",
         "webex_allowed_users", "webex_allowed_rooms",
+        # Git settings
+        "git_auto_commit", "git_push_to_remote", "git_create_pr",
+        "git_default_branch", "git_commit_prefix", "git_remote_name",
+        # GitLab integration
+        "gitlab_url", "gitlab_token", "gitlab_namespace", "gitlab_skip_ssl",
     ]
 
     data = {}

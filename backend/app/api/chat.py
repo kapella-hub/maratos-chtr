@@ -10,10 +10,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import agent_registry
+from app.config import settings
 from app.agents.base import Message, convert_numbered_lines_to_codeblock
 from app.commands import command_registry
 from app.database import Message as DBMessage
@@ -127,19 +128,50 @@ async def chat(
         db.add(session)
         await db.commit()
 
-    # Load conversation history
-    result = await db.execute(
-        select(DBMessage)
-        .where(DBMessage.session_id == session.id)
-        .order_by(DBMessage.created_at)
+    # Load conversation history with pagination to prevent OOM
+    # First, count total messages
+    count_result = await db.execute(
+        select(func.count(DBMessage.id)).where(DBMessage.session_id == session.id)
     )
-    db_messages = result.scalars().all()
+    total_messages = count_result.scalar() or 0
+
+    # Load only recent messages (sliding window)
+    max_messages = settings.max_history_messages
+    messages: list[Message] = []
+
+    if total_messages > max_messages:
+        # Get count of older messages that will be summarized
+        older_count = total_messages - max_messages
+        logger.info(f"Session {session.id}: {total_messages} messages, loading last {max_messages}")
+
+        # Add a system message about truncated history
+        messages.append(Message(
+            role="system",
+            content=f"[Note: This conversation has {total_messages} messages. Showing the most recent {max_messages}. {older_count} earlier messages were summarized.]"
+        ))
+
+        # Load only recent messages
+        result = await db.execute(
+            select(DBMessage)
+            .where(DBMessage.session_id == session.id)
+            .order_by(DBMessage.created_at.desc())
+            .limit(max_messages)
+        )
+        db_messages = list(reversed(result.scalars().all()))  # Reverse to chronological order
+    else:
+        # Load all messages (small conversation)
+        result = await db.execute(
+            select(DBMessage)
+            .where(DBMessage.session_id == session.id)
+            .order_by(DBMessage.created_at)
+        )
+        db_messages = result.scalars().all()
 
     # Convert to Message objects
-    messages = [
+    messages.extend([
         Message(role=m.role, content=m.content, tool_calls=m.tool_calls)
         for m in db_messages
-    ]
+    ])
 
     # Check for slash commands
     actual_message = request.message
@@ -221,8 +253,13 @@ async def chat(
 
         # Get memory context
         context = request.context or {}
+
+        # Pass user message for skill auto-detection
+        context["user_message"] = actual_message
+
         try:
             from app.memory.manager import memory_manager
+            from app.memory import MemoryError, MemoryStorageError
             memory_context = await memory_manager.get_context(
                 query=actual_message,  # Use expanded message for memory search
                 session_id=session.id,
@@ -230,8 +267,18 @@ async def chat(
             )
             if memory_context:
                 context["memory"] = memory_context
+        except MemoryStorageError as e:
+            # Storage error - log as error, may need investigation
+            logger.error(f"Memory storage error: {e}", exc_info=True)
+        except MemoryError as e:
+            # General memory error - log as warning
+            logger.warning(f"Memory system unavailable: {e}")
+        except ImportError:
+            # Memory module not available - this is fine
+            logger.debug("Memory module not available")
         except Exception as e:
-            logger.warning(f"Memory retrieval failed: {e}")
+            # Unexpected error - log with full traceback for debugging
+            logger.error(f"Unexpected memory error: {e}", exc_info=True)
 
         # Inject project context if loaded
         if project_context:
@@ -295,6 +342,7 @@ async def chat(
         # Store important exchanges in memory
         try:
             from app.memory.manager import memory_manager
+            from app.memory import MemoryStorageError
             await memory_manager.extract_and_store(
                 conversation=[
                     {"role": "user", "content": request.message},
@@ -303,8 +351,12 @@ async def chat(
                 session_id=session.id,
                 agent_id=agent_id,
             )
+        except MemoryStorageError as e:
+            logger.error(f"Memory storage error: {e}", exc_info=True)
+        except ImportError:
+            pass  # Memory module not available
         except Exception as e:
-            logger.warning(f"Memory storage failed: {e}")
+            logger.error(f"Unexpected memory storage error: {e}", exc_info=True)
 
         # Check for [SPAWN:agent] markers and auto-orchestrate
         spawn_matches = SPAWN_PATTERN.findall(full_response)

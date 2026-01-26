@@ -136,8 +136,19 @@ class KiroAgent(Agent):
         self,
         messages: list,
         context: dict[str, Any] | None = None,
+        model_override: str | None = None,
+        temperature_override: float | None = None,
+        max_tokens_override: int | None = None,
     ) -> AsyncIterator[str]:
-        """Chat using kiro-cli."""
+        """Chat using kiro-cli.
+
+        Args:
+            messages: List of conversation messages
+            context: Optional context dict (workspace, memory, files, etc.)
+            model_override: Optional model to use instead of default
+            temperature_override: Ignored (kiro-cli doesn't support this)
+            max_tokens_override: Ignored (kiro-cli doesn't support this)
+        """
         if not self.available:
             yield "❌ kiro-cli not found. Install it with:\n"
             yield "```\ncurl -fsSL https://cli.kiro.dev/install | bash\n```\n"
@@ -146,7 +157,7 @@ class KiroAgent(Agent):
 
         # Build the prompt from messages
         prompt_parts = []
-        
+
         # Add system prompt
         system_prompt = self.get_system_prompt(context)
         if system_prompt:
@@ -160,9 +171,9 @@ class KiroAgent(Agent):
 
         full_prompt = "\n\n".join(prompt_parts)
 
-        # Get model from settings (dynamic) or fall back to config
+        # Use model_override if provided, otherwise fall back to settings or config
         from app.config import settings
-        model = settings.default_model or self.config.model or "claude-sonnet-4.5"
+        model = model_override or settings.default_model or self.config.model or "claude-sonnet-4.5"
         
         # Build kiro-cli command
         cmd = [

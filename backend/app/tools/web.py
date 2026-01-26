@@ -4,6 +4,7 @@ from typing import Any
 
 import httpx
 
+from app.config import settings
 from app.tools.base import Tool, ToolParameter, ToolResult, registry
 
 
@@ -48,7 +49,7 @@ class WebSearchTool(Tool):
             )
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=settings.http_timeout) as client:
                 response = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
                     params={"q": query, "count": count},
@@ -56,7 +57,6 @@ class WebSearchTool(Tool):
                         "X-Subscription-Token": self.api_key,
                         "Accept": "application/json",
                     },
-                    timeout=30,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -77,6 +77,12 @@ class WebSearchTool(Tool):
                 data={"result_count": len(results)},
             )
 
+        except httpx.TimeoutException:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Request timed out after {settings.http_timeout}s"
+            )
         except httpx.HTTPStatusError as e:
             return ToolResult(success=False, output="", error=f"HTTP error: {e}")
         except Exception as e:
@@ -116,11 +122,13 @@ class WebFetchTool(Tool):
             return ToolResult(success=False, output="", error="No URL provided")
 
         try:
-            async with httpx.AsyncClient(follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                follow_redirects=True,
+                timeout=settings.http_timeout
+            ) as client:
                 response = await client.get(
                     url,
-                    headers={"User-Agent": "ClawdStudio/0.1"},
-                    timeout=30,
+                    headers={"User-Agent": "MaratOS/0.1"},
                 )
                 response.raise_for_status()
 
@@ -134,6 +142,12 @@ class WebFetchTool(Tool):
                 data={"url": str(response.url), "status": response.status_code},
             )
 
+        except httpx.TimeoutException:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Request timed out after {settings.http_timeout}s"
+            )
         except httpx.HTTPStatusError as e:
             return ToolResult(success=False, output="", error=f"HTTP error: {e}")
         except Exception as e:

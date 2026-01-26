@@ -2,11 +2,30 @@
 
 import json
 import hashlib
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 import numpy as np
+
+logger = logging.getLogger(__name__)
+
+
+# Custom exceptions for memory system
+class MemoryError(Exception):
+    """Base exception for memory system errors."""
+    pass
+
+
+class MemoryStorageError(MemoryError):
+    """Error reading/writing memory storage."""
+    pass
+
+
+class MemoryNotFoundError(MemoryError):
+    """Requested memory not found."""
+    pass
 
 # Optional: use sentence-transformers for embeddings
 try:

@@ -1,12 +1,16 @@
 """Configuration API endpoints."""
 
+import httpx
+import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.config import get_allowed_write_dirs, get_config_dict, settings, update_config
+
+logger = logging.getLogger(__name__)
 from app.tools import registry as tool_registry
 from app.tools.filesystem import FilesystemTool
 
@@ -38,6 +42,20 @@ class ConfigUpdate(BaseModel):
     telegram_token: str | None = None
     telegram_allowed_users: str | None = None
 
+    # Git settings
+    git_auto_commit: bool | None = None
+    git_push_to_remote: bool | None = None
+    git_create_pr: bool | None = None
+    git_default_branch: str | None = None
+    git_commit_prefix: str | None = None
+    git_remote_name: str | None = None
+
+    # GitLab integration
+    gitlab_url: str | None = None
+    gitlab_token: str | None = None
+    gitlab_namespace: str | None = None
+    gitlab_skip_ssl: bool | None = None
+
 
 @router.get("")
 async def get_config() -> dict[str, Any]:
@@ -64,6 +82,21 @@ async def get_config() -> dict[str, Any]:
     config["telegram_enabled"] = settings.telegram_enabled
     config["telegram_token"] = settings.telegram_token or ""
     config["telegram_allowed_users"] = settings.telegram_allowed_users
+
+    # Git settings
+    config["git_auto_commit"] = settings.git_auto_commit
+    config["git_push_to_remote"] = settings.git_push_to_remote
+    config["git_create_pr"] = settings.git_create_pr
+    config["git_default_branch"] = settings.git_default_branch
+    config["git_commit_prefix"] = settings.git_commit_prefix
+    config["git_remote_name"] = settings.git_remote_name
+
+    # GitLab integration
+    config["gitlab_url"] = settings.gitlab_url
+    config["gitlab_token"] = "***" if settings.gitlab_token else ""  # Don't expose full token
+    config["gitlab_namespace"] = settings.gitlab_namespace
+    config["gitlab_skip_ssl"] = settings.gitlab_skip_ssl
+    config["gitlab_configured"] = bool(settings.gitlab_url and settings.gitlab_token)
 
     return config
 
@@ -258,3 +291,231 @@ async def remove_allowed_dir(path: str) -> dict[str, Any]:
         "error": f"Directory not in allowed list: {path}",
         "all_allowed": [str(d) for d in get_allowed_write_dirs()],
     }
+
+
+# === Directory Browser ===
+
+
+class BrowseRequest(BaseModel):
+    """Request to browse a directory."""
+    path: str = "~"
+
+
+class DirectoryEntry(BaseModel):
+    """A directory entry."""
+    name: str
+    path: str
+    is_dir: bool
+    is_project: bool = False  # Has package.json, pyproject.toml, etc.
+
+
+class BrowseResponse(BaseModel):
+    """Response from directory browse."""
+    current_path: str
+    parent_path: str | None
+    entries: list[DirectoryEntry]
+
+
+@router.post("/browse")
+async def browse_directory(request: BrowseRequest) -> BrowseResponse:
+    """Browse a directory to help users select project folders.
+
+    Returns directories only (not files) for folder selection.
+    """
+    path = Path(request.path).expanduser().resolve()
+
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Path not found: {request.path}")
+    if not path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Not a directory: {request.path}")
+
+    # Get parent path (if not root)
+    parent = path.parent if path != path.parent else None
+
+    # Project indicators
+    project_markers = {
+        "package.json", "pyproject.toml", "Cargo.toml", "go.mod",
+        "pom.xml", "build.gradle", "Gemfile", "composer.json",
+        "mix.exs", ".git"
+    }
+
+    entries = []
+    try:
+        for item in sorted(path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+            # Skip hidden files/dirs except .git
+            if item.name.startswith('.') and item.name != '.git':
+                continue
+
+            # Only include directories
+            if item.is_dir():
+                # Check if this is a project directory
+                is_project = any((item / marker).exists() for marker in project_markers)
+
+                entries.append(DirectoryEntry(
+                    name=item.name,
+                    path=str(item),
+                    is_dir=True,
+                    is_project=is_project,
+                ))
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {request.path}")
+
+    return BrowseResponse(
+        current_path=str(path),
+        parent_path=str(parent) if parent else None,
+        entries=entries,
+    )
+
+
+# === GitLab Integration ===
+
+
+class GitLabCreateProjectRequest(BaseModel):
+    """Request to create a new GitLab project."""
+    name: str  # Project name (slug)
+    description: str = ""
+    namespace: str | None = None  # Override default namespace
+    visibility: str = "private"  # private, internal, or public
+    initialize_with_readme: bool = True
+
+
+class GitLabProjectResponse(BaseModel):
+    """Response from GitLab project creation."""
+    id: int
+    name: str
+    path: str
+    path_with_namespace: str
+    ssh_url_to_repo: str
+    http_url_to_repo: str
+    web_url: str
+
+
+@router.post("/gitlab/test")
+async def test_gitlab_connection() -> dict[str, Any]:
+    """Test GitLab connection with current settings."""
+    if not settings.gitlab_url or not settings.gitlab_token:
+        raise HTTPException(status_code=400, detail="GitLab not configured. Set URL and token in settings.")
+
+    try:
+        async with httpx.AsyncClient(verify=not settings.gitlab_skip_ssl) as client:
+            response = await client.get(
+                f"{settings.gitlab_url.rstrip('/')}/api/v4/user",
+                headers={"PRIVATE-TOKEN": settings.gitlab_token},
+                timeout=10.0,
+            )
+
+            if response.status_code == 200:
+                user = response.json()
+                return {
+                    "status": "connected",
+                    "user": user.get("username"),
+                    "name": user.get("name"),
+                    "gitlab_url": settings.gitlab_url,
+                }
+            elif response.status_code == 401:
+                raise HTTPException(status_code=401, detail="Invalid GitLab token")
+            else:
+                raise HTTPException(status_code=response.status_code, detail=f"GitLab API error: {response.text}")
+
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Cannot connect to GitLab: {str(e)}")
+
+
+@router.get("/gitlab/namespaces")
+async def list_gitlab_namespaces() -> list[dict[str, Any]]:
+    """List available GitLab namespaces (groups) for the authenticated user."""
+    if not settings.gitlab_url or not settings.gitlab_token:
+        raise HTTPException(status_code=400, detail="GitLab not configured")
+
+    try:
+        async with httpx.AsyncClient(verify=not settings.gitlab_skip_ssl) as client:
+            # Get user's groups
+            response = await client.get(
+                f"{settings.gitlab_url.rstrip('/')}/api/v4/groups",
+                headers={"PRIVATE-TOKEN": settings.gitlab_token},
+                params={"min_access_level": 30},  # Developer access or higher
+                timeout=10.0,
+            )
+
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch namespaces")
+
+            groups = response.json()
+            return [
+                {
+                    "id": g["id"],
+                    "name": g["name"],
+                    "path": g["full_path"],
+                    "web_url": g["web_url"],
+                }
+                for g in groups
+            ]
+
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"GitLab API error: {str(e)}")
+
+
+@router.post("/gitlab/projects")
+async def create_gitlab_project(request: GitLabCreateProjectRequest) -> GitLabProjectResponse:
+    """Create a new GitLab project."""
+    if not settings.gitlab_url or not settings.gitlab_token:
+        raise HTTPException(status_code=400, detail="GitLab not configured. Set URL and token in settings.")
+
+    namespace = request.namespace or settings.gitlab_namespace
+    if not namespace:
+        raise HTTPException(status_code=400, detail="No namespace specified and no default configured")
+
+    try:
+        async with httpx.AsyncClient(verify=not settings.gitlab_skip_ssl) as client:
+            # First, get the namespace ID
+            namespace_response = await client.get(
+                f"{settings.gitlab_url.rstrip('/')}/api/v4/groups/{namespace.replace('/', '%2F')}",
+                headers={"PRIVATE-TOKEN": settings.gitlab_token},
+                timeout=10.0,
+            )
+
+            if namespace_response.status_code != 200:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Namespace '{namespace}' not found or no access"
+                )
+
+            namespace_id = namespace_response.json()["id"]
+
+            # Create the project
+            project_data = {
+                "name": request.name,
+                "path": request.name.lower().replace(" ", "-").replace("_", "-"),
+                "namespace_id": namespace_id,
+                "description": request.description,
+                "visibility": request.visibility,
+                "initialize_with_readme": request.initialize_with_readme,
+            }
+
+            response = await client.post(
+                f"{settings.gitlab_url.rstrip('/')}/api/v4/projects",
+                headers={"PRIVATE-TOKEN": settings.gitlab_token},
+                json=project_data,
+                timeout=30.0,
+            )
+
+            if response.status_code == 201:
+                project = response.json()
+                logger.info(f"Created GitLab project: {project['path_with_namespace']}")
+                return GitLabProjectResponse(
+                    id=project["id"],
+                    name=project["name"],
+                    path=project["path"],
+                    path_with_namespace=project["path_with_namespace"],
+                    ssh_url_to_repo=project["ssh_url_to_repo"],
+                    http_url_to_repo=project["http_url_to_repo"],
+                    web_url=project["web_url"],
+                )
+            elif response.status_code == 400:
+                error = response.json()
+                raise HTTPException(status_code=400, detail=error.get("message", "Failed to create project"))
+            else:
+                raise HTTPException(status_code=response.status_code, detail=f"GitLab error: {response.text}")
+
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"GitLab API error: {str(e)}")

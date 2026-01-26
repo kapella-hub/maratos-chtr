@@ -20,6 +20,11 @@ from app.autonomous.models import (
 )
 from app.autonomous.orchestrator import Orchestrator
 from app.autonomous.project_manager import project_manager
+from app.autonomous.model_selector import (
+    get_available_models_info,
+    refresh_available_models,
+    model_selector,
+)
 from app.config import settings
 from app.database import (
     AutonomousProject as DBProject,
@@ -44,6 +49,10 @@ class StartProjectRequest(BaseModel):
     max_runtime_hours: float = 8.0
     max_total_iterations: int = 50
     parallel_tasks: int = 3
+    # Git repository options
+    git_mode: str = "existing"  # "new", "existing", or "none"
+    git_remote_url: str | None = None  # Remote URL for push
+    git_init_repo: bool = True  # Initialize git repo if not exists
 
 
 class ProjectResponse(BaseModel):
@@ -142,8 +151,16 @@ async def start_project(
         """Generate SSE stream."""
         orchestrator = Orchestrator(project)
 
+        # Register orchestrator so it can be cancelled via API
+        project_manager.register_orchestrator(project.id, orchestrator)
+
         try:
             async for event in orchestrator.start():
+                # Check if cancelled
+                if orchestrator._cancelled:
+                    logger.info(f"Project {project.id} cancelled, stopping stream")
+                    break
+
                 yield event.to_sse()
 
                 # Update database periodically
@@ -340,17 +357,23 @@ async def cancel_project(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     """Cancel a project."""
-    if await project_manager.cancel_project(project_id):
-        # Update DB
-        result = await db.execute(
-            select(DBProject).where(DBProject.id == project_id)
-        )
-        db_project = result.scalar_one_or_none()
-        if db_project:
-            db_project.status = "cancelled"
-            db_project.completed_at = datetime.now()
-            await db.commit()
+    # Try to cancel in memory (orchestrator + project manager)
+    cancelled_in_memory = await project_manager.cancel_project(project_id)
 
+    # Also update DB regardless of in-memory status
+    result = await db.execute(
+        select(DBProject).where(DBProject.id == project_id)
+    )
+    db_project = result.scalar_one_or_none()
+
+    if db_project:
+        db_project.status = "cancelled"
+        db_project.completed_at = datetime.now()
+        await db.commit()
+        logger.info(f"Cancelled project in DB: {project_id}")
+        return {"status": "cancelled", "project_id": project_id}
+
+    if cancelled_in_memory:
         return {"status": "cancelled", "project_id": project_id}
 
     raise HTTPException(status_code=404, detail="Project not found")
@@ -412,6 +435,52 @@ async def get_stats(
         "db_projects": db_projects,
         "db_tasks": db_tasks,
     }
+
+
+@router.get("/models")
+async def get_models() -> dict[str, Any]:
+    """Get available models and tier assignments.
+
+    Returns information about:
+    - Available models from kiro-cli
+    - Current tier assignments (advanced, balanced, fast)
+    - Credit multipliers for cost estimation
+    """
+    return get_available_models_info()
+
+
+@router.post("/models/refresh")
+async def refresh_models() -> dict[str, Any]:
+    """Refresh available models by re-querying kiro-cli.
+
+    Use this after updating kiro-cli to discover new models.
+    """
+    models = refresh_available_models()
+    return {
+        "refreshed": True,
+        "available_models": models,
+        "current_assignments": get_available_models_info()["tier_assignments"],
+    }
+
+
+@router.get("/models/cost-estimate")
+async def estimate_cost(
+    task_count: int = 10,
+    avg_tokens_per_task: int = 2000,
+) -> dict[str, Any]:
+    """Estimate cost savings from tiered model selection.
+
+    Args:
+        task_count: Expected number of tasks
+        avg_tokens_per_task: Average tokens per task
+
+    Returns:
+        Cost comparison between all-top-tier and tiered selection
+    """
+    return model_selector.estimate_cost_savings(
+        task_count=task_count,
+        avg_tokens_per_task=avg_tokens_per_task,
+    )
 
 
 async def _save_project_state(db: AsyncSession, project: ProjectPlan) -> None:

@@ -19,7 +19,9 @@
       "Bash(./restart.sh)",
       "Bash(python3:*)",
       "Bash(pkill:*)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(kiro:*)",
+      "Bash(find:*)"
     ]
   }
 }

@@ -9,6 +9,7 @@ interface EventLogProps {
 const eventColors: Record<string, string> = {
   project_started: 'text-blue-400',
   planning_started: 'text-yellow-400',
+  model_selected: 'text-violet-400',
   task_created: 'text-green-400',
   planning_completed: 'text-green-400',
   task_started: 'text-blue-400',
@@ -34,6 +35,7 @@ const eventColors: Record<string, string> = {
 const eventIcons: Record<string, string> = {
   project_started: '🚀',
   planning_started: '📋',
+  model_selected: '🤖',
   task_created: '📝',
   planning_completed: '✅',
   task_started: '▶️',
@@ -64,12 +66,14 @@ function formatEventMessage(event: AutonomousEvent): string {
       return 'Project started'
     case 'planning_started':
       return 'Planning phase started'
+    case 'model_selected':
+      return `Model: ${data.model} - ${data.reason || data.phase || ''}`
     case 'task_created':
       return `Task created: ${(data.task as Record<string, unknown>)?.title || data.task_id}`
     case 'planning_completed':
       return `Planning completed - ${data.task_count} tasks`
     case 'task_started':
-      return `Task started: ${data.title} (${data.agent_type}, attempt ${data.attempt})`
+      return `Task started: ${data.title} (${data.agent_type}${data.model ? `, ${data.model}` : ''}, attempt ${data.attempt})`
     case 'task_progress':
       return `Task progress: ${Math.round((data.progress as number || 0) * 100)}% - ${data.stage}`
     case 'task_agent_output':
