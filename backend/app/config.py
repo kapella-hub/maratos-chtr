@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     # Message history settings
     max_history_messages: int = 50  # Max messages to load from history
     summarize_after_messages: int = 30  # Summarize older messages after this threshold
+
+    # Rate limiting
+    rate_limit_enabled: bool = True
+    rate_limit_chat: str = "20/minute"  # Chat endpoint limit
+    rate_limit_default: str = "100/minute"  # Default limit for other endpoints
     
     # === Channel Settings ===
     
