@@ -14,7 +14,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import agent_registry
-from app.agents.base import Message
+from app.agents.base import Message, convert_numbered_lines_to_codeblock
+from app.commands import command_registry
 from app.database import Message as DBMessage
 from app.database import Session as DBSession
 from app.database import get_db
@@ -140,8 +141,43 @@ async def chat(
         for m in db_messages
     ]
 
-    # Add user message
-    user_message = Message(role="user", content=request.message)
+    # Check for slash commands
+    actual_message = request.message
+    project_context = None
+    command_response = None
+
+    command, args = command_registry.parse(request.message)
+    if command:
+        logger.info(f"Processing command: /{command.name} {args[:50]}...")
+        context = request.context or {}
+        result = command.handler(args, context)
+
+        if "error" in result:
+            # Command failed - return error as message
+            command_response = f"**Error:** {result['error']}"
+            if "example" in result:
+                command_response += f"\n\n**Example:** `{result['example']}`"
+            if "available" in result:
+                command_response += f"\n\n**Available:** {', '.join(result['available'])}"
+
+        elif "message" in result:
+            # Command has a direct message response (like /help or /project list)
+            command_response = result["message"]
+
+        elif "expanded_prompt" in result:
+            # Command expands to a full prompt
+            actual_message = result["expanded_prompt"]
+            if "agent_id" in result:
+                new_agent = agent_registry.get(result["agent_id"])
+                if new_agent:
+                    agent = new_agent
+                    agent_id = result["agent_id"]
+
+        if "project_context" in result:
+            project_context = result["project_context"]
+
+    # Add user message (original or expanded)
+    user_message = Message(role="user", content=actual_message)
     messages.append(user_message)
 
     # Save user message
@@ -161,15 +197,34 @@ async def chat(
         # Yield session ID and agent info first
         yield f"data: {{\"session_id\": \"{session.id}\", \"agent\": \"{agent_id}\"}}\n\n"
 
+        # If command returned a direct response, yield it and return
+        if command_response:
+            yield 'data: {"thinking": false}\n\n'
+            escaped = command_response.replace("\n", "\\n").replace('"', '\\"')
+            yield f'data: {{"content": "{escaped}"}}\n\n'
+
+            # Save response
+            async with db.begin():
+                db_assistant_msg = DBMessage(
+                    id=str(uuid.uuid4()),
+                    session_id=session.id,
+                    role="assistant",
+                    content=command_response,
+                )
+                db.add(db_assistant_msg)
+
+            yield "data: [DONE]\n\n"
+            return
+
         # Signal thinking started
         yield 'data: {"thinking": true}\n\n'
-        
+
         # Get memory context
         context = request.context or {}
         try:
             from app.memory.manager import memory_manager
             memory_context = await memory_manager.get_context(
-                query=request.message,
+                query=actual_message,  # Use expanded message for memory search
                 session_id=session.id,
                 max_tokens=1000,
             )
@@ -178,41 +233,52 @@ async def chat(
         except Exception as e:
             logger.warning(f"Memory retrieval failed: {e}")
 
+        # Inject project context if loaded
+        if project_context:
+            context["project"] = project_context
+
         first_chunk = True
         in_model_thinking = False
-        async for chunk in agent.chat(messages, context):
-            # Handle thinking block markers
-            if chunk == "__THINKING_START__":
-                in_model_thinking = True
-                yield 'data: {"model_thinking": true}\n\n'
-                continue
-            elif chunk == "__THINKING_END__":
-                in_model_thinking = False
-                yield 'data: {"model_thinking": false}\n\n'
-                continue
-            
-            # Signal initial thinking done on first real content
-            if first_chunk and chunk.strip():
-                yield 'data: {"thinking": false}\n\n'
-                first_chunk = False
-            
-            full_response += chunk
-            escaped = chunk.replace("\n", "\\n").replace('"', '\\"')
-            yield f'data: {{"content": "{escaped}"}}\n\n'
+        try:
+            async for chunk in agent.chat(messages, context):
+                # Handle thinking block markers
+                if chunk == "__THINKING_START__":
+                    in_model_thinking = True
+                    yield 'data: {"model_thinking": true}\n\n'
+                    continue
+                elif chunk == "__THINKING_END__":
+                    in_model_thinking = False
+                    yield 'data: {"model_thinking": false}\n\n'
+                    continue
+
+                # Signal initial thinking done on first real content
+                if first_chunk and chunk.strip():
+                    yield 'data: {"thinking": false}\n\n'
+                    first_chunk = False
+
+                full_response += chunk
+                escaped = chunk.replace("\n", "\\n").replace('"', '\\"')
+                yield f'data: {{"content": "{escaped}"}}\n\n'
+        except Exception as e:
+            logger.error(f"Agent chat error: {e}", exc_info=True)
+            escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
+            yield f'data: {{"error": "{escaped_err}"}}\n\n'
 
         # If no content was streamed, still signal thinking done
         if first_chunk:
+            logger.warning(f"No content received from agent {agent_id}")
             yield 'data: {"thinking": false}\n\n'
         if in_model_thinking:
             yield 'data: {"model_thinking": false}\n\n'
 
-        # Save assistant message
+        # Save assistant message (convert numbered lines to code blocks for cleaner display)
+        processed_response = convert_numbered_lines_to_codeblock(full_response)
         async with db.begin():
             db_assistant_msg = DBMessage(
                 id=str(uuid.uuid4()),
                 session_id=session.id,
                 role="assistant",
-                content=full_response,
+                content=processed_response,
             )
             db.add(db_assistant_msg)
         
@@ -232,7 +298,7 @@ async def chat(
             await memory_manager.extract_and_store(
                 conversation=[
                     {"role": "user", "content": request.message},
-                    {"role": "assistant", "content": full_response},
+                    {"role": "assistant", "content": processed_response},
                 ],
                 session_id=session.id,
                 agent_id=agent_id,
@@ -308,6 +374,8 @@ async def chat(
                         
                         if current.status == TaskStatus.COMPLETED:
                             result_text = current.result.get("response", "") if current.result else ""
+                            # Convert numbered line format to proper code blocks
+                            result_text = convert_numbered_lines_to_codeblock(result_text)
                             logger.info(f"Subagent {agent_id_spawn} response length: {len(result_text)}")
                             
                             yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "completed"}}\n\n'

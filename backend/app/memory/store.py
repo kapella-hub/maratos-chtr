@@ -184,15 +184,20 @@ class MemoryStore:
             scored.sort(key=lambda x: x[1], reverse=True)
             results = [entry for entry, _ in scored[:limit]]
         else:
-            # Fallback to keyword search
-            query_lower = query.lower()
+            # Fallback to word-based search (better than substring)
+            query_words = set(query.lower().split())
             scored = []
             for entry in candidates:
-                if query_lower in entry.content.lower():
-                    scored.append((entry, 1.0))
-                elif any(query_lower in tag.lower() for tag in entry.tags):
-                    scored.append((entry, 0.5))
-            
+                content_words = set(entry.content.lower().split())
+                # Calculate word overlap score
+                overlap = len(query_words & content_words)
+                if overlap > 0:
+                    score = overlap / len(query_words)  # Jaccard-like similarity
+                    scored.append((entry, score))
+                # Also check tags
+                elif any(word in tag.lower() for word in query_words for tag in entry.tags):
+                    scored.append((entry, 0.3))
+
             scored.sort(key=lambda x: x[1], reverse=True)
             results = [entry for entry, _ in scored[:limit]]
         

@@ -10,23 +10,23 @@ from app.tools.base import Tool, ToolParameter, ToolResult, registry
 
 class FilesystemTool(Tool):
     """Tool for filesystem operations with sandboxed writes.
-    
+
     Security model:
     - READ: Allowed anywhere on the filesystem
-    - WRITE: Only allowed in the workspace directory
-    - When modifying external code, it must be copied to workspace first
+    - WRITE: Only allowed in configured allowed directories (workspace + custom dirs)
+    - Configure allowed dirs via MARATOS_ALLOWED_WRITE_DIRS env var
     """
 
     def __init__(self, workspace: Path | None = None) -> None:
         super().__init__(
             id="filesystem",
             name="Filesystem",
-            description="Read files anywhere, write only to workspace. Use 'copy' to bring external code into workspace for modification.",
+            description="Read files anywhere, write only to allowed directories. Configure allowed dirs in settings.",
             parameters=[
                 ToolParameter(
                     name="action",
                     type="string",
-                    description="Action: read (anywhere), list (anywhere), exists (anywhere), write/delete/copy (workspace only)",
+                    description="Action: read (anywhere), list (anywhere), exists (anywhere), write/delete/copy (allowed dirs only)",
                     enum=["read", "write", "list", "delete", "exists", "copy"],
                 ),
                 ToolParameter(
@@ -43,7 +43,7 @@ class FilesystemTool(Tool):
                 ToolParameter(
                     name="dest",
                     type="string",
-                    description="Destination path in workspace (for copy action)",
+                    description="Destination path for copy. Can be in any allowed write directory.",
                     required=False,
                 ),
                 ToolParameter(
@@ -67,8 +67,25 @@ class FilesystemTool(Tool):
         self.workspace = workspace or settings.workspace_dir
         self.workspace.mkdir(parents=True, exist_ok=True)
 
+    def _get_allowed_dirs(self) -> list[Path]:
+        """Get all directories where writes are allowed."""
+        from app.config import get_allowed_write_dirs
+        return get_allowed_write_dirs()
+
+    def _is_write_allowed(self, path: Path) -> bool:
+        """Check if path is within any allowed write directory."""
+        try:
+            resolved = path.resolve()
+            for allowed_dir in self._get_allowed_dirs():
+                allowed_resolved = allowed_dir.resolve()
+                if str(resolved).startswith(str(allowed_resolved) + os.sep) or resolved == allowed_resolved:
+                    return True
+            return False
+        except (OSError, ValueError):
+            return False
+
     def _is_in_workspace(self, path: Path) -> bool:
-        """Check if path is within the workspace directory."""
+        """Check if path is within the workspace directory (for display purposes)."""
         try:
             resolved = path.resolve()
             workspace_resolved = self.workspace.resolve()
@@ -76,21 +93,23 @@ class FilesystemTool(Tool):
         except (OSError, ValueError):
             return False
 
-    def _resolve_path(self, path: str, must_be_workspace: bool = False) -> tuple[Path, str | None]:
-        """Resolve path, optionally checking workspace restriction.
-        
+    def _resolve_path(self, path: str, must_be_allowed: bool = False) -> tuple[Path, str | None]:
+        """Resolve path, optionally checking write permission.
+
         Returns (resolved_path, error_message)
         """
         p = Path(path).expanduser()
         if not p.is_absolute():
             # Relative paths are relative to workspace
             p = self.workspace / p
-        
+
         resolved = p.resolve()
-        
-        if must_be_workspace and not self._is_in_workspace(resolved):
-            return resolved, f"Write operations only allowed in workspace ({self.workspace}). Use 'copy' action to bring files into workspace first."
-        
+
+        if must_be_allowed and not self._is_write_allowed(resolved):
+            allowed_dirs = self._get_allowed_dirs()
+            dirs_str = ", ".join(str(d) for d in allowed_dirs)
+            return resolved, f"Write operations only allowed in: {dirs_str}. Set MARATOS_ALLOWED_WRITE_DIRS to add more directories."
+
         return resolved, None
 
     async def execute(self, **kwargs: Any) -> ToolResult:
@@ -101,7 +120,7 @@ class FilesystemTool(Tool):
         try:
             # === READ ACTIONS (allowed anywhere) ===
             if action == "read":
-                path, _ = self._resolve_path(path_str, must_be_workspace=False)
+                path, _ = self._resolve_path(path_str, must_be_allowed=False)
                 
                 if not path.exists():
                     return ToolResult(success=False, output="", error=f"File not found: {path}")
@@ -129,7 +148,7 @@ class FilesystemTool(Tool):
                 )
 
             elif action == "list":
-                path, _ = self._resolve_path(path_str, must_be_workspace=False)
+                path, _ = self._resolve_path(path_str, must_be_allowed=False)
                 
                 if not path.exists():
                     return ToolResult(success=False, output="", error=f"Path not found: {path}")
@@ -153,7 +172,7 @@ class FilesystemTool(Tool):
                 )
 
             elif action == "exists":
-                path, _ = self._resolve_path(path_str, must_be_workspace=False)
+                path, _ = self._resolve_path(path_str, must_be_allowed=False)
                 exists = path.exists()
                 return ToolResult(
                     success=True,
@@ -167,7 +186,7 @@ class FilesystemTool(Tool):
 
             # === WRITE ACTIONS (workspace only) ===
             elif action == "write":
-                path, error = self._resolve_path(path_str, must_be_workspace=True)
+                path, error = self._resolve_path(path_str, must_be_allowed=True)
                 if error:
                     return ToolResult(success=False, output="", error=error)
 
@@ -182,7 +201,7 @@ class FilesystemTool(Tool):
                 )
 
             elif action == "delete":
-                path, error = self._resolve_path(path_str, must_be_workspace=True)
+                path, error = self._resolve_path(path_str, must_be_allowed=True)
                 if error:
                     return ToolResult(success=False, output="", error=error)
 
@@ -197,14 +216,14 @@ class FilesystemTool(Tool):
 
             elif action == "copy":
                 # Copy from anywhere INTO workspace
-                source, _ = self._resolve_path(path_str, must_be_workspace=False)
+                source, _ = self._resolve_path(path_str, must_be_allowed=False)
                 
                 dest_str = kwargs.get("dest")
                 if not dest_str:
                     # Default: copy with same name into workspace root
                     dest_str = source.name
                 
-                dest, error = self._resolve_path(dest_str, must_be_workspace=True)
+                dest, error = self._resolve_path(dest_str, must_be_allowed=True)
                 if error:
                     return ToolResult(success=False, output="", error=error)
 

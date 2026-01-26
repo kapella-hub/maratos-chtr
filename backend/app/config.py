@@ -1,10 +1,14 @@
 """Configuration management for MaratOS."""
 
+import json
 from pathlib import Path
 from typing import Any
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Path for persisted settings
+SETTINGS_FILE = Path("./data/settings.json")
 
 
 class Settings(BaseSettings):
@@ -34,6 +38,12 @@ class Settings(BaseSettings):
     # Paths
     data_dir: Path = Field(default_factory=lambda: Path("./data"))
     workspace_dir: Path = Field(default_factory=lambda: Path.home() / "maratos-workspace")
+
+    # Filesystem Security - directories where writes are allowed
+    # Comma-separated list of paths. Writes allowed in these dirs and their subdirs.
+    # Example: "/Users/me/Projects,/tmp/scratch"
+    # If empty, only workspace_dir allows writes.
+    allowed_write_dirs: str = ""
 
     # Limits
     max_context_tokens: int = 100000
@@ -102,7 +112,74 @@ def get_channel_config() -> dict[str, Any]:
 
 
 def update_config(updates: dict[str, Any]) -> None:
-    """Update config values (runtime only)."""
+    """Update config values and persist to file."""
     for key, value in updates.items():
         if hasattr(settings, key):
             setattr(settings, key, value)
+
+    # Persist to file
+    save_settings()
+
+
+def save_settings() -> None:
+    """Save current settings to file."""
+    # Only save settings that should persist (not from .env)
+    persist_keys = [
+        "default_model", "debug", "allowed_write_dirs",
+        "telegram_enabled", "telegram_token", "telegram_allowed_users",
+        "imessage_enabled", "imessage_allowed_senders",
+        "webex_enabled", "webex_token", "webex_webhook_secret",
+        "webex_allowed_users", "webex_allowed_rooms",
+    ]
+
+    data = {}
+    for key in persist_keys:
+        if hasattr(settings, key):
+            value = getattr(settings, key)
+            # Convert Path to string
+            if isinstance(value, Path):
+                value = str(value)
+            data[key] = value
+
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def load_settings() -> None:
+    """Load settings from file on startup."""
+    if not SETTINGS_FILE.exists():
+        return
+
+    try:
+        with open(SETTINGS_FILE) as f:
+            data = json.load(f)
+
+        for key, value in data.items():
+            if hasattr(settings, key) and value is not None:
+                setattr(settings, key, value)
+
+    except Exception as e:
+        print(f"Warning: Could not load settings: {e}")
+
+
+def get_allowed_write_dirs() -> list[Path]:
+    """Get all directories where writes are allowed.
+
+    Returns workspace_dir plus any custom allowed_write_dirs.
+    """
+    dirs = [settings.workspace_dir]
+
+    if settings.allowed_write_dirs:
+        for dir_str in settings.allowed_write_dirs.split(","):
+            dir_str = dir_str.strip()
+            if dir_str:
+                path = Path(dir_str).expanduser().resolve()
+                if path not in dirs:
+                    dirs.append(path)
+
+    return dirs
+
+
+# Load persisted settings on startup
+load_settings()

@@ -1,4 +1,4 @@
-# 🖥️ MaratOS
+claude # 🖥️ MaratOS
 
 Your personal AI operating system, powered by **MO** — a capable, opinionated AI partner.
 

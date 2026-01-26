@@ -11,12 +11,12 @@ interface ChatInputProps {
   placeholder?: string
 }
 
-export default function ChatInput({ 
-  onSend, 
-  onQueue, 
-  onStop, 
-  isLoading, 
-  placeholder = 'Type a message...' 
+export default function ChatInput({
+  onSend,
+  onQueue,
+  onStop,
+  isLoading,
+  placeholder = 'Type a message...'
 }: ChatInputProps) {
   const [input, setInput] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -32,13 +32,11 @@ export default function ChatInput({
 
   const handleSubmit = () => {
     if (!input.trim()) return
-    
+
     if (isLoading && onQueue) {
-      // Queue message if busy
       onQueue(input.trim())
       setInput('')
     } else if (!isLoading) {
-      // Send directly if not busy
       onSend(input.trim())
       setInput('')
     }
@@ -52,8 +50,8 @@ export default function ChatInput({
   }
 
   return (
-    <div className="border-t border-border p-4">
-      <div className="flex items-end gap-2 max-w-4xl mx-auto">
+    <div className="border-t border-border/50 p-4 bg-background/80 backdrop-blur-sm">
+      <div className="flex items-end gap-3 max-w-4xl mx-auto">
         <div className="flex-1 relative">
           <textarea
             ref={textareaRef}
@@ -63,41 +61,42 @@ export default function ChatInput({
             placeholder={isLoading ? 'Type to queue message...' : placeholder}
             rows={1}
             className={cn(
-              'w-full resize-none rounded-lg border border-input bg-background px-4 py-3',
-              'focus:outline-none focus:ring-2 focus:ring-ring',
-              'placeholder:text-muted-foreground',
-              isLoading && 'border-amber-500/50'
+              'w-full resize-none rounded-2xl border bg-muted/50 px-4 py-3',
+              'focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 focus:bg-background',
+              'placeholder:text-muted-foreground/60',
+              'transition-all duration-200',
+              isLoading && 'border-amber-500/30 focus:ring-amber-500/50'
             )}
           />
         </div>
-        
-        {/* Stop button - prominent when loading */}
+
+        {/* Stop button */}
         {isLoading && (
           <button
             onClick={onStop}
             className={cn(
-              'p-3 rounded-lg bg-red-600 text-white',
-              'hover:bg-red-700 transition-colors',
-              'animate-pulse shadow-lg shadow-red-500/30',
+              'p-3 rounded-xl bg-red-500 text-white',
+              'hover:bg-red-600 transition-all duration-200',
+              'shadow-lg shadow-red-500/20',
               'flex items-center gap-2'
             )}
             title="Stop generation (Esc)"
           >
-            <Square className="w-5 h-5 fill-current" />
+            <Square className="w-4 h-4 fill-current" />
             <span className="text-sm font-medium">Stop</span>
           </button>
         )}
-        
+
         {/* Send/Queue button */}
         <button
           onClick={handleSubmit}
           disabled={!input.trim()}
           className={cn(
-            'p-3 rounded-lg transition-colors',
-            'disabled:opacity-50 disabled:cursor-not-allowed',
-            isLoading 
-              ? 'bg-amber-500 text-white hover:bg-amber-600' 
-              : 'bg-primary text-primary-foreground hover:bg-primary/90'
+            'p-3 rounded-xl transition-all duration-200',
+            'disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none',
+            isLoading
+              ? 'bg-amber-500 text-white hover:bg-amber-600 shadow-lg shadow-amber-500/20'
+              : 'bg-gradient-to-r from-violet-600 to-purple-600 text-white hover:from-violet-500 hover:to-purple-500 shadow-lg shadow-violet-500/20 hover:shadow-violet-500/30'
           )}
           title={isLoading ? 'Add to queue' : 'Send message'}
         >
@@ -107,6 +106,13 @@ export default function ChatInput({
             <Send className="w-5 h-5" />
           )}
         </button>
+      </div>
+
+      {/* Hint text */}
+      <div className="max-w-4xl mx-auto mt-2 text-center">
+        <p className="text-xs text-muted-foreground/50">
+          Press Enter to send, Shift+Enter for new line
+        </p>
       </div>
     </div>
   )

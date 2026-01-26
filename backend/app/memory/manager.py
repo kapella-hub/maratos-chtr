@@ -133,40 +133,37 @@ class MemoryManager:
         for msg in conversation:
             role = msg.get("role", "")
             content = msg.get("content", "")
-            
-            # Skip short messages
-            if len(content) < 50:
+
+            # Skip short messages (increased threshold to reduce noise)
+            if len(content) < 150:
                 continue
-            
-            # Detect decisions
-            decision_keywords = ["decided", "decision", "chose", "will use", "going with"]
-            if any(kw in content.lower() for kw in decision_keywords):
+
+            # Skip if mostly code (code blocks are noisy for memory)
+            code_block_count = content.count("```")
+            if code_block_count >= 2:
+                # More than half is code - skip extraction
+                continue
+
+            content_lower = content.lower()
+
+            # Detect decisions (user-initiated, not agent workflow)
+            decision_keywords = ["i decided", "we decided", "decision is", "chose to", "will use", "going with"]
+            if any(kw in content_lower for kw in decision_keywords):
                 entry = await self.remember(
                     content=content[:500],
                     memory_type="decision",
                     session_id=session_id,
                     agent_id=agent_id,
-                    importance=0.7,
+                    importance=0.6,  # Lower importance, let access patterns boost
                 )
                 stored.append(entry)
-            
-            # Detect facts/preferences
-            fact_keywords = ["always", "never", "prefer", "likes", "uses", "works at", "lives in"]
-            if any(kw in content.lower() for kw in fact_keywords):
+
+            # Detect facts/preferences (be more specific to reduce false positives)
+            fact_keywords = ["i prefer", "i always", "i never", "i like to", "my preference", "works at", "lives in"]
+            if any(kw in content_lower for kw in fact_keywords):
                 entry = await self.remember(
                     content=content[:500],
                     memory_type="fact",
-                    session_id=session_id,
-                    agent_id=agent_id,
-                    importance=0.6,
-                )
-                stored.append(entry)
-            
-            # Detect code/technical learnings
-            if "```" in content or "function" in content or "class " in content:
-                entry = await self.remember(
-                    content=content[:1000],
-                    memory_type="code",
                     session_id=session_id,
                     agent_id=agent_id,
                     importance=0.5,

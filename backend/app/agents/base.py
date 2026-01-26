@@ -1,6 +1,7 @@
 """Base agent interface."""
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
@@ -8,6 +9,73 @@ import litellm
 
 from app.config import settings
 from app.tools import ToolResult, registry as tool_registry
+
+
+# Regex to detect numbered line format: "1: code", "• 1: code", "1, 1: code" (diff), "  220: code" (indented)
+NUMBERED_LINE_PATTERN = re.compile(r'^\s*(?:[•\-\*]\s*)?(\d+)(?:,\s*\d+)?\s*:\s?(.*)$')
+
+
+def convert_numbered_lines_to_codeblock(text: str) -> str:
+    """Convert consecutive numbered lines (1: code, 2: code) to proper markdown code blocks.
+
+    Detects patterns like:
+        1: # Database Configuration
+        2: DATABASE_URL=postgres://...
+        3:
+
+    And converts them to:
+        ```
+        # Database Configuration
+        DATABASE_URL=postgres://...
+
+        ```
+    """
+    lines = text.split('\n')
+    result = []
+    code_block_lines = []
+    in_code_block = False
+    last_line_num = 0
+
+    for line in lines:
+        match = NUMBERED_LINE_PATTERN.match(line)
+
+        if match:
+            line_num = int(match.group(1))
+            code_content = match.group(2)
+
+            # Check if this continues a sequence (allow gaps up to 10 for diff output with removed lines)
+            if not in_code_block or (line_num > last_line_num and line_num <= last_line_num + 10):
+                if not in_code_block:
+                    in_code_block = True
+                code_block_lines.append(code_content)
+                last_line_num = line_num
+            else:
+                # New sequence - flush previous block
+                if code_block_lines:
+                    result.append('```')
+                    result.extend(code_block_lines)
+                    result.append('```')
+                code_block_lines = [code_content]
+                last_line_num = line_num
+                in_code_block = True
+        else:
+            # Non-numbered line - flush any accumulated code block
+            if code_block_lines:
+                result.append('```')
+                result.extend(code_block_lines)
+                result.append('```')
+                code_block_lines = []
+                in_code_block = False
+                last_line_num = 0
+            result.append(line)
+
+    # Flush any remaining code block
+    if code_block_lines:
+        result.append('```')
+        result.extend(code_block_lines)
+        result.append('```')
+
+    return '\n'.join(result)
 
 
 @dataclass
@@ -67,14 +135,44 @@ class Agent:
 
     def get_system_prompt(self, context: dict[str, Any] | None = None) -> str:
         """Get system prompt, optionally with context."""
-        return self.config.system_prompt
+        prompt = self.config.system_prompt
+
+        if context:
+            # Inject project context (conventions, patterns, tech stack)
+            if "project" in context and context["project"]:
+                prompt += f"\n\n{context['project']}\n"
+
+            # Inject workspace path
+            if "workspace" in context:
+                prompt += f"\n\n## Workspace\nAll file modifications must be in: `{context['workspace']}`\n"
+
+            # Inject memory context (CRITICAL for accuracy)
+            if "memory" in context and context["memory"]:
+                prompt += f"\n\n## Relevant Context from Memory\n{context['memory']}\n"
+
+            # Inject file context
+            if "files" in context:
+                prompt += f"\n\n## Files to Work With\n{context['files']}\n"
+
+        return prompt
 
     async def chat(
         self,
         messages: list[Message],
         context: dict[str, Any] | None = None,
+        model_override: str | None = None,
+        temperature_override: float | None = None,
+        max_tokens_override: int | None = None,
     ) -> AsyncIterator[str]:
-        """Chat with the agent, yielding response chunks."""
+        """Chat with the agent, yielding response chunks.
+
+        Args:
+            messages: List of conversation messages
+            context: Optional context dict (workspace, memory, files, etc.)
+            model_override: Optional model to use instead of agent's default
+            temperature_override: Optional temperature to use
+            max_tokens_override: Optional max tokens to use
+        """
         # Build message list
         api_messages = []
 
@@ -86,13 +184,18 @@ class Agent:
         # Conversation messages
         api_messages.extend([m.to_dict() for m in messages])
 
+        # Use overrides or defaults
+        model = model_override or self.config.model
+        temperature = temperature_override if temperature_override is not None else self.config.temperature
+        max_tokens = max_tokens_override or settings.max_response_tokens
+
         # Make API call with streaming
         response = await litellm.acompletion(
-            model=self.config.model,
+            model=model,
             messages=api_messages,
             tools=self._tool_schemas if self._tool_schemas else None,
-            temperature=self.config.temperature,
-            max_tokens=settings.max_response_tokens,
+            temperature=temperature,
+            max_tokens=max_tokens,
             stream=True,
         )
 

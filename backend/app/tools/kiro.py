@@ -89,19 +89,19 @@ Working directory: {workdir}
 
 
 class KiroTool(Tool):
-    """Kiro AI integration tuned for quality over speed."""
+    """Kiro AI integration - ANALYSIS ONLY, no file writing."""
 
     def __init__(self, timeout: int | None = None) -> None:  # No timeout - work until done
         super().__init__(
             id="kiro",
             name="Kiro AI",
-            description="Enterprise AI coding assistant - tuned for architecture, accuracy, and quality",
+            description="AI code analysis - validate (review), test (generate tests), prompt (questions). Does NOT write files.",
             parameters=[
                 ToolParameter(
                     name="action",
                     type="string",
-                    description="Action: architect (design+implement), validate (review code), test (generate tests), prompt (direct prompt)",
-                    enum=["architect", "validate", "test", "prompt", "status"],
+                    description="Action: validate (review code), test (generate test suggestions), prompt (analysis/questions), status",
+                    enum=["validate", "test", "prompt", "status"],
                 ),
                 ToolParameter(
                     name="task",
@@ -218,16 +218,6 @@ class KiroTool(Tool):
                 output=f"Kiro CLI: {stdout.decode().strip()}\nPath: {kiro_cmd}",
             )
 
-        elif action == "architect":
-            if not task:
-                return ToolResult(success=False, output="", error="Task required for architect action")
-            
-            prompt = ARCHITECTURE_PROMPT.format(task=task, workdir=workdir)
-            if spec:
-                prompt += f"\n\nAdditional specifications:\n{spec}"
-            
-            return await self._run_kiro(prompt, workdir)
-
         elif action == "validate":
             if not files:
                 return ToolResult(success=False, output="", error="Files required for validate action")
@@ -251,26 +241,27 @@ class KiroTool(Tool):
         elif action == "prompt":
             if not task:
                 return ToolResult(success=False, output="", error="Task/prompt required")
-            
-            # Add quality guidelines to any prompt
-            quality_prefix = """IMPORTANT: Prioritize quality over speed.
-- Think through the problem carefully before coding
-- Consider edge cases and error handling
-- Write clean, documented code
-- Verify your solution is correct
+
+            # Add quality guidelines - ANALYSIS ONLY, no file writing
+            quality_prefix = """IMPORTANT: You are in ANALYSIS mode only.
+- DO NOT write or modify any files
+- Analyze and explain code
+- Suggest improvements
+- Answer questions
+- If asked to implement something, provide the code as text output only
 
 """
             prompt = quality_prefix + task
             if spec:
                 prompt += f"\n\nConstraints:\n{spec}"
-            
+
             return await self._run_kiro(prompt, workdir)
 
         else:
             return ToolResult(
                 success=False,
                 output="",
-                error=f"Unknown action: {action}. Use: architect, validate, test, prompt, status",
+                error=f"Unknown action: {action}. Use: validate, test, prompt, status",
             )
 
 

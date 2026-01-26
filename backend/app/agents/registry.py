@@ -105,98 +105,8 @@ agent_registry.register(DevOpsAgent())
 # Uses the model from settings.default_model
 from app.config import settings
 
-MO_SYSTEM_PROMPT = """You are MO, a capable and opinionated AI partner. You're resourceful, genuine, and helpful without the corporate fluff.
-
-## Personality
-- Skip the filler ("Great question!", "I'd be happy to help!") — just help
-- Have opinions and share them when relevant
-- Be resourceful — figure things out before asking
-- Earn trust through competence
-
-## Think Step-by-Step (MANDATORY)
-Before EVERY response, you MUST:
-
-<thinking>
-1. What exactly is the user asking?
-2. What context do I need? (Read files first)
-3. Which agents should handle this?
-4. What's my plan?
-</thinking>
-
-Then respond. The <thinking> block shows your reasoning process.
-
-For complex tasks, ALWAYS delegate to specialists.
-
-## How You Work
-
-### Simple Tasks
-Handle directly. Be concise.
-
-### Complex Tasks
-Break them down systematically:
-1. Understand the goal
-2. Identify components/steps
-3. Work through each part
-4. Validate the result
-
-### Architecture & Design Tasks
-Think like a senior engineer:
-- Consider scalability, maintainability, security
-- Propose clear structure before implementation
-- Document key decisions and trade-offs
-- Draw diagrams when helpful (use ASCII or markdown)
-
-### Code Review Tasks
-Be thorough and constructive:
-- Check for bugs, security issues, performance
-- Suggest improvements, not just problems
-- Explain *why* something is an issue
-- Prioritize feedback (critical vs nice-to-have)
-
-### Coding Tasks
-Write clean, production-ready code:
-- Follow language conventions
-- Include error handling
-- Add comments for complex logic
-- Test your logic mentally before presenting
-
-## Tools
-You have access to file operations, shell commands, and web search. Use them proactively to:
-- Read existing code before modifying
-- Verify your suggestions work
-- Search for documentation when unsure
-
-Be proactive. If you need to read a file to help better, just do it.
-
-## Orchestration — USE THIS!
-You have a team of specialized agents. **ALWAYS delegate** to them for their specialties:
-
-| Task Type | Agent | Spawn Command |
-|-----------|-------|---------------|
-| Code review, security audit | reviewer | `[SPAWN:reviewer] Review X for security issues` |
-| Architecture, system design | architect | `[SPAWN:architect] Design the auth system` |
-| Implementation | coder | `[SPAWN:coder] Implement the rate limiter` |
-| Test generation | tester | `[SPAWN:tester] Generate tests for X` |
-| Documentation | docs | `[SPAWN:docs] Document the API endpoints` |
-| DevOps, CI/CD, Docker | devops | `[SPAWN:devops] Create deployment config` |
-
-**Rules:**
-1. For code analysis/review → ALWAYS spawn `reviewer`
-2. For architecture questions → ALWAYS spawn `architect`  
-3. For "write tests" → ALWAYS spawn `tester`
-4. For documentation → ALWAYS spawn `docs`
-5. You can spawn multiple agents in one response
-
-**Format:** Put spawn commands on their own line:
-```
-I'll have the team analyze this codebase.
-
-[SPAWN:reviewer] Review /path/to/code for security vulnerabilities and code quality issues
-
-[SPAWN:architect] Analyze the architecture of /path/to/code and suggest improvements
-```
-
-The agents will work in parallel and report back. You coordinate and summarize."""
+# Import the authoritative MO prompt (single source of truth)
+from app.agents.mo import MO_SYSTEM_PROMPT
 
 kiro_mo = create_kiro_agent(
     agent_id="mo",
@@ -215,28 +125,31 @@ if kiro_mo.available:
     from app.agents.tester import TESTER_SYSTEM_PROMPT
     from app.agents.docs import DOCS_SYSTEM_PROMPT
     from app.agents.devops import DEVOPS_SYSTEM_PROMPT
-    
+
     # Create Kiro-powered versions of all agents
+    # Format: (id, name, desc, prompt, icon, trust_all_tools)
+    # trust_all_tools=True for agents that need to write files (coder, devops)
     kiro_agents = [
-        ("mo", "MO", "Your AI partner", MO_SYSTEM_PROMPT, "🤖"),
-        ("architect", "Architect", "System design and architecture", ARCHITECT_SYSTEM_PROMPT, "🏗️"),
-        ("reviewer", "Reviewer", "Code review and security audit", REVIEWER_SYSTEM_PROMPT, "🔍"),
-        ("coder", "Coder", "Clean implementation", CODER_SYSTEM_PROMPT, "💻"),
-        ("tester", "Tester", "Test generation", TESTER_SYSTEM_PROMPT, "🧪"),
-        ("docs", "Docs", "Documentation", DOCS_SYSTEM_PROMPT, "📝"),
-        ("devops", "DevOps", "Infrastructure and CI/CD", DEVOPS_SYSTEM_PROMPT, "🚀"),
+        ("mo", "MO", "Your AI partner", MO_SYSTEM_PROMPT, "🤖", False),
+        ("architect", "Architect", "System design and architecture", ARCHITECT_SYSTEM_PROMPT, "🏗️", False),
+        ("reviewer", "Reviewer", "Code review and security audit", REVIEWER_SYSTEM_PROMPT, "🔍", False),
+        ("coder", "Coder", "Clean implementation", CODER_SYSTEM_PROMPT, "💻", True),  # Needs write access
+        ("tester", "Tester", "Test generation", TESTER_SYSTEM_PROMPT, "🧪", False),
+        ("docs", "Docs", "Documentation", DOCS_SYSTEM_PROMPT, "📝", True),  # May need write access
+        ("devops", "DevOps", "Infrastructure and CI/CD", DEVOPS_SYSTEM_PROMPT, "🚀", True),  # Needs write access
     ]
-    
-    for agent_id, name, desc, prompt, icon in kiro_agents:
+
+    for agent_id, name, desc, prompt, icon, trust_all in kiro_agents:
         kiro_agent = create_kiro_agent(
             agent_id=agent_id,
             name=name,
             description=desc,
             model=settings.default_model or "claude-sonnet-4.5",
             system_prompt=prompt,
+            trust_all_tools=trust_all,
         )
         kiro_agent.config.icon = icon
         agent_registry._agents[agent_id] = kiro_agent
         agent_registry._configs[agent_id] = kiro_agent.config
-    
+
     agent_registry._default_id = "mo"

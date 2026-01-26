@@ -56,6 +56,51 @@ class Memory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class AutonomousProject(Base):
+    """Autonomous development project."""
+
+    __tablename__ = "autonomous_projects"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    original_prompt: Mapped[str] = mapped_column(Text)
+    workspace_path: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(20), default="planning")
+    config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    branch_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    pr_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    total_iterations: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AutonomousTask(Base):
+    """Task within an autonomous project."""
+
+    __tablename__ = "autonomous_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text)
+    agent_type: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    depends_on: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    quality_gates: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    iterations: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    target_files: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    max_attempts: Mapped[int] = mapped_column(default=3)
+    priority: Mapped[int] = mapped_column(default=0)
+    final_commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 # Engine and session factory
 engine = create_async_engine(settings.database_url, echo=settings.debug)
 async_session_factory = async_sessionmaker(engine, expire_on_commit=False)

@@ -16,22 +16,68 @@ TOOL_LOG_PATTERNS = [
     r'^Reading (?:directory|file):.*',
     r'^Batch \w+ operation.*',
     r'^↱ Operation \d+:.*',
-    r'^[✓✗] (?:Successfully|Failed).*',
-    r'^⋮.*Summary:.*',
-    r'^•\s*Completed in.*',
+    r'^[✓✔☑✗✘❌]\s*(?:Successfully|Failed).*',  # Various checkmark/x characters
+    r'^(?:Successfully|Failed)\s+(?:read|wrote|deleted|copied).*',  # Without checkmark
+    r'^⋮\s*$',  # Just the ellipsis character alone
+    r'^⋮.*',  # Ellipsis with anything after
+    r'^\s*Summary:.*',
+    r'^•?\s*Completed in.*',  # With or without bullet
     r'.*\(using tool:.*\).*',
     r'^\d+;\d+m.*entries.*',
     r'^\s*\[\d+ more items found\].*',
     r'^\[Overview\].*bytes.*tokens.*',
     r'^\d+ \w+ at /.*:\d+:\d+$',  # "1 Class RequestData at /path:30:1"
     r'^\(\d+ more items found\)$',
+    r'^Searching.*\.\.\..*',  # "Searching in /path..."
+    r'^Found \d+ (?:files?|matches?).*',  # "Found 5 files..."
+    r'^Purpose:.*',  # "Purpose: ..."
+    r'^Updating:.*',  # "Updating: path"
+    r'^Creating:.*',  # "Creating: path"
+    r'^Deleting:.*',  # "Deleting: path"
+    r'^\d+ operations? processed.*',  # "2 operations processed, 2 successful"
+    # Kiro CLI startup noise
+    r'^Model:.*$',  # "Model: claude-sonnet-4 (/model to change)"
+    r'^Did you know\?.*$',
+    r'^You can use.*$',
+    r'^\s*experience\s*$',
+    r'^Time:.*$',
+    r'^\s*▸\s*Time:.*$',  # " ▸ Time: 2s"
+    r'^[•\-\s]*Completed in \d+\.?\d*s?.*$',  # " - Completed in 0.0s"
+    r'^Now let me analyze.*$',
+    r'^Let me start by reading.*$',
+    r'^I\'ll (?:start|begin|conduct|analyze|review).*$',  # Transitional phrases
+]
+
+# Pattern for kiro banner (ASCII art and boxes)
+KIRO_BANNER_PATTERNS = [
+    r'^[╭╮╰╯│─]+',  # Box drawing characters
+    r'^\s*[⢀⣴⣶⣦⡀⠀⣾⣿⠋⠁⠈⠙⡆⢀⢻⡆⢰⣇⡿⠀⣼⠇⢸⣤⣄⠉⡇⠹⣷⣆⣸⣠⣿⠃⢿⢹⣧⠻⣦⢴⠟⣤⣼⢀⣠⣴⣤⣄⡀⠈⠙⣷⡀⣶⡄⢸⠹⠁]+',  # Kiro banner characters
+    r'^\s*$',  # Empty lines in the banner area
 ]
 
 def is_tool_log_line(line: str) -> bool:
     """Check if a line is a tool execution log."""
+    # Check tool log patterns
     for pattern in TOOL_LOG_PATTERNS:
         if re.match(pattern, line):
             return True
+    # Check banner patterns
+    for pattern in KIRO_BANNER_PATTERNS:
+        if re.match(pattern, line):
+            return True
+    return False
+
+def is_kiro_banner_line(line: str) -> bool:
+    """Check if line is part of the Kiro ASCII banner."""
+    # Banner contains these specific Unicode characters
+    banner_chars = set('⢀⣴⣶⣦⡀⠀⣾⣿⠋⠁⠈⠙⡆⢻⢰⣇⡿⣼⠇⢸⣤⣄⠉⠹⣷⣆⣠⠃⢿⢹⣧⠻⠟⢀⢴')
+    line_chars = set(line)
+    # If more than 30% of unique chars are banner chars, it's banner
+    if line_chars and len(line_chars & banner_chars) / len(line_chars) > 0.3:
+        return True
+    # Box drawing characters
+    if re.match(r'^[╭╮╰╯│─\s]+$', line):
+        return True
     return False
 
 def filter_tool_logs(text: str) -> str:
@@ -49,7 +95,19 @@ class KiroAgentConfig(AgentConfig):
     """Configuration for Kiro agent."""
 
     model: str = "claude-sonnet-4.5"  # claude-opus-4.5, claude-sonnet-4.5, claude-haiku-4.5
-    trust_tools: bool = True  # --trust-all-tools flag
+    trust_all_tools: bool = False  # If True, uses --trust-all-tools (allows writes)
+    # Trusted tools for read-only operations (safe to auto-approve)
+    trusted_tools: list = None  # Default set in __post_init__
+
+    def __post_init__(self):
+        if self.trusted_tools is None:
+            # Trust read-only tools by default for non-interactive mode
+            # Note: Some tools require @mcpserver/ prefix - using built-in tool names
+            self.trusted_tools = [
+                "fs_read",
+                "web_search",
+                "web_fetch",
+            ]
 
 
 class KiroAgent(Agent):
@@ -118,14 +176,22 @@ class KiroAgent(Agent):
         if model:
             cmd.extend(["--model", model])
 
-        # Add trust-all-tools if enabled
-        if hasattr(self.config, 'trust_tools') and self.config.trust_tools:
+        # Add tool trust settings
+        if hasattr(self.config, 'trust_all_tools') and self.config.trust_all_tools:
             cmd.append("--trust-all-tools")
+        elif hasattr(self.config, 'trusted_tools') and self.config.trusted_tools:
+            # Trust only specific tools (read-only by default)
+            tools_list = ",".join(self.config.trusted_tools)
+            cmd.extend(["--trust-tools", tools_list])
 
         # Add the prompt
         cmd.append(full_prompt)
 
         # Run kiro-cli and stream output
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Running kiro-cli: {' '.join(cmd[:3])}...")  # Log command (not full prompt)
+
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -135,41 +201,86 @@ class KiroAgent(Agent):
 
             # Stream stdout with line-based filtering
             buffer = ""
+            total_received = 0
+            lines_yielded = 0
+            lines_filtered = 0
+            in_banner = True  # Start assuming we're in banner
+
             while True:
                 chunk = await process.stdout.read(512)
                 if not chunk:
                     # Flush remaining buffer
                     if buffer.strip():
                         buffer = ANSI_ESCAPE.sub('', buffer)
-                        if not is_tool_log_line(buffer.strip()):
-                            yield buffer
+                        cleaned = buffer.strip()
+                        # Strip leading > from kiro response
+                        if cleaned.startswith('> '):
+                            cleaned = cleaned[2:]
+                        if cleaned and not is_tool_log_line(cleaned) and not is_kiro_banner_line(cleaned):
+                            yield cleaned
+                            lines_yielded += 1
                     break
-                
+
                 text = chunk.decode("utf-8", errors="replace")
                 buffer += text
-                
+                total_received += len(text)
+
                 # Process complete lines only
                 while '\n' in buffer:
                     line, buffer = buffer.split('\n', 1)
                     line = ANSI_ESCAPE.sub('', line)
-                    
-                    # Skip tool log lines, keep everything else
-                    if not is_tool_log_line(line):
+                    cleaned = line.strip()
+
+                    # Skip empty lines at start (banner area)
+                    if not cleaned and in_banner:
+                        lines_filtered += 1
+                        continue
+
+                    # Check for banner content
+                    if is_kiro_banner_line(cleaned):
+                        lines_filtered += 1
+                        continue
+
+                    # Check for tool logs and startup noise
+                    if is_tool_log_line(cleaned):
+                        lines_filtered += 1
+                        continue
+
+                    # Real content found - no longer in banner
+                    in_banner = False
+
+                    # Strip leading > from kiro response prefix
+                    if cleaned.startswith('> '):
+                        cleaned = cleaned[2:]
+                        line = cleaned
+
+                    # Yield non-empty content
+                    if cleaned:
                         yield line + '\n'
+                        lines_yielded += 1
+                    else:
+                        lines_filtered += 1
 
             # Wait for completion
             await process.wait()
+
+            logger.info(f"Kiro-cli finished: received={total_received} bytes, yielded={lines_yielded} lines, filtered={lines_filtered} lines, returncode={process.returncode}")
 
             # Check for errors
             if process.returncode != 0:
                 stderr = await process.stderr.read()
                 error_text = stderr.decode("utf-8", errors="replace")
+                logger.error(f"Kiro-cli error: {error_text}")
                 if "login" in error_text.lower() or "auth" in error_text.lower():
                     yield "\n\n❌ Kiro CLI not authenticated. Run `kiro-cli login` first."
                 else:
                     yield f"\n\n❌ Kiro CLI error: {error_text}"
+            elif total_received == 0:
+                logger.warning("Kiro-cli returned no output")
+                yield "\n\n⚠️ No response from Kiro. The model may be overloaded or the request timed out."
 
         except Exception as e:
+            logger.exception(f"Kiro-cli exception: {e}")
             yield f"\n\n❌ Error running kiro-cli: {e}"
 
 
