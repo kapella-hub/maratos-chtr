@@ -250,9 +250,9 @@ async def add_allowed_dir(path: str) -> dict[str, Any]:
     resolved = Path(path).expanduser().resolve()
 
     if not resolved.exists():
-        return {"error": f"Directory does not exist: {path}"}
+        raise HTTPException(status_code=400, detail=f"Directory does not exist: {path}")
     if not resolved.is_dir():
-        return {"error": f"Not a directory: {path}"}
+        raise HTTPException(status_code=400, detail=f"Not a directory: {path}")
 
     # Get current dirs
     current = [d.strip() for d in settings.allowed_write_dirs.split(",") if d.strip()]
@@ -279,16 +279,16 @@ async def remove_allowed_dir(path: str) -> dict[str, Any]:
     current = [d.strip() for d in settings.allowed_write_dirs.split(",") if d.strip()]
 
     # Remove if present
-    if resolved_str in current:
-        current.remove(resolved_str)
-        settings.allowed_write_dirs = ",".join(current)
-        return {
-            "removed": resolved_str,
-            "all_allowed": [str(d) for d in get_allowed_write_dirs()],
-        }
+    if resolved_str not in current:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Directory not in allowed list: {path}"
+        )
 
+    current.remove(resolved_str)
+    settings.allowed_write_dirs = ",".join(current)
     return {
-        "error": f"Directory not in allowed list: {path}",
+        "removed": resolved_str,
         "all_allowed": [str(d) for d in get_allowed_write_dirs()],
     }
 

@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -196,7 +196,7 @@ async def start_project(
 @router.get("/projects")
 async def list_projects(
     status: str | None = None,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ) -> list[ProjectResponse]:
     """List autonomous projects."""

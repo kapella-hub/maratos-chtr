@@ -3,7 +3,7 @@
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.agents import AgentConfig, agent_registry
 
@@ -13,8 +13,8 @@ router = APIRouter(prefix="/agents")
 class AgentUpdate(BaseModel):
     """Agent update request."""
 
-    model: str | None = None
-    temperature: float | None = None
+    model: str | None = Field(default=None, min_length=1, max_length=100)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
 
 
 @router.get("")

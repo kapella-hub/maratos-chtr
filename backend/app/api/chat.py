@@ -7,14 +7,20 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import agent_registry
 from app.config import settings
+
+# Rate limiter for chat endpoint
+limiter = Limiter(key_func=get_remote_address, enabled=settings.rate_limit_enabled)
 from app.agents.base import Message, convert_numbered_lines_to_codeblock
 from app.commands import command_registry
 from app.database import Message as DBMessage
@@ -65,10 +71,18 @@ router = APIRouter(prefix="/chat")
 class ChatRequest(BaseModel):
     """Chat request body."""
 
-    message: str
+    message: str = Field(min_length=1, max_length=50000)
     session_id: str | None = None
     agent_id: str | None = None  # Optional: specify agent (mo, architect, reviewer)
     context: dict[str, Any] | None = None
+
+    @field_validator("message")
+    @classmethod
+    def message_not_empty(cls, v: str) -> str:
+        """Validate message is not empty or whitespace only."""
+        if not v.strip():
+            raise ValueError("Message cannot be empty or whitespace only")
+        return v
 
 
 class SessionResponse(BaseModel):
@@ -91,15 +105,17 @@ class MessageResponse(BaseModel):
 
 
 @router.post("")
+@limiter.limit(settings.rate_limit_chat)
 async def chat(
-    request: ChatRequest,
+    request: Request,
+    chat_request: ChatRequest,
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     """Send a message and stream the response."""
     # Get agent (use specified or registry default)
-    if request.agent_id:
-        agent = agent_registry.get(request.agent_id)
-        agent_id = request.agent_id
+    if chat_request.agent_id:
+        agent = agent_registry.get(chat_request.agent_id)
+        agent_id = chat_request.agent_id
     else:
         agent = agent_registry.get_default()
         agent_id = agent.id if agent else "mo"
@@ -107,26 +123,35 @@ async def chat(
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     # Get or create session
-    if request.session_id:
-        result = await db.execute(
-            select(DBSession).where(DBSession.id == request.session_id)
-        )
-        session = result.scalar_one_or_none()
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
-        # Update agent if changed
-        if session.agent_id != agent_id:
-            session.agent_id = agent_id
+    try:
+        if chat_request.session_id:
+            result = await db.execute(
+                select(DBSession).where(DBSession.id == chat_request.session_id)
+            )
+            session = result.scalar_one_or_none()
+            if not session:
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            # Update agent if changed
+            if session.agent_id != agent_id:
+                session.agent_id = agent_id
+                await db.commit()
+        else:
+            session = DBSession(
+                id=str(uuid.uuid4()),
+                agent_id=agent_id,
+                title=chat_request.message[:100] if chat_request.message else None,
+            )
+            db.add(session)
             await db.commit()
-    else:
-        session = DBSession(
-            id=str(uuid.uuid4()),
-            agent_id=agent_id,
-            title=request.message[:100] if request.message else None,
-        )
-        db.add(session)
-        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        logger.error(f"Database integrity error creating session: {e}")
+        raise HTTPException(status_code=409, detail="Session conflict - please try again")
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error(f"Database error creating session: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Database error")
 
     # Load conversation history with pagination to prevent OOM
     # First, count total messages
@@ -174,14 +199,14 @@ async def chat(
     ])
 
     # Check for slash commands
-    actual_message = request.message
+    actual_message = chat_request.message
     project_context = None
     command_response = None
 
-    command, args = command_registry.parse(request.message)
+    command, args = command_registry.parse(chat_request.message)
     if command:
         logger.info(f"Processing command: /{command.name} {args[:50]}...")
-        context = request.context or {}
+        context = chat_request.context or {}
         result = command.handler(args, context)
 
         if "error" in result:
@@ -213,14 +238,19 @@ async def chat(
     messages.append(user_message)
 
     # Save user message
-    db_user_msg = DBMessage(
-        id=str(uuid.uuid4()),
-        session_id=session.id,
-        role="user",
-        content=request.message,
-    )
-    db.add(db_user_msg)
-    await db.commit()
+    try:
+        db_user_msg = DBMessage(
+            id=str(uuid.uuid4()),
+            session_id=session.id,
+            role="user",
+            content=chat_request.message,
+        )
+        db.add(db_user_msg)
+        await db.commit()
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error(f"Database error saving user message: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to save message")
 
     async def generate():
         """Generate streaming response."""
@@ -236,14 +266,18 @@ async def chat(
             yield f'data: {{"content": "{escaped}"}}\n\n'
 
             # Save response
-            async with db.begin():
-                db_assistant_msg = DBMessage(
-                    id=str(uuid.uuid4()),
-                    session_id=session.id,
-                    role="assistant",
-                    content=command_response,
-                )
-                db.add(db_assistant_msg)
+            try:
+                async with db.begin():
+                    db_assistant_msg = DBMessage(
+                        id=str(uuid.uuid4()),
+                        session_id=session.id,
+                        role="assistant",
+                        content=command_response,
+                    )
+                    db.add(db_assistant_msg)
+                    session.updated_at = datetime.now()
+            except SQLAlchemyError as e:
+                logger.error(f"Failed to save command response: {e}", exc_info=True)
 
             yield "data: [DONE]\n\n"
             return
@@ -252,7 +286,7 @@ async def chat(
         yield 'data: {"thinking": true}\n\n'
 
         # Get memory context
-        context = request.context or {}
+        context = chat_request.context or {}
 
         # Pass user message for skill auto-detection
         context["user_message"] = actual_message
@@ -320,24 +354,32 @@ async def chat(
 
         # Save assistant message (convert numbered lines to code blocks for cleaner display)
         processed_response = convert_numbered_lines_to_codeblock(full_response)
-        async with db.begin():
-            db_assistant_msg = DBMessage(
-                id=str(uuid.uuid4()),
-                session_id=session.id,
-                role="assistant",
-                content=processed_response,
-            )
-            db.add(db_assistant_msg)
-        
+        try:
+            async with db.begin():
+                db_assistant_msg = DBMessage(
+                    id=str(uuid.uuid4()),
+                    session_id=session.id,
+                    role="assistant",
+                    content=processed_response,
+                )
+                db.add(db_assistant_msg)
+                # Update session timestamp
+                session.updated_at = datetime.now()
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to save assistant message: {e}", exc_info=True)
+            # Don't fail the stream - message was already sent to client
+
         # Generate better title for new sessions (first message)
         if len(db_messages) == 0 and full_response:
             try:
-                new_title = await generate_title(request.message, full_response)
+                new_title = await generate_title(chat_request.message, full_response)
                 async with db.begin():
                     session.title = new_title
                 logger.info(f"Generated session title: {new_title}")
+            except SQLAlchemyError as e:
+                logger.error(f"Failed to update title: {e}", exc_info=True)
             except Exception as e:
-                logger.warning(f"Failed to update title: {e}")
+                logger.warning(f"Failed to generate title: {e}")
         
         # Store important exchanges in memory
         try:
@@ -345,7 +387,7 @@ async def chat(
             from app.memory import MemoryStorageError
             await memory_manager.extract_and_store(
                 conversation=[
-                    {"role": "user", "content": request.message},
+                    {"role": "user", "content": chat_request.message},
                     {"role": "assistant", "content": processed_response},
                 ],
                 session_id=session.id,
@@ -388,7 +430,7 @@ async def chat(
                     task = await subagent_runner.run_task(
                         task_description=task_desc,
                         agent_id=agent_id_spawn,
-                        context=request.context,
+                        context=chat_request.context,
                         callback_session=session.id,
                     )
                     running_tasks.append((agent_id_spawn, task))
@@ -472,7 +514,7 @@ async def chat(
 @router.get("/sessions")
 async def list_sessions(
     db: AsyncSession = Depends(get_db),
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=500),
 ) -> list[SessionResponse]:
     """List chat sessions."""
     result = await db.execute(

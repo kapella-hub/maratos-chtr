@@ -1,11 +1,14 @@
 """Configuration management for MaratOS."""
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 # Path for persisted settings
 SETTINGS_FILE = Path("./data/settings.json")
@@ -94,6 +97,22 @@ class Settings(BaseSettings):
     gitlab_token: str = ""  # Personal access token with api scope
     gitlab_namespace: str = ""  # Default namespace/group for new projects (e.g., group/subgroup)
     gitlab_skip_ssl: bool = False  # Skip SSL verification (for internal servers with self-signed certs)
+
+    @field_validator("gitlab_url")
+    @classmethod
+    def validate_gitlab_url(cls, v: str) -> str:
+        """Validate GitLab URL format."""
+        if v and not v.startswith(("http://", "https://")):
+            raise ValueError("GitLab URL must start with http:// or https://")
+        return v.rstrip("/") if v else v
+
+    @field_validator("rate_limit_chat", "rate_limit_default")
+    @classmethod
+    def validate_rate_limit(cls, v: str) -> str:
+        """Validate rate limit format (e.g., '20/minute')."""
+        if "/" not in v:
+            raise ValueError("Rate limit must be in format 'N/period' (e.g., '20/minute')")
+        return v
 
 
 settings = Settings()
@@ -188,12 +207,25 @@ def load_settings() -> None:
         with open(SETTINGS_FILE) as f:
             data = json.load(f)
 
+        # Validate settings before applying
+        # Create a test settings object to check for validation errors
+        try:
+            current_dict = settings.model_dump()
+            current_dict.update({k: v for k, v in data.items() if v is not None})
+            Settings(**current_dict)  # This will raise ValidationError if invalid
+        except ValidationError as e:
+            logger.warning(f"Settings validation failed, using defaults: {e}")
+            return
+
+        # Apply validated settings
         for key, value in data.items():
             if hasattr(settings, key) and value is not None:
                 setattr(settings, key, value)
 
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in settings file: {e}")
     except Exception as e:
-        print(f"Warning: Could not load settings: {e}")
+        logger.error(f"Could not load settings: {e}")
 
 
 def get_allowed_write_dirs() -> list[Path]:
@@ -214,5 +246,30 @@ def get_allowed_write_dirs() -> list[Path]:
     return dirs
 
 
+def validate_critical_settings() -> None:
+    """Validate critical settings and log warnings for potential issues."""
+    # Check for missing API key
+    if not settings.anthropic_api_key:
+        logger.warning(
+            "MARATOS_ANTHROPIC_API_KEY not set - LLM calls will fail. "
+            "Set this environment variable or add to .env file."
+        )
+
+    # Warn about SSL skip
+    if settings.gitlab_skip_ssl:
+        logger.warning(
+            "GitLab SSL verification is disabled (gitlab_skip_ssl=True). "
+            "Only use this in development with self-signed certificates."
+        )
+
+    # Warn about debug mode in production-like settings
+    if settings.debug and settings.host == "0.0.0.0":
+        logger.warning(
+            "Running in debug mode with public host binding (0.0.0.0). "
+            "Disable debug mode for production deployments."
+        )
+
+
 # Load persisted settings on startup
 load_settings()
+validate_critical_settings()

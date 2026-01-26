@@ -117,3 +117,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency for getting database sessions."""
     async with async_session_factory() as session:
         yield session
+
+
+async def close_db() -> None:
+    """Close database connections gracefully."""
+    await engine.dispose()

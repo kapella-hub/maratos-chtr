@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.memory.manager import memory_manager
 
@@ -12,16 +12,16 @@ router = APIRouter(prefix="/memory")
 
 class RememberRequest(BaseModel):
     """Request to store a memory."""
-    content: str
-    memory_type: str = "fact"
+    content: str = Field(min_length=1, max_length=50000)
+    memory_type: str = Field(default="fact", min_length=1, max_length=50)
     tags: list[str] | None = None
-    importance: float = 0.5
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class RecallRequest(BaseModel):
     """Request to recall memories."""
-    query: str
-    limit: int = 10
+    query: str = Field(min_length=1, max_length=1000)
+    limit: int = Field(default=10, ge=1, le=100)
     memory_types: list[str] | None = None
 
 
@@ -55,14 +55,17 @@ async def recall(request: RecallRequest) -> list[dict[str, Any]]:
 
 
 @router.get("/recent")
-async def get_recent(limit: int = 20) -> list[dict[str, Any]]:
+async def get_recent(limit: int = Query(default=20, ge=1, le=500)) -> list[dict[str, Any]]:
     """Get recent memories."""
     memories = memory_manager.store.get_recent(limit=limit)
     return [m.to_dict() for m in memories]
 
 
 @router.get("/important")
-async def get_important(limit: int = 20, min_importance: float = 0.7) -> list[dict[str, Any]]:
+async def get_important(
+    limit: int = Query(default=20, ge=1, le=500),
+    min_importance: float = Query(default=0.7, ge=0.0, le=1.0),
+) -> list[dict[str, Any]]:
     """Get important memories."""
     memories = memory_manager.store.get_important(limit=limit, min_importance=min_importance)
     return [m.to_dict() for m in memories]
@@ -71,9 +74,9 @@ async def get_important(limit: int = 20, min_importance: float = 0.7) -> list[di
 @router.delete("/{memory_id}")
 async def delete_memory(memory_id: str) -> dict[str, str]:
     """Delete a memory."""
-    if memory_manager.store.delete(memory_id):
-        return {"status": "deleted"}
-    return {"status": "not_found"}
+    if not memory_manager.store.delete(memory_id):
+        raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
+    return {"status": "deleted"}
 
 
 @router.post("/compact")

@@ -2,8 +2,9 @@
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query
+from enum import Enum
+from pydantic import BaseModel, Field
 
 from app.subagents.manager import subagent_manager, TaskStatus
 from app.subagents.runner import subagent_runner
@@ -11,16 +12,27 @@ from app.subagents.runner import subagent_runner
 router = APIRouter(prefix="/subagents")
 
 
+class ValidAgentId(str, Enum):
+    """Valid agent IDs for spawning tasks."""
+    MO = "mo"
+    ARCHITECT = "architect"
+    CODER = "coder"
+    REVIEWER = "reviewer"
+    TESTER = "tester"
+    DOCS = "docs"
+    DEVOPS = "devops"
+
+
 class SpawnTaskRequest(BaseModel):
     """Request to spawn a subagent task."""
-    task: str
-    agent_id: str = "mo"
+    task: str = Field(min_length=1, max_length=50000)
+    agent_id: ValidAgentId = ValidAgentId.MO
     context: dict[str, Any] | None = None
 
 
 class RunSkillRequest(BaseModel):
     """Request to run a skill as subagent."""
-    skill_id: str
+    skill_id: str = Field(min_length=1, max_length=100)
     context: dict[str, Any] | None = None
 
 
@@ -29,7 +41,7 @@ async def spawn_task(request: SpawnTaskRequest) -> dict[str, Any]:
     """Spawn a subagent to work on a task in the background."""
     task = await subagent_runner.run_task(
         task_description=request.task,
-        agent_id=request.agent_id,
+        agent_id=request.agent_id.value,
         context=request.context,
     )
     return task.to_dict()
@@ -52,7 +64,7 @@ async def run_skill_task(request: RunSkillRequest) -> dict[str, Any]:
 async def list_tasks(
     status: str | None = None,
     agent_id: str | None = None,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=500),
 ) -> list[dict[str, Any]]:
     """List subagent tasks."""
     task_status = TaskStatus(status) if status else None

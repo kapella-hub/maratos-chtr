@@ -21,7 +21,8 @@
       "Bash(pkill:*)",
       "Bash(xargs:*)",
       "Bash(kiro:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(pip install:*)"
     ]
   }
 }

@@ -182,7 +182,15 @@ class SubagentManager:
             self._running[task_id].cancel()
             return True
         return False
-    
+
+    async def cancel_all(self) -> int:
+        """Cancel all running tasks. Returns number of tasks cancelled."""
+        cancelled = 0
+        for task_id in list(self._running.keys()):
+            self._running[task_id].cancel()
+            cancelled += 1
+        return cancelled
+
     def get_running_count(self) -> int:
         """Get number of currently running tasks."""
         return len(self._running)
