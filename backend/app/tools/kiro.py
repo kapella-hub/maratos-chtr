@@ -149,6 +149,42 @@ class KiroTool(Tool):
         
         return None
 
+    def _clean_kiro_output(self, output: str) -> str:
+        """Remove Kiro ASCII art banner and spinner artifacts from output."""
+        lines = output.split('\n')
+        cleaned_lines = []
+        in_banner = False
+
+        for line in lines:
+            # Skip ASCII art banner (contains special Unicode box drawing chars)
+            if '╭─' in line or '╰─' in line or '│' in line:
+                continue
+            # Skip lines that are mostly Unicode art characters
+            if line.count('⠀') > 5 or line.count('█') > 3 or line.count('▀') > 3 or line.count('▄') > 3:
+                continue
+            # Skip model selection line
+            if line.strip().startswith('Model:'):
+                continue
+            # Skip "Did you know" tips
+            if 'Did you know?' in line or '/changelog' in line:
+                in_banner = True
+                continue
+            if in_banner and line.strip() == '':
+                in_banner = False
+                continue
+            if in_banner:
+                continue
+            # Skip empty lines at start
+            if not cleaned_lines and not line.strip():
+                continue
+            cleaned_lines.append(line)
+
+        # Remove trailing empty lines
+        while cleaned_lines and not cleaned_lines[-1].strip():
+            cleaned_lines.pop()
+
+        return '\n'.join(cleaned_lines)
+
     async def _run_kiro(self, prompt: str, workdir: str | None = None) -> ToolResult:
         """Run Kiro with a prompt."""
         kiro_cmd = await self._get_kiro_cmd()
@@ -163,9 +199,11 @@ class KiroTool(Tool):
         prompt_file = Path("/tmp/kiro_prompt.txt")
         prompt_file.write_text(prompt)
 
-        # Run kiro with the prompt file
-        cmd = f"cat {prompt_file} | {kiro_cmd}"
-        
+        # Run kiro with the prompt file using proper flags for non-interactive mode
+        # --no-interactive: Don't prompt for input
+        # --trust-all-tools: Auto-approve tool usage
+        cmd = f"{kiro_cmd} --no-interactive --trust-all-tools -p \"$(cat {prompt_file})\""
+
         process = await asyncio.create_subprocess_shell(
             cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -178,10 +216,23 @@ class KiroTool(Tool):
         stdout, stderr = await process.communicate()
 
         output = stdout.decode("utf-8", errors="replace")
+
+        # Clean the output to remove ASCII art and banners
+        output = self._clean_kiro_output(output)
+
         if stderr:
             stderr_text = stderr.decode("utf-8", errors="replace")
-            if stderr_text.strip():
-                output += f"\n[stderr]\n{stderr_text}"
+            # Filter out common non-error messages from stderr
+            if stderr_text.strip() and 'warning' not in stderr_text.lower():
+                output += f"\n[stderr]\n{self._clean_kiro_output(stderr_text)}"
+
+        # Check for specific error patterns
+        if "Tool approval required" in output:
+            return ToolResult(
+                success=False,
+                output="",
+                error="Kiro CLI requires tool approval. Try running with --trust-all-tools flag.",
+            )
 
         return ToolResult(
             success=process.returncode == 0,

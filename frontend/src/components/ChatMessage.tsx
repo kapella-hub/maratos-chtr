@@ -23,7 +23,7 @@ function stripAnsi(text: string): string {
   return text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
 }
 
-// Filter out verbose tool execution log lines
+// Filter out verbose tool execution log lines and CLI artifacts
 function filterToolLogs(text: string): string {
   const toolLogPatterns = [
     /^[✓✔☑✗✘❌]\s*(?:Successfully|Failed).*$/gm,
@@ -43,12 +43,30 @@ function filterToolLogs(text: string): string {
     /^\d+ operations? processed.*$/gm,
     /^Now let me analyze.*$/gm,
     /^Let me start by reading.*$/gm,
+    // Kiro CLI ASCII art and banners
+    /^[⠀\s]*[▀▄█░▒▓⣴⣶⣦⡀⣾⡿⠁⢻⡆⢰⣿⠋⠙⣿]+[⠀\s]*$/gm,
+    /^.*╭─+.*─+╮.*$/gm,
+    /^.*╰─+.*─+╯.*$/gm,
+    /^.*│.*│.*$/gm,
+    /^Model:\s*(Auto|claude-[\w\-.]+).*$/gm,
+    /^.*Did you know\?.*$/gm,
+    /^.*\/changelog.*$/gm,
+    /^.*\/model to change.*$/gm,
+    /^error: Tool approval required.*$/gm,
+    /^.*--trust-all-tools.*$/gm,
+    /^.*--no-interactive.*$/gm,
   ]
 
   let result = text
   for (const pattern of toolLogPatterns) {
     result = result.replace(pattern, '')
   }
+  // Clean up lines that are mostly Unicode whitespace/box chars
+  result = result.split('\n').filter(line => {
+    // Skip lines that are mostly special Unicode chars
+    const specialChars = (line.match(/[⠀▀▄█░▒▓│╭╮╯╰─┌┐└┘├┤┬┴┼]/g) || []).length
+    return specialChars < line.length * 0.5
+  }).join('\n')
   result = result.replace(/\n{3,}/g, '\n\n')
   return result
 }

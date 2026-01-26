@@ -35,6 +35,52 @@ logger = logging.getLogger(__name__)
 SPAWN_PATTERN = re.compile(r'\[SPAWN:(\w+)\]\s*(.+?)(?=\[SPAWN:|\Z)', re.DOTALL)
 
 
+def clean_cli_output(text: str) -> str:
+    """Remove CLI artifacts like ASCII banners, spinners, and verbose log lines."""
+    if not text:
+        return text
+
+    lines = text.split('\n')
+    cleaned = []
+    skip_until_empty = False
+
+    for line in lines:
+        # Skip ASCII art banner lines (contain lots of Unicode box/block chars)
+        special_count = sum(1 for c in line if c in '⠀▀▄█░▒▓│╭╮╯╰─┌┐└┘├┤┬┴┼⣴⣶⣦⣿⢰⢸⠈⠙⠁⠀')
+        if special_count > len(line) * 0.3 and len(line) > 10:
+            continue
+
+        # Skip "Did you know?" banners and similar
+        if 'Did you know?' in line or '─────' in line:
+            skip_until_empty = True
+            continue
+        if skip_until_empty:
+            if not line.strip():
+                skip_until_empty = False
+            continue
+
+        # Skip model selection lines
+        if line.strip().startswith('Model:') and ('Auto' in line or 'claude' in line):
+            continue
+
+        # Skip tool approval errors
+        if 'Tool approval required' in line or '--trust-all-tools' in line:
+            continue
+
+        # Skip verbose operation summaries
+        if re.match(r'^\s*Summary:\s*\d+\s*operations?', line):
+            continue
+        if re.match(r'^\s*\d+\s*operations?\s+processed', line):
+            continue
+
+        cleaned.append(line)
+
+    # Remove leading/trailing empty lines and collapse multiple empty lines
+    result = '\n'.join(cleaned)
+    result = re.sub(r'\n{3,}', '\n\n', result)
+    return result.strip()
+
+
 async def generate_title(user_message: str, assistant_response: str) -> str:
     """Generate a concise title for the chat session."""
     import litellm
@@ -501,7 +547,8 @@ async def chat(
                         
                         if current.status == TaskStatus.COMPLETED:
                             result_text = current.result.get("response", "") if current.result else ""
-                            # Convert numbered line format to proper code blocks
+                            # Clean CLI artifacts and convert numbered lines to code blocks
+                            result_text = clean_cli_output(result_text)
                             result_text = convert_numbered_lines_to_codeblock(result_text)
                             logger.info(f"Subagent {agent_id_spawn} response length: {len(result_text)}")
                             
