@@ -302,8 +302,10 @@ async def chat(
         """Generate streaming response."""
         full_response = ""
 
-        # Yield session ID and agent info first
-        yield f"data: {{\"session_id\": \"{session.id}\", \"agent\": \"{agent_id}\"}}\n\n"
+        # Yield session ID, agent info, and current model first
+        from app.config import settings
+        current_model = settings.default_model or "claude-sonnet-4.5"
+        yield f"data: {{\"session_id\": \"{session.id}\", \"agent\": \"{agent_id}\", \"model\": \"{current_model}\"}}\n\n"
 
         # If command returned a direct response, yield it and return
         if command_response:

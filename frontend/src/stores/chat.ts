@@ -53,15 +53,17 @@ interface ChatStore {
   messageQueue: QueuedMessage[]
   sessionId: string | null
   agentId: string
+  currentModel: string | null  // Model being used for current chat
   isStreaming: boolean
   isThinking: boolean
   isModelThinking: boolean
   isOrchestrating: boolean
   activeSubagents: SubagentTask[]
   abortController: AbortController | null
-  
+
   setSessionId: (id: string | null) => void
   setAgentId: (id: string) => void
+  setCurrentModel: (model: string | null) => void
   addMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void
   appendToLastMessage: (content: string) => void
   setLastMessageAgent: (agentId: string) => void
@@ -86,6 +88,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   messageQueue: [],
   sessionId: null,
   agentId: 'mo',
+  currentModel: null,
   isStreaming: false,
   isThinking: false,
   isModelThinking: false,
@@ -95,6 +98,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   setSessionId: (id) => set({ sessionId: id }),
   setAgentId: (id) => set({ agentId: id }),
+  setCurrentModel: (model) => set({ currentModel: model }),
   setAbortController: (controller) => set({ abortController: controller }),
   
   stopGeneration: () => {
@@ -175,5 +179,5 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   
   clearSubagents: () => set({ activeSubagents: [], isOrchestrating: false }),
   
-  clearMessages: () => set({ messages: [], messageQueue: [], sessionId: null, isThinking: false, isModelThinking: false, isOrchestrating: false, activeSubagents: [] }),
+  clearMessages: () => set({ messages: [], messageQueue: [], sessionId: null, currentModel: null, isThinking: false, isModelThinking: false, isOrchestrating: false, activeSubagents: [] }),
 }))

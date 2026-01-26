@@ -56,6 +56,13 @@ export default function ChatInput({
   }
 
   const handleKeyDown = (e: KeyboardEvent) => {
+    // Cmd/Ctrl + Enter to send
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      handleSubmit()
+      return
+    }
+    // Enter without shift to send
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
@@ -68,6 +75,7 @@ export default function ChatInput({
 
   const charCount = input.length
   const showCharCount = charCount > 100
+  const isOverLimit = charCount > 2000
 
   return (
     <div className="border-t border-border/30 bg-gradient-to-t from-background via-background to-transparent">
@@ -190,9 +198,12 @@ export default function ChatInput({
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className="absolute right-4 -top-6 text-xs text-muted-foreground"
+                  className={cn(
+                    "absolute right-4 -top-6 text-xs font-medium",
+                    isOverLimit ? "text-red-400" : "text-muted-foreground"
+                  )}
                 >
-                  {charCount.toLocaleString()} characters
+                  {charCount.toLocaleString()} {isOverLimit && "⚠️"}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -201,6 +212,8 @@ export default function ChatInput({
           {/* Footer hints */}
           <div className="flex items-center justify-center gap-4 mt-3">
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground/60">
+              <kbd className="kbd">⌘</kbd>
+              <span>+</span>
               <kbd className="kbd">Enter</kbd>
               <span>send</span>
             </span>

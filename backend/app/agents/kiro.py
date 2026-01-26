@@ -174,7 +174,12 @@ class KiroAgent(Agent):
         # Use model_override if provided, otherwise fall back to settings or config
         from app.config import settings
         model = model_override or settings.default_model or self.config.model or "claude-sonnet-4.5"
-        
+
+        # Log which model is being used
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"KiroAgent using model: {model} (settings.default_model={settings.default_model})")
+
         # Build kiro-cli command
         cmd = [
             self._kiro_path,

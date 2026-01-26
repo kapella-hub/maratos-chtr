@@ -23,7 +23,7 @@ function stripAnsi(text: string): string {
   return text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
 }
 
-// Filter out verbose tool execution log lines and CLI artifacts
+// Filter out verbose tool execution log lines, CLI artifacts, and GOAL markers
 function filterToolLogs(text: string): string {
   const toolLogPatterns = [
     /^[✓✔☑✗✘❌]\s*(?:Successfully|Failed).*$/gm,
@@ -43,11 +43,15 @@ function filterToolLogs(text: string): string {
     /^\d+ operations? processed.*$/gm,
     /^Now let me analyze.*$/gm,
     /^Let me start by reading.*$/gm,
-    // Kiro CLI ASCII art and banners
+    /^Now let me (?:check|examine|look|read|review).*$/gm,
+    /^Let me (?:also )?(?:check|examine|look|read|review).*$/gm,
+    // Kiro CLI ASCII art and banners - be specific to avoid filtering legitimate flowcharts
     /^[⠀\s]*[▀▄█░▒▓⣴⣶⣦⡀⣾⡿⠁⢻⡆⢰⣿⠋⠙⣿]+[⠀\s]*$/gm,
-    /^.*╭─+.*─+╮.*$/gm,
-    /^.*╰─+.*─+╯.*$/gm,
-    /^.*│.*│.*$/gm,
+    // Only filter Kiro-style rounded box banners (╭─╮ style), not regular boxes
+    /^\s*╭─+╮\s*$/gm,
+    /^\s*╰─+╯\s*$/gm,
+    // Only filter Kiro banner content (│ with mostly whitespace or "Did you know" style content)
+    /^\s*│\s+(?:Did you know|Type \/|Model:|Auto)\s*.*│\s*$/gm,
     /^Model:\s*(Auto|claude-[\w\-.]+).*$/gm,
     /^.*Did you know\?.*$/gm,
     /^.*\/changelog.*$/gm,
@@ -55,25 +59,86 @@ function filterToolLogs(text: string): string {
     /^error: Tool approval required.*$/gm,
     /^.*--trust-all-tools.*$/gm,
     /^.*--no-interactive.*$/gm,
+    // Filter ALL GOAL markers - these are internal tracking
+    /^\[GOAL:\d+\]\s*.*/gm,
+    /^\[GOAL_DONE:\d+\]\s*$/gm,
+    /^\[GOAL_FAILED:\d+\]\s*.*/gm,
+    /^\[CHECKPOINT:\w+\]\s*.*/gm,
+    // Filter agent header markers
+    /^\[(CODER|ARCHITECT|REVIEWER|TESTER|DOCS|DEVOPS)\]\s*/gm,
+    // Filter Summary lines
+    /^\s*-?\s*Summary:\s*\d+\s+operations?\s+processed.*$/gm,
   ]
 
   let result = text
   for (const pattern of toolLogPatterns) {
     result = result.replace(pattern, '')
   }
-  // Clean up lines that are mostly Unicode whitespace/box chars
+  // Clean up lines that are mostly Kiro/CLI braille art (⠀▀▄█░▒▓) but preserve box-drawing chars for flowcharts
   result = result.split('\n').filter(line => {
-    // Skip lines that are mostly special Unicode chars
-    const specialChars = (line.match(/[⠀▀▄█░▒▓│╭╮╯╰─┌┐└┘├┤┬┴┼]/g) || []).length
-    return specialChars < line.length * 0.5
+    // Only filter lines with braille/block art chars (CLI banners), not box-drawing chars (flowcharts)
+    const cliArtChars = (line.match(/[⠀▀▄█░▒▓⣴⣶⣦⡀⣾⡿⢻⣿]/g) || []).length
+    // If line is mostly CLI art chars, filter it out
+    return cliArtChars < line.length * 0.3
   }).join('\n')
   result = result.replace(/\n{3,}/g, '\n\n')
-  return result
+  return result.trim()
 }
 
 // Fix malformed code blocks
 function fixCodeBlocks(text: string): string {
   return text.replace(/```(\w+)\s+([^\n])/g, '```$1\n$2')
+}
+
+// Inject file paths into code fences from surrounding context
+// Detects patterns like "In `path/to/file.ts`:" followed by code block
+// and modifies the fence to ```typescript:path/to/file.ts
+function injectFilePathsIntoCodeFences(text: string): string {
+  const lines = text.split('\n')
+  const result: string[] = []
+
+  // Patterns to detect file references before code blocks
+  const fileRefPatterns = [
+    /^(?:In|File|Update|Create|Edit|Modify|Change|Modified|Updated|Created)\s*[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)[`"']?\s*:?\s*$/i,
+    /^\*\*([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)\*\*:?\s*$/,
+    /^`([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)`:?\s*$/,
+    /^([a-zA-Z0-9_\-./]+\/[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+):?\s*$/,
+  ]
+
+  let pendingFilePath: string | null = null
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const trimmedLine = line.trim()
+
+    // Check if this line matches a file reference pattern
+    for (const pattern of fileRefPatterns) {
+      const match = trimmedLine.match(pattern)
+      if (match) {
+        pendingFilePath = match[1]
+        break
+      }
+    }
+
+    // Check if this is a code fence and we have a pending file path
+    if (pendingFilePath && line.match(/^```(\w*)$/)) {
+      const langMatch = line.match(/^```(\w*)$/)
+      const lang = langMatch?.[1] || ''
+      // Inject file path into the fence
+      result.push(`\`\`\`${lang}:${pendingFilePath}`)
+      pendingFilePath = null
+      continue
+    }
+
+    // If line doesn't look like a file reference or code fence, clear pending
+    if (trimmedLine && !line.match(/^```/) && !fileRefPatterns.some(p => p.test(trimmedLine))) {
+      pendingFilePath = null
+    }
+
+    result.push(line)
+  }
+
+  return result.join('\n')
 }
 
 // Strip hidden blocks
@@ -327,19 +392,126 @@ function ComponentLoading() {
   )
 }
 
+// Detect if this is a subagent response (not from MO or user)
+const SUBAGENT_IDS = new Set(['architect', 'coder', 'reviewer', 'tester', 'docs', 'devops'])
+
+function isSubagentResponse(agentId: string): boolean {
+  return SUBAGENT_IDS.has(agentId.toLowerCase())
+}
+
+// Extract a brief summary from agent response content
+function extractAgentSummary(content: string, agentId: string): string {
+  // Try to find key accomplishments
+  const lines = content.split('\n').filter(l => l.trim())
+
+  // Look for summary patterns
+  for (const line of lines) {
+    if (line.match(/^(completed|implemented|fixed|created|updated|reviewed|tested|added)/i)) {
+      return line.slice(0, 100) + (line.length > 100 ? '...' : '')
+    }
+    if (line.match(/^(summary|result|done):/i)) {
+      return line.replace(/^(summary|result|done):\s*/i, '').slice(0, 100)
+    }
+  }
+
+  // Fallback to first meaningful line
+  for (const line of lines) {
+    if (line.length > 20 && !line.startsWith('[') && !line.startsWith('#')) {
+      return line.slice(0, 80) + (line.length > 80 ? '...' : '')
+    }
+  }
+
+  // Default summary based on agent type
+  const agentActions: Record<string, string> = {
+    coder: 'Code implementation completed',
+    architect: 'Architecture design completed',
+    reviewer: 'Code review completed',
+    tester: 'Tests completed',
+    docs: 'Documentation completed',
+    devops: 'DevOps task completed',
+  }
+  return agentActions[agentId.toLowerCase()] || 'Task completed'
+}
+
 export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
   const [showCopy, setShowCopy] = useState(false)
   const isUser = message.role === 'user'
   const agentId = message.agentId || 'mo'
+  const isSubagent = isSubagentResponse(agentId)
+  // Subagent responses are collapsed by default
+  const [expanded, setExpanded] = useState(!isSubagent)
+
+  // Detect and wrap agent work output sections in collapsible blocks
+  function wrapAgentOutput(text: string): string {
+    const lines = text.split('\n')
+    const result: string[] = []
+    let agentOutputLines: string[] = []
+    let inAgentOutput = false
+    
+    const agentOutputPattern = /^[✓✔☑✗✘❌⋮]\s|^\s*(?:Successfully|Failed|Reading|Searching|Found|Completed in|Purpose:|Updating:|Creating:|Deleting:)/
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      const isAgentOutput = agentOutputPattern.test(line.trim())
+      
+      if (isAgentOutput) {
+        if (!inAgentOutput) {
+          inAgentOutput = true
+          agentOutputLines = []
+        }
+        agentOutputLines.push(line)
+      } else {
+        if (inAgentOutput && agentOutputLines.length >= 2) {
+          // Wrap accumulated agent output in a collapsible code block
+          result.push('')
+          result.push('<details>')
+          result.push('<summary>🔧 Agent Work Details</summary>')
+          result.push('')
+          result.push('```')
+          result.push(...agentOutputLines)
+          result.push('```')
+          result.push('</details>')
+          result.push('')
+          agentOutputLines = []
+        } else if (inAgentOutput) {
+          // Not enough lines, just add them normally
+          result.push(...agentOutputLines)
+        }
+        inAgentOutput = false
+        result.push(line)
+      }
+    }
+    
+    // Handle remaining agent output at end
+    if (inAgentOutput && agentOutputLines.length >= 2) {
+      result.push('')
+      result.push('<details>')
+      result.push('<summary>🔧 Agent Work Details</summary>')
+      result.push('')
+      result.push('```')
+      result.push(...agentOutputLines)
+      result.push('```')
+      result.push('</details>')
+      result.push('')
+    } else if (agentOutputLines.length > 0) {
+      result.push(...agentOutputLines)
+    }
+    
+    return result.join('\n')
+  }
 
   const processedContent = useMemo(() => {
     const { content: rawContent, hadThinking, isThinkingInProgress } = stripHiddenBlocks(message.content)
-    const filtered = filterToolLogs(rawContent)
+    const withAgentWork = wrapAgentOutput(rawContent)
+    const filtered = filterToolLogs(withAgentWork)
     const withFixedCodeBlocks = fixCodeBlocks(filtered)
     const withSpawnCards = convertSpawnMarkers(withFixedCodeBlocks)
-    const content = convertNumberedLinesToCodeBlocks(withSpawnCards)
-    return { content: stripAnsi(content), hadThinking, isThinkingInProgress }
-  }, [message.content])
+    const withNumberedLines = convertNumberedLinesToCodeBlocks(withSpawnCards)
+    const withFilePaths = injectFilePathsIntoCodeFences(withNumberedLines)
+    const content = withFilePaths
+    const summary = isSubagent ? extractAgentSummary(rawContent, agentId) : ''
+    return { content: stripAnsi(content), hadThinking, isThinkingInProgress, summary }
+  }, [message.content, agentId, isSubagent])
 
   return (
     <motion.div
@@ -422,10 +594,88 @@ export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
               </div>
             )}
 
-            {/* Markdown Content */}
+            {/* Subagent Response - Collapsible by default */}
+            {isSubagent && !isUser && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className={cn(
+                  'rounded-xl border overflow-hidden mb-2',
+                  expanded ? 'border-border/50' : `border-${agentId === 'coder' ? 'emerald' : agentId === 'reviewer' ? 'amber' : agentId === 'tester' ? 'pink' : agentId === 'architect' ? 'blue' : 'violet'}-500/30`
+                )}
+              >
+                <button
+                  onClick={() => setExpanded(!expanded)}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-4 py-3 transition-colors text-left',
+                    expanded ? 'bg-muted/20 hover:bg-muted/30' : 'bg-muted/40 hover:bg-muted/50'
+                  )}
+                >
+                  <motion.div
+                    animate={{ rotate: expanded ? 90 : 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                  </motion.div>
+                  <span className="text-lg">{agentIcons[agentId] || '🤖'}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm">{agentLabels[agentId] || agentId}</span>
+                      <span className={cn(
+                        'text-xs px-2 py-0.5 rounded-full',
+                        expanded ? 'bg-muted text-muted-foreground' : 'bg-emerald-500/20 text-emerald-400'
+                      )}>
+                        {expanded ? 'expanded' : 'completed'}
+                      </span>
+                    </div>
+                    {!expanded && processedContent.summary && (
+                      <p className="text-xs text-muted-foreground mt-1 truncate">
+                        {processedContent.summary}
+                      </p>
+                    )}
+                  </div>
+                </button>
+              </motion.div>
+            )}
+
+            {/* Markdown Content - hidden if subagent response and not expanded */}
+            {(expanded || isUser || !isSubagent) && (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
+                details: ({ children }) => {
+                  const [isOpen, setIsOpen] = useState(false)
+                  return (
+                    <div className="my-4 rounded-xl border border-border overflow-hidden">
+                      <button
+                        onClick={() => setIsOpen(!isOpen)}
+                        className="w-full flex items-center gap-2 px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors text-left"
+                      >
+                        {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                        <span className="font-medium text-sm">
+                          {/* Extract summary text from children */}
+                          {Array.isArray(children) && children.find((child: any) => child?.type === 'summary')?.props?.children || '🔧 Agent Work Details'}
+                        </span>
+                      </button>
+                      <AnimatePresence>
+                        {isOpen && (
+                          <motion.div
+                            initial={{ height: 0 }}
+                            animate={{ height: 'auto' }}
+                            exit={{ height: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="p-4">
+                              {/* Render children except summary */}
+                              {Array.isArray(children) && children.filter((child: any) => child?.type !== 'summary')}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  )
+                },
+                summary: () => null, // Handled by details component
                 h1: ({ children }) => (
                   <h1 className="markdown-h1">{children}</h1>
                 ),
@@ -449,28 +699,96 @@ export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
                   const spawnMatch = text.match(/:::spawn\[(\w+)\|([^|]+)\|([^|]+)\|([^\]]+)\]:::/)
                   if (spawnMatch) {
                     const [, agent, icon, label, task] = spawnMatch
-                    const config = spawnAgentConfig[agent.toLowerCase()] || spawnAgentConfig.mo
+
+                    // Agent-specific styling
+                    const agentStyles: Record<string, { bg: string; border: string; glow: string; text: string }> = {
+                      architect: {
+                        bg: 'bg-gradient-to-br from-blue-950/80 to-cyan-950/60',
+                        border: 'border-blue-500/40',
+                        glow: 'shadow-blue-500/20',
+                        text: 'text-blue-300',
+                      },
+                      coder: {
+                        bg: 'bg-gradient-to-br from-emerald-950/80 to-green-950/60',
+                        border: 'border-emerald-500/40',
+                        glow: 'shadow-emerald-500/20',
+                        text: 'text-emerald-300',
+                      },
+                      reviewer: {
+                        bg: 'bg-gradient-to-br from-amber-950/80 to-orange-950/60',
+                        border: 'border-amber-500/40',
+                        glow: 'shadow-amber-500/20',
+                        text: 'text-amber-300',
+                      },
+                      tester: {
+                        bg: 'bg-gradient-to-br from-pink-950/80 to-rose-950/60',
+                        border: 'border-pink-500/40',
+                        glow: 'shadow-pink-500/20',
+                        text: 'text-pink-300',
+                      },
+                      docs: {
+                        bg: 'bg-gradient-to-br from-cyan-950/80 to-sky-950/60',
+                        border: 'border-cyan-500/40',
+                        glow: 'shadow-cyan-500/20',
+                        text: 'text-cyan-300',
+                      },
+                      devops: {
+                        bg: 'bg-gradient-to-br from-orange-950/80 to-red-950/60',
+                        border: 'border-orange-500/40',
+                        glow: 'shadow-orange-500/20',
+                        text: 'text-orange-300',
+                      },
+                      mo: {
+                        bg: 'bg-gradient-to-br from-violet-950/80 to-purple-950/60',
+                        border: 'border-violet-500/40',
+                        glow: 'shadow-violet-500/20',
+                        text: 'text-violet-300',
+                      },
+                    }
+
+                    const style = agentStyles[agent.toLowerCase()] || agentStyles.mo
+
                     return (
-                      <motion.div
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        className={cn(
-                          'my-4 p-4 rounded-xl border-l-4 flex items-start gap-4',
-                          'bg-gradient-to-r from-transparent to-muted/30',
-                          config.color
-                        )}
-                      >
-                        <span className="text-3xl">{icon}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="font-semibold">{label}</span>
-                            <span className="badge badge-primary text-xs">spawning</span>
+                      <>
+                        <motion.div
+                          initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          transition={{ duration: 0.3, ease: 'easeOut' }}
+                          className={cn(
+                            'my-4 p-4 rounded-xl border',
+                            'shadow-lg backdrop-blur-sm',
+                            style.bg,
+                            style.border,
+                            style.glow
+                          )}
+                        >
+                          <div className="flex items-start gap-4">
+                            <div className="flex-shrink-0">
+                              <div className={cn(
+                                'w-12 h-12 rounded-xl flex items-center justify-center text-2xl',
+                                'bg-black/30 border border-white/10'
+                              )}>
+                                {icon}
+                              </div>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className={cn('font-bold text-lg', style.text)}>
+                                  {label}
+                                </span>
+                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-white/10 text-white/80">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  spawning
+                                </span>
+                              </div>
+                              <p className="text-sm text-white/80 leading-relaxed">
+                                {task}
+                              </p>
+                            </div>
                           </div>
-                          <p className="text-sm text-muted-foreground leading-relaxed break-words">
-                            {task}
-                          </p>
-                        </div>
-                      </motion.div>
+                        </motion.div>
+                        <div className="h-2" /> {/* Spacing after spawn card */}
+                      </>
                     )
                   }
 
@@ -484,10 +802,35 @@ export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
                   const codeProps = codeElement?.props || {}
                   const codeContent = String(codeProps.children || '').replace(/\n$/, '')
                   const className = codeProps.className || ''
-                  const language = className.replace('language-', '')
 
-                  // Handle mermaid diagrams
-                  if (language === 'mermaid') {
+                  // Extract language and file path from className
+                  // Supports formats like: language-typescript:path/to/file.ts or language-typescript
+                  let language = className.replace('language-', '').trim().toLowerCase()
+                  let filePath: string | undefined
+
+                  // Check for file path in language (e.g., typescript:src/file.ts)
+                  if (language.includes(':')) {
+                    const [lang, path] = language.split(':')
+                    language = lang.trim()
+                    filePath = path.trim()
+                  }
+
+                  // Also try to extract file path from first comment line in code
+                  if (!filePath && codeContent) {
+                    const firstLine = codeContent.split('\n')[0]
+                    // Match patterns like: // src/components/file.tsx or # path/to/file.py
+                    const filePathMatch = firstLine.match(/^(?:\/\/|#|\/\*)\s*(?:file:?\s*)?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)/)
+                    if (filePathMatch) {
+                      filePath = filePathMatch[1]
+                    }
+                  }
+
+                  // Handle mermaid diagrams - check for mermaid language or content
+                  const isMermaid = language === 'mermaid' ||
+                    // Fallback: detect mermaid by content patterns
+                    (!language && /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|journey)\b/i.test(codeContent.trim()))
+
+                  if (isMermaid) {
                     return (
                       <Suspense fallback={<ComponentLoading />}>
                         <MermaidDiagram chart={codeContent} />
@@ -515,7 +858,25 @@ export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
                     }
                   }
 
-                  return <CodeBlock code={codeContent} language={language} />
+                  // Check if this looks like a file diff or agent output
+                  const isDiff = codeContent.includes('---') && codeContent.includes('+++') ||
+                                 codeContent.match(/^[-+]\s/m) ||
+                                 codeContent.includes('@@') ||
+                                 (codeContent.split('\n').length > 20 && !language)
+
+                  const codeBlock = <CodeBlock code={codeContent} language={language} filePath={filePath} />
+                  
+                  // Wrap diffs and long outputs in collapsible sections
+                  if (isDiff || codeContent.split('\n').length > 30) {
+                    const title = isDiff ? '📝 File Changes' : '📄 Details'
+                    return (
+                      <CollapsibleSection title={title} defaultOpen={false}>
+                        {codeBlock}
+                      </CollapsibleSection>
+                    )
+                  }
+
+                  return codeBlock
                 },
                 code: ({ className, children }) => {
                   const isInline = !className
@@ -575,6 +936,17 @@ export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
             >
               {processedContent.content}
             </ReactMarkdown>
+            )}
+
+            {/* Expand prompt for collapsed subagent responses */}
+            {isSubagent && !expanded && !isUser && (
+              <button
+                onClick={() => setExpanded(true)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors mt-2"
+              >
+                Click to see full response...
+              </button>
+            )}
           </div>
         )}
       </div>

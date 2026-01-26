@@ -1,15 +1,17 @@
 import { useState, useCallback, useMemo } from 'react'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
-import { Copy, Check, Terminal, FileCode, FileJson, FileText, Braces, Hash, Database } from 'lucide-react'
+import { Copy, Check, Terminal, FileCode, FileJson, FileText, Braces, Hash, Database, ListOrdered } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface CodeBlockProps {
   code: string
   language?: string
+  filePath?: string
   showLineNumbers?: boolean
   className?: string
   maxHeight?: number
+  onRunInTerminal?: (code: string) => void
 }
 
 // Language icons and colors
@@ -85,11 +87,14 @@ const customStyle = {
 export default function CodeBlock({
   code,
   language = 'text',
-  showLineNumbers = true,
+  filePath,
+  showLineNumbers: initialShowLineNumbers = true,
   className,
   maxHeight = 500,
+  onRunInTerminal,
 }: CodeBlockProps) {
   const [copied, setCopied] = useState(false)
+  const [showLineNumbers, setShowLineNumbers] = useState(initialShowLineNumbers)
 
   const normalizedLang = useMemo(() => {
     const lang = language.toLowerCase().trim()
@@ -115,6 +120,7 @@ export default function CodeBlock({
   }
 
   const Icon = config.icon
+  const isShellScript = ['bash', 'shell', 'sh', 'zsh', 'powershell'].includes(normalizedLang)
 
   const handleCopy = useCallback(async () => {
     try {
@@ -126,41 +132,105 @@ export default function CodeBlock({
     }
   }, [code])
 
+  const handleRunInTerminal = useCallback(() => {
+    if (onRunInTerminal) {
+      onRunInTerminal(code)
+    }
+  }, [code, onRunInTerminal])
+
   const lineCount = code.split('\n').length
+
+  // Extract filename and directory from a path
+  const fileName = filePath ? filePath.split('/').pop() : null
+  const directory = filePath && filePath.includes('/')
+    ? filePath.substring(0, filePath.lastIndexOf('/'))
+    : null
 
   return (
     <div className={cn('code-block my-4 group', className)}>
       {/* Header */}
       <div className="code-block-header">
-        <div className="flex items-center gap-2">
-          <Icon className={cn('w-4 h-4', config.color)} />
-          <span className="text-xs font-medium text-gray-400">{config.label}</span>
-          <span className="text-xs text-gray-600">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <Icon className={cn('w-4 h-4 flex-shrink-0', config.color)} />
+          {filePath ? (
+            <div className="flex items-center gap-1.5 min-w-0" title={filePath}>
+              {directory && (
+                <>
+                  <span className="text-[11px] text-gray-500 truncate max-w-[200px]">
+                    {directory}/
+                  </span>
+                </>
+              )}
+              <span className="text-[13px] font-semibold text-gray-100 truncate">
+                {fileName}
+              </span>
+            </div>
+          ) : (
+            <span className="text-xs font-medium text-gray-400">{config.label}</span>
+          )}
+          <span className="text-[11px] text-gray-600 flex-shrink-0 ml-2">
             {lineCount} {lineCount === 1 ? 'line' : 'lines'}
           </span>
         </div>
-        <button
-          onClick={handleCopy}
-          className={cn(
-            'flex items-center gap-1.5 px-2 py-1 rounded-md text-xs',
-            'transition-all duration-200',
-            copied
-              ? 'bg-emerald-500/20 text-emerald-400'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+        <div className="flex items-center gap-1">
+          {/* Line Numbers Toggle */}
+          {lineCount > 1 && (
+            <button
+              onClick={() => setShowLineNumbers(!showLineNumbers)}
+              className={cn(
+                'flex items-center gap-1.5 px-2 py-1 rounded-md text-xs',
+                'transition-all duration-200',
+                showLineNumbers
+                  ? 'bg-blue-500/20 text-blue-400'
+                  : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+              )}
+              title={showLineNumbers ? 'Hide line numbers' : 'Show line numbers'}
+            >
+              <ListOrdered className="w-3.5 h-3.5" />
+            </button>
           )}
-        >
-          {copied ? (
-            <>
-              <Check className="w-3.5 h-3.5" />
-              <span>Copied!</span>
-            </>
-          ) : (
-            <>
-              <Copy className="w-3.5 h-3.5" />
-              <span>Copy</span>
-            </>
+          
+          {/* Run in Terminal */}
+          {isShellScript && (
+            <button
+              onClick={handleRunInTerminal}
+              className={cn(
+                'flex items-center gap-1.5 px-2 py-1 rounded-md text-xs',
+                'transition-all duration-200',
+                'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+              )}
+              title="Run in terminal"
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              <span>Run</span>
+            </button>
           )}
-        </button>
+          
+          {/* Copy Button */}
+          <button
+            onClick={handleCopy}
+            className={cn(
+              'flex items-center gap-1.5 px-2 py-1 rounded-md text-xs',
+              'transition-all duration-200',
+              copied
+                ? 'bg-emerald-500/20 text-emerald-400'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+            )}
+            title={copied ? 'Copied!' : 'Copy code'}
+          >
+            {copied ? (
+              <>
+                <Check className="w-3.5 h-3.5" />
+                <span>Copied!</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copy</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Code Content */}

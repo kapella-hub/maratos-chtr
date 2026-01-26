@@ -74,11 +74,12 @@ export async function deleteSession(id: string): Promise<void> {
 }
 
 // Chat event types
-export type ChatEventType = 
-  | 'session_id' 
-  | 'content' 
-  | 'done' 
-  | 'agent' 
+export type ChatEventType =
+  | 'session_id'
+  | 'content'
+  | 'done'
+  | 'agent'
+  | 'model'
   | 'thinking'
   | 'model_thinking'
   | 'orchestrating'
@@ -163,6 +164,9 @@ export async function* streamChat(
             }
             if (parsed.agent) {
               yield { type: 'agent', data: parsed.agent }
+            }
+            if (parsed.model) {
+              yield { type: 'model', data: parsed.model }
             }
             if (parsed.thinking !== undefined) {
               yield { type: 'thinking', data: parsed.thinking }
