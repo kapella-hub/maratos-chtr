@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # Paths
     data_dir: Path = Field(default_factory=lambda: Path("./data"))
     workspace_dir: Path = Field(default_factory=lambda: Path.home() / "maratos-workspace")
+    skills_dir: Path = Field(default_factory=lambda: Path.home() / ".maratos" / "skills")
 
     # Filesystem Security - directories where writes are allowed
     # Comma-separated list of paths. Writes allowed in these dirs and their subdirs.

@@ -456,10 +456,43 @@ async def chat(
                     if not current:
                         continue
                     
-                    # Send progress updates
+                    # Send progress updates with goal information
                     if current.progress != last_progress.get(task.id, 0):
                         last_progress[task.id] = current.progress
-                        yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "progress": {current.progress:.2f}}}\n\n'
+
+                        # Build progress event with goal data
+                        import json
+                        progress_data = {
+                            "subagent": agent_id_spawn,
+                            "task_id": task.id,
+                            "progress": round(current.progress, 2),
+                        }
+
+                        # Include goal tracking if available
+                        if current.goals:
+                            goals_completed = sum(1 for g in current.goals if g.status.value == "completed")
+                            progress_data["goals"] = {
+                                "total": len(current.goals),
+                                "completed": goals_completed,
+                                "current_id": current.current_goal_id,
+                                "items": [
+                                    {
+                                        "id": g.id,
+                                        "description": g.description[:100],
+                                        "status": g.status.value,
+                                    }
+                                    for g in current.goals
+                                ],
+                            }
+
+                        # Include checkpoints if available
+                        if current.checkpoints:
+                            progress_data["checkpoints"] = [
+                                {"name": c.name, "description": c.description[:100]}
+                                for c in current.checkpoints[-3:]  # Last 3 checkpoints
+                            ]
+
+                        yield f"data: {json.dumps(progress_data)}\n\n"
                     
                     # Check if completed
                     if current.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):

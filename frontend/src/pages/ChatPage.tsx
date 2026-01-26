@@ -97,9 +97,17 @@ export default function ChatPage() {
           updateSubagent({
             id: event.taskId || event.subagent,
             agent: event.subagent,
-            status: (event.status as 'spawning' | 'running' | 'completed' | 'failed') || 'running',
+            status: (event.status as 'spawning' | 'running' | 'retrying' | 'completed' | 'failed' | 'timed_out' | 'cancelled') || 'running',
             progress: event.progress || 0,
             error: event.error,
+            goals: event.goals,
+            checkpoints: event.checkpoints,
+            logs: (event as { logs?: string[] }).logs,
+            currentAction: (event as { current_action?: string }).current_action,
+            attempt: event.attempt,
+            maxAttempts: event.max_attempts,
+            isFallback: event.is_fallback,
+            originalTaskId: event.original_task_id,
           })
         } else if (event.type === 'subagent_result' && event.data) {
           addMessage({
@@ -142,8 +150,12 @@ export default function ChatPage() {
   }, [dequeueMessage, processMessage])
 
   // Handle sending a new message
-  const handleSend = async (content: string) => {
-    await processMessage(content)
+  const handleSend = async (content: string, skill?: { id: string; name: string } | null) => {
+    // If a skill is selected, prefix the content with skill info
+    const messageContent = skill
+      ? `[Using skill: ${skill.name}]\n\n${content}`
+      : content
+    await processMessage(messageContent)
     processQueue()
   }
 
@@ -264,7 +276,18 @@ export default function ChatPage() {
       </div>
 
       {isOrchestrating && activeSubagents.length > 0 && (
-        <SubagentStatus tasks={activeSubagents} />
+        <SubagentStatus
+          tasks={activeSubagents}
+          onCancel={(taskId) => {
+            // Update the local state to reflect cancellation
+            updateSubagent({
+              id: taskId,
+              agent: activeSubagents.find(t => t.id === taskId)?.agent || '',
+              status: 'cancelled',
+              progress: activeSubagents.find(t => t.id === taskId)?.progress || 0,
+            })
+          }}
+        />
       )}
 
       <QueueIndicator queue={messageQueue} onClear={clearQueue} />

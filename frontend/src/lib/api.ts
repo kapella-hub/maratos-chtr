@@ -85,6 +85,24 @@ export type ChatEventType =
   | 'subagent'
   | 'subagent_result'
 
+export interface SubagentGoal {
+  id: number
+  description: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+}
+
+export interface SubagentCheckpoint {
+  name: string
+  description: string
+}
+
+export interface SubagentGoalProgress {
+  total: number
+  completed: number
+  current_id: number | null
+  items: SubagentGoal[]
+}
+
 export interface ChatEvent {
   type: ChatEventType
   data?: string | boolean | number
@@ -93,6 +111,13 @@ export interface ChatEvent {
   status?: string
   progress?: number
   error?: string
+  goals?: SubagentGoalProgress
+  checkpoints?: SubagentCheckpoint[]
+  // Retry tracking
+  attempt?: number
+  max_attempts?: number
+  is_fallback?: boolean
+  original_task_id?: string
 }
 
 // Chat
@@ -149,13 +174,20 @@ export async function* streamChat(
               yield { type: 'orchestrating', data: parsed.orchestrating }
             }
             if (parsed.subagent) {
-              yield { 
-                type: 'subagent', 
+              yield {
+                type: 'subagent',
                 subagent: parsed.subagent,
                 taskId: parsed.task_id,
                 status: parsed.status,
                 progress: parsed.progress,
                 error: parsed.error,
+                goals: parsed.goals,
+                checkpoints: parsed.checkpoints,
+                // Retry tracking
+                attempt: parsed.attempt,
+                max_attempts: parsed.max_attempts,
+                is_fallback: parsed.is_fallback,
+                original_task_id: parsed.original_task_id,
               }
             }
             if (parsed.subagent_result) {
@@ -506,6 +538,96 @@ export async function fetchAutonomousStats(): Promise<{
   return res.json()
 }
 
+// Subagent Failure Stats
+export interface FailureStats {
+  total: number
+  by_agent: Record<string, number>
+  by_type: Record<string, number>
+  total_retries: number
+}
+
+export interface FailureEntry {
+  task_id: string
+  agent_id: string
+  task_description: string
+  failure_type: string
+  error_message: string
+  attempt: number
+  max_attempts: number
+  duration_seconds: number
+  last_checkpoint: string | null
+  goals_completed: number
+  goals_total: number
+  timestamp: string
+}
+
+export async function fetchFailureStats(): Promise<{
+  stats: FailureStats
+  recent_failures: FailureEntry[]
+}> {
+  const res = await fetch(`${API_BASE}/subagents/failures`)
+  if (!res.ok) throw new Error('Failed to fetch failure stats')
+  return res.json()
+}
+
+export async function fetchAgentFailures(agentId: string, limit: number = 20): Promise<{
+  agent_id: string
+  count: number
+  failures: FailureEntry[]
+}> {
+  const res = await fetch(`${API_BASE}/subagents/failures/${agentId}?limit=${limit}`)
+  if (!res.ok) throw new Error('Failed to fetch agent failures')
+  return res.json()
+}
+
+export async function retrySubagentTask(taskId: string): Promise<{
+  status: string
+  original_task_id: string
+  new_task: Record<string, unknown>
+}> {
+  const res = await fetch(`${API_BASE}/subagents/tasks/${taskId}/retry`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Failed to retry task')
+  return res.json()
+}
+
+export async function spawnFallbackTask(taskId: string, fallbackAgentId: string = 'reviewer'): Promise<{
+  status: string
+  original_task_id: string
+  fallback_task: Record<string, unknown>
+}> {
+  const res = await fetch(`${API_BASE}/subagents/tasks/${taskId}/fallback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fallback_agent_id: fallbackAgentId }),
+  })
+  if (!res.ok) throw new Error('Failed to spawn fallback task')
+  return res.json()
+}
+
+export async function diagnoseFailedTask(taskId: string): Promise<{
+  status: string
+  original_task_id: string
+  diagnostic_task: Record<string, unknown>
+}> {
+  const res = await fetch(`${API_BASE}/subagents/tasks/${taskId}/diagnose`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Failed to start diagnosis')
+  return res.json()
+}
+
+// Security Audit Stats
+export interface SecurityStats {
+  total_operations: number
+  failed_operations: number
+  denied_operations: number
+  total_violations: number
+  operations_by_type: Record<string, number>
+  violations_by_type: Record<string, number>
+}
+
 // Skills
 export interface Skill {
   id: string
@@ -537,6 +659,86 @@ export async function fetchSkills(): Promise<Skill[]> {
 export async function fetchSkill(id: string): Promise<SkillDetail> {
   const res = await fetch(`${API_BASE}/skills/${encodeURIComponent(id)}`)
   if (!res.ok) throw new Error('Failed to fetch skill')
+  return res.json()
+}
+
+export interface SkillMatch extends Skill {
+  match_score: number
+  matched_triggers: string[]
+}
+
+export interface SkillMatchResult {
+  prompt: string
+  matches: SkillMatch[]
+  best_match: SkillMatch | null
+}
+
+export async function matchSkills(prompt: string): Promise<SkillMatchResult> {
+  const res = await fetch(`${API_BASE}/skills/match`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  })
+  if (!res.ok) throw new Error('Failed to match skills')
+  return res.json()
+}
+
+export interface SkillValidationResult {
+  path: string
+  skill_id: string | null
+  valid: boolean
+  errors: Array<{ field: string; message: string }>
+  warnings: Array<{ field: string; message: string }>
+}
+
+export async function validateSkills(): Promise<{
+  skills_dir: string
+  total: number
+  valid: number
+  invalid: number
+  results: SkillValidationResult[]
+}> {
+  const res = await fetch(`${API_BASE}/skills/validate`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Failed to validate skills')
+  return res.json()
+}
+
+// Subagent task management
+export async function cancelSubagentTask(taskId: string): Promise<{ status: string }> {
+  const res = await fetch(`${API_BASE}/subagents/tasks/${taskId}/cancel`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Failed to cancel task')
+  return res.json()
+}
+
+export interface SubagentTaskDetail {
+  id: string
+  name: string
+  description: string
+  agent_id: string
+  status: string
+  progress: number
+  logs: string[]
+  goals: Array<{
+    id: number
+    description: string
+    status: string
+  }>
+  checkpoints: Array<{
+    name: string
+    description: string
+  }>
+  error?: string
+  attempt: number
+  max_attempts: number
+}
+
+export async function fetchSubagentTask(taskId: string): Promise<SubagentTaskDetail> {
+  const res = await fetch(`${API_BASE}/subagents/tasks/${taskId}`)
+  if (!res.ok) throw new Error('Failed to fetch task')
   return res.json()
 }
 

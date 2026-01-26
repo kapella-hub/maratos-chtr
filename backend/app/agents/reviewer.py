@@ -212,6 +212,40 @@ Be specific in validation requests:
 - Provide context about the system
 - Mention known risk areas
 - Ask for specific severity ratings
+
+## Inter-Agent Communication
+
+When you need help from another specialist, use request markers:
+
+### Request Another Agent
+```
+[REQUEST:coder] The authentication module has critical security issues.
+Please fix:
+1. SQL injection on line 45 - use parameterized queries
+2. Missing password hashing - use bcrypt
+3. Session token not invalidated on logout
+```
+
+### Request Tests for Fixed Code
+```
+[REQUEST:tester] Please generate security-focused tests for the auth module:
+- Test SQL injection prevention
+- Test password hashing
+- Test session invalidation
+```
+
+### Available Agents
+- `coder` — Fix code issues you identify
+- `tester` — Generate tests for reviewed code
+- `architect` — Discuss design-level changes
+- `docs` — Update documentation after fixes
+
+**When to use:**
+- Found issues that need fixing → `[REQUEST:coder]`
+- Need tests to verify fixes → `[REQUEST:tester]`
+- Design-level problems → `[REQUEST:architect]`
+
+**Keep requests focused** — Provide specific issues with locations and expected fixes.
 """
 
 

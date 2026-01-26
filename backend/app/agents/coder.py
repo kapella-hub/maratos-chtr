@@ -35,14 +35,45 @@ Write code that you'd be proud to maintain.
 
 You can modify files directly in allowed directories. No need to copy first.
 
-## Workflow
+## Sub-Goal Workflow (IMPORTANT)
 
-### 1. UNDERSTAND
-Read the code first:
-1. Understand the existing patterns and conventions
-2. Note the project structure and style
+Break your work into discrete goals using markers. This enables progress tracking and recovery.
 
-### 2. IMPLEMENT
+### Goal Markers
+```
+[GOAL:1] Create module skeleton
+[GOAL:2] Implement core functionality
+[GOAL:3] Add error handling
+[GOAL:4] Write docstrings
+[GOAL:5] Verify and test
+[GOAL_DONE:1]  <- Mark when goal is complete
+[GOAL_DONE:2]
+[CHECKPOINT:after_core] Core logic implemented, ready for error handling
+```
+
+### 1. PLAN (Emit Goals First)
+Before writing code, declare your goals:
+```
+[GOAL:1] Read and understand existing code structure
+[GOAL:2] Create the new module file
+[GOAL:3] Implement the main function
+[GOAL:4] Add error handling and validation
+[GOAL:5] Verify implementation works
+```
+
+### 2. EXECUTE (Mark Progress)
+As you complete each goal:
+```
+[GOAL_DONE:1]
+Now implementing goal 2...
+```
+
+After significant progress, add checkpoints:
+```
+[CHECKPOINT:structure_done] Module structure created with imports and class skeleton
+```
+
+### 3. IMPLEMENT
 Write code directly to the project:
 ```
 filesystem action=write path=/path/to/project/src/file.py content="[your code]"
@@ -53,11 +84,12 @@ filesystem action=write path=/path/to/project/src/file.py content="[your code]"
 filesystem action=read path=/path/to/project/src/file.py
 ```
 
-### 3. DELIVER
+### 4. DELIVER
 You MUST provide:
 1. List of ALL files created/modified with FULL paths
 2. Instructions to test/use the code
 3. Any new dependencies added
+4. Mark all goals as done: `[GOAL_DONE:1]` `[GOAL_DONE:2]` etc.
 
 **WRONG:** "I've implemented the fix" (no paths, no proof)
 **RIGHT:** "Modified /Users/xyz/Projects/myapp/src/auth.py with Flask session-based auth"
@@ -130,6 +162,37 @@ from functools import wraps
 ...
 "
 ```
+
+## Inter-Agent Communication
+
+When you need help from another specialist, use request markers:
+
+### Request Another Agent
+```
+[REQUEST:reviewer] Please review this authentication implementation for security issues:
+- Check for SQL injection
+- Verify password hashing
+- Review session handling
+```
+
+### Shorthand for Code Review
+```
+[REVIEW_REQUEST] Please review the changes in src/auth.py for security and best practices.
+```
+
+### Available Agents
+- `reviewer` — Code review, security analysis, best practices
+- `tester` — Test generation and coverage analysis
+- `architect` — Design decisions and architecture guidance
+- `docs` — Documentation generation
+- `devops` — CI/CD, deployment, infrastructure
+
+**When to use:**
+- Security-sensitive code → `[REQUEST:reviewer]`
+- Need tests for your implementation → `[REQUEST:tester]`
+- Uncertain about design approach → `[REQUEST:architect]`
+
+**Keep requests focused** — Ask specific questions, not "review everything."
 """
 
 

@@ -9,12 +9,37 @@ export interface ChatMessage {
   isSubagentResult?: boolean
 }
 
+export interface SubagentGoal {
+  id: number
+  description: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+}
+
+export interface SubagentCheckpoint {
+  name: string
+  description: string
+}
+
 export interface SubagentTask {
   id: string
   agent: string
-  status: 'spawning' | 'running' | 'completed' | 'failed'
+  status: 'spawning' | 'running' | 'retrying' | 'completed' | 'failed' | 'timed_out' | 'cancelled'
   progress: number
   error?: string
+  goals?: {
+    total: number
+    completed: number
+    current_id: number | null
+    items: SubagentGoal[]
+  }
+  checkpoints?: SubagentCheckpoint[]
+  logs?: string[]
+  currentAction?: string
+  // Retry tracking
+  attempt?: number
+  maxAttempts?: number
+  isFallback?: boolean
+  originalTaskId?: string
 }
 
 export interface QueuedMessage {

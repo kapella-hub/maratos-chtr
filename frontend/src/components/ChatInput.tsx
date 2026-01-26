@@ -1,14 +1,18 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react'
-import { Send, Square, ListPlus } from 'lucide-react'
+import { Send, Square, ListPlus, Sparkles } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
+import SkillSelector from './SkillSelector'
+import type { Skill } from '@/lib/api'
 
 interface ChatInputProps {
-  onSend: (message: string) => void
+  onSend: (message: string, skill?: Skill | null) => void
   onQueue?: (message: string) => void
   onStop?: () => void
   isLoading?: boolean
   hasQueue?: boolean
   placeholder?: string
+  showSkills?: boolean
 }
 
 export default function ChatInput({
@@ -16,9 +20,12 @@ export default function ChatInput({
   onQueue,
   onStop,
   isLoading,
-  placeholder = 'Type a message...'
+  placeholder = 'Ask MO anything...',
+  showSkills = true
 }: ChatInputProps) {
   const [input, setInput] = useState('')
+  const [isFocused, setIsFocused] = useState(false)
+  const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Auto-resize textarea
@@ -30,6 +37,11 @@ export default function ChatInput({
     }
   }, [input])
 
+  // Focus on mount
+  useEffect(() => {
+    textareaRef.current?.focus()
+  }, [])
+
   const handleSubmit = () => {
     if (!input.trim()) return
 
@@ -37,8 +49,9 @@ export default function ChatInput({
       onQueue(input.trim())
       setInput('')
     } else if (!isLoading) {
-      onSend(input.trim())
+      onSend(input.trim(), selectedSkill)
       setInput('')
+      setSelectedSkill(null) // Clear skill after sending
     }
   }
 
@@ -47,72 +60,164 @@ export default function ChatInput({
       e.preventDefault()
       handleSubmit()
     }
+    // Escape to stop
+    if (e.key === 'Escape' && isLoading && onStop) {
+      onStop()
+    }
   }
 
+  const charCount = input.length
+  const showCharCount = charCount > 100
+
   return (
-    <div className="border-t border-border/50 p-4 bg-background/80 backdrop-blur-sm">
-      <div className="flex items-end gap-3 max-w-4xl mx-auto">
-        <div className="flex-1 relative">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={isLoading ? 'Type to queue message...' : placeholder}
-            rows={1}
+    <div className="border-t border-border/30 bg-gradient-to-t from-background via-background to-transparent">
+      <div className="p-4 pb-6">
+        <div className="max-w-4xl mx-auto">
+          {/* Input Container */}
+          <motion.div
             className={cn(
-              'w-full resize-none rounded-2xl border bg-muted/50 px-4 py-3',
-              'focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 focus:bg-background',
-              'placeholder:text-muted-foreground/60',
-              'transition-all duration-200',
-              isLoading && 'border-amber-500/30 focus:ring-amber-500/50'
+              'relative rounded-2xl transition-all duration-300',
+              'bg-card border shadow-lg',
+              isFocused
+                ? 'border-primary/50 shadow-primary/10 ring-4 ring-primary/5'
+                : 'border-border/50 shadow-black/5',
+              isLoading && 'border-amber-500/30'
             )}
-          />
-        </div>
-
-        {/* Stop button */}
-        {isLoading && (
-          <button
-            onClick={onStop}
-            className={cn(
-              'p-3 rounded-xl bg-red-500 text-white',
-              'hover:bg-red-600 transition-all duration-200',
-              'shadow-lg shadow-red-500/20',
-              'flex items-center gap-2'
-            )}
-            title="Stop generation (Esc)"
           >
-            <Square className="w-4 h-4 fill-current" />
-            <span className="text-sm font-medium">Stop</span>
-          </button>
-        )}
+            {/* Decorative gradient line at top when focused */}
+            <AnimatePresence>
+              {isFocused && (
+                <motion.div
+                  initial={{ scaleX: 0 }}
+                  animate={{ scaleX: 1 }}
+                  exit={{ scaleX: 0 }}
+                  className="absolute top-0 left-4 right-4 h-0.5 bg-gradient-to-r from-violet-500 via-purple-500 to-pink-500 rounded-full"
+                />
+              )}
+            </AnimatePresence>
 
-        {/* Send/Queue button */}
-        <button
-          onClick={handleSubmit}
-          disabled={!input.trim()}
-          className={cn(
-            'p-3 rounded-xl transition-all duration-200',
-            'disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none',
-            isLoading
-              ? 'bg-amber-500 text-white hover:bg-amber-600 shadow-lg shadow-amber-500/20'
-              : 'bg-gradient-to-r from-violet-600 to-purple-600 text-white hover:from-violet-500 hover:to-purple-500 shadow-lg shadow-violet-500/20 hover:shadow-violet-500/30'
-          )}
-          title={isLoading ? 'Add to queue' : 'Send message'}
-        >
-          {isLoading ? (
-            <ListPlus className="w-5 h-5" />
-          ) : (
-            <Send className="w-5 h-5" />
-          )}
-        </button>
-      </div>
+            {/* Skill Selector */}
+            {showSkills && input.length > 0 && (
+              <div className="absolute -top-10 left-3">
+                <SkillSelector
+                  prompt={input}
+                  selectedSkill={selectedSkill}
+                  onSelect={setSelectedSkill}
+                />
+              </div>
+            )}
 
-      {/* Hint text */}
-      <div className="max-w-4xl mx-auto mt-2 text-center">
-        <p className="text-xs text-muted-foreground/50">
-          Press Enter to send, Shift+Enter for new line
-        </p>
+            {/* Textarea */}
+            <div className="flex items-end gap-2 p-3">
+              {/* Icon */}
+              <div className={cn(
+                'flex-shrink-0 p-2 rounded-xl transition-colors duration-200',
+                isFocused ? 'text-primary' : 'text-muted-foreground'
+              )}>
+                <Sparkles className="w-5 h-5" />
+              </div>
+
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setIsFocused(false)}
+                placeholder={isLoading ? 'Type to queue next message...' : placeholder}
+                rows={1}
+                className={cn(
+                  'flex-1 resize-none bg-transparent py-2 px-1',
+                  'focus:outline-none',
+                  'placeholder:text-muted-foreground/50',
+                  'text-foreground',
+                  'min-h-[40px] max-h-[200px]'
+                )}
+              />
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {/* Stop button */}
+                <AnimatePresence>
+                  {isLoading && (
+                    <motion.button
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0, opacity: 0 }}
+                      onClick={onStop}
+                      className={cn(
+                        'p-2.5 rounded-xl bg-red-500 text-white',
+                        'hover:bg-red-600 active:scale-95',
+                        'transition-all duration-200',
+                        'shadow-lg shadow-red-500/25'
+                      )}
+                      title="Stop generation (Esc)"
+                    >
+                      <Square className="w-4 h-4 fill-current" />
+                    </motion.button>
+                  )}
+                </AnimatePresence>
+
+                {/* Send/Queue button */}
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleSubmit}
+                  disabled={!input.trim()}
+                  className={cn(
+                    'p-2.5 rounded-xl transition-all duration-200',
+                    'disabled:opacity-30 disabled:cursor-not-allowed disabled:shadow-none',
+                    'flex items-center gap-2',
+                    isLoading
+                      ? 'bg-amber-500 text-white hover:bg-amber-600 shadow-lg shadow-amber-500/25'
+                      : 'bg-gradient-to-r from-violet-600 to-purple-600 text-white hover:from-violet-500 hover:to-purple-500 shadow-lg shadow-violet-500/25'
+                  )}
+                  title={isLoading ? 'Add to queue (Enter)' : 'Send message (Enter)'}
+                >
+                  {isLoading ? (
+                    <ListPlus className="w-5 h-5" />
+                  ) : (
+                    <Send className="w-5 h-5" />
+                  )}
+                </motion.button>
+              </div>
+            </div>
+
+            {/* Character count */}
+            <AnimatePresence>
+              {showCharCount && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute right-4 -top-6 text-xs text-muted-foreground"
+                >
+                  {charCount.toLocaleString()} characters
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+
+          {/* Footer hints */}
+          <div className="flex items-center justify-center gap-4 mt-3">
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground/60">
+              <kbd className="kbd">Enter</kbd>
+              <span>send</span>
+            </span>
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground/60">
+              <kbd className="kbd">Shift</kbd>
+              <span>+</span>
+              <kbd className="kbd">Enter</kbd>
+              <span>new line</span>
+            </span>
+            {isLoading && (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground/60">
+                <kbd className="kbd">Esc</kbd>
+                <span>stop</span>
+              </span>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )
