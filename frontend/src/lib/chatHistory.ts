@@ -13,9 +13,13 @@ const STORAGE_KEY = 'maratos_chat_history'
 const MAX_SESSIONS = 100
 
 export function saveChatSession(sessionId: string, messages: ChatMessage[], title?: string): void {
+  if (!sessionId || messages.length === 0) {
+    return // Nothing to save
+  }
+
   const sessions = getChatSessions()
   const existing = sessions.find(s => s.id === sessionId)
-  
+
   const session: ChatSession = {
     id: sessionId,
     title: title || generateTitle(messages),
@@ -24,11 +28,22 @@ export function saveChatSession(sessionId: string, messages: ChatMessage[], titl
     lastUpdated: new Date(),
     isPinned: existing?.isPinned || false,
   }
-  
+
   const filtered = sessions.filter(s => s.id !== sessionId)
   const updated = [session, ...filtered].slice(0, MAX_SESSIONS)
-  
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+  } catch (error) {
+    // localStorage quota exceeded - try removing older sessions
+    console.warn('Failed to save chat session, trying to free space:', error)
+    try {
+      const reducedSessions = updated.slice(0, Math.floor(MAX_SESSIONS / 2))
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(reducedSessions))
+    } catch (innerError) {
+      console.error('Failed to save chat session even after cleanup:', innerError)
+    }
+  }
 }
 
 export function getChatSessions(): ChatSession[] {
@@ -41,12 +56,13 @@ export function getChatSessions(): ChatSession[] {
       ...s,
       timestamp: new Date(s.timestamp),
       lastUpdated: new Date(s.lastUpdated),
-      messages: s.messages.map((m: any) => ({
+      messages: (s.messages || []).map((m: any) => ({
         ...m,
-        timestamp: new Date(m.timestamp),
+        timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
       })),
     }))
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse chat history:', error)
     return []
   }
 }

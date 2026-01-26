@@ -79,6 +79,17 @@ export default function ChatPage() {
     }
   }, [sessionId, messages, isStreaming])
 
+  // Save on page unload to prevent data loss during streaming
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (sessionId && messages.length > 0) {
+        saveChatSession(sessionId, messages)
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [sessionId, messages])
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
@@ -190,10 +201,11 @@ export default function ChatPage() {
   }
 
   // Load session from history when sessionId changes (from sidebar)
+  // Only load if messages are empty (fresh session load, not a new chat)
   useEffect(() => {
     if (sessionId && messages.length === 0) {
       const session = getChatSession(sessionId)
-      if (session) {
+      if (session && session.messages.length > 0) {
         session.messages.forEach(msg => {
           addMessage({
             role: msg.role,
@@ -203,7 +215,7 @@ export default function ChatPage() {
         })
       }
     }
-  }, [sessionId])
+  }, [sessionId, messages.length, addMessage])
 
   const modelName = formatModelName(config?.default_model || 'claude-sonnet-4')
 
