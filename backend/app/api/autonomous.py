@@ -112,7 +112,7 @@ async def start_project(
         workspace = Path(request.workspace_path)
     else:
         # Use default workspace under maratos-workspace
-        workspace = Path(settings.workspace) / f"auto-{request.name.lower().replace(' ', '-')}"
+        workspace = settings.workspace_dir / f"auto-{request.name.lower().replace(' ', '-')}"
 
     workspace.mkdir(parents=True, exist_ok=True)
 

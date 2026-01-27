@@ -194,6 +194,20 @@ class Agent:
             if "files" in context:
                 prompt += f"\n\n## Files to Work With\n{context['files']}\n"
 
+        # Inject Thinking Level Instructions
+        thinking_level = settings.thinking_level or "medium"
+        if thinking_level != "off":
+             prompt += f"\n\n## Current Thinking Level\n**{thinking_level.upper()}** - "
+             level_descriptions = {
+                "minimal": "Quick sanity check before execution",
+                "low": "Brief problem breakdown",
+                "medium": "Structured analysis with approach evaluation",
+                "high": "Deep analysis, multiple approaches, risk assessment",
+                "max": "Exhaustive analysis with self-critique",
+             }
+             prompt += level_descriptions.get(thinking_level, "Standard analysis")
+             prompt += "\n"
+
         return prompt, matched_skills
 
     def _get_skill_context(self, context: dict[str, Any]) -> tuple[str, list]:

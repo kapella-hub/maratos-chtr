@@ -188,21 +188,7 @@ class MOAgent(Agent):
         """Build system prompt with context."""
         prompt, matched_skills = super().get_system_prompt(context)
 
-        # Add current thinking level
-        from app.config import settings
-        thinking_level = settings.thinking_level or "medium"
-        prompt += f"\n\n## Current Thinking Level\n**{thinking_level.upper()}** - "
 
-        level_descriptions = {
-            "off": "Direct execution, no analysis phase",
-            "minimal": "Quick sanity check before execution",
-            "low": "Brief problem breakdown",
-            "medium": "Structured analysis with approach evaluation",
-            "high": "Deep analysis, multiple approaches, risk assessment",
-            "max": "Exhaustive analysis with self-critique",
-        }
-        prompt += level_descriptions.get(thinking_level, "Unknown level")
-        prompt += "\n"
 
         if context:
             if "workspace" in context:

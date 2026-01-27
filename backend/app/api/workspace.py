@@ -49,7 +49,7 @@ async def browse_directory(
     if not path or path == "":
         # Return list of root locations
         home = Path.home()
-        workspace = Path(settings.workspace)
+        workspace = settings.workspace_dir
 
         roots = []
 
@@ -161,7 +161,7 @@ async def browse_directory(
 @router.get("/projects")
 async def list_workspace_projects() -> list[dict[str, Any]]:
     """List all projects in the workspace directory."""
-    workspace = Path(settings.workspace)
+    workspace = settings.workspace_dir
 
     if not workspace.exists():
         return []

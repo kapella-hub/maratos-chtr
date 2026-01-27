@@ -196,6 +196,22 @@ class ModelSelector:
         if custom_models:
             self.models.update(custom_models)
 
+        # Apply user preference from settings
+        user_model = settings.default_model
+        if user_model and "sonnet-4-20250514" not in user_model: # Don't override if it's just the hardcoded default
+            # Clean model name for kiro-cli (remove provider prefix)
+            clean_model = user_model.replace("anthropic/", "")
+            
+            # Update Balanced Tier (the workhorse) to use user's choice
+            # We assume the user picked a model they want to use for development
+            self.models[ModelTier.TIER_2_BALANCED].model_id = clean_model
+            self.models[ModelTier.TIER_2_BALANCED].description += " (User Selected)"
+            
+            # If user picked an Opus model, upgrade Tier 1 as well just in case
+            if "opus" in clean_model.lower():
+                 self.models[ModelTier.TIER_1_ADVANCED].model_id = clean_model
+                 self.models[ModelTier.TIER_1_ADVANCED].description += " (User Selected)"
+
     def get_model_for_agent(
         self,
         agent_type: str,
