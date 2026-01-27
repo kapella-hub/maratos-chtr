@@ -96,9 +96,9 @@ export default function ChatInput({
   const isCommand = input.trim().startsWith('/')
 
   return (
-    <div className="border-t border-border/30 bg-gradient-to-t from-background via-background to-transparent">
-      <div className="p-4 pb-6">
-        <div className="max-w-4xl mx-auto">
+    <div className="bg-transparent">
+      <div className="pb-4 px-4">
+        <div className="max-w-3xl mx-auto">
           {/* Input Container */}
           <motion.div
             className={cn(

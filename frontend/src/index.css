@@ -34,6 +34,14 @@
     --warning-foreground: 0 0% 100%;
     --info: 199 89% 48%;
     --info-foreground: 0 0% 100%;
+
+    /* New UI layout tokens */
+    --chat-max-width: 48rem;
+    --canvas-min-width: 320px;
+    --canvas-max-width: 600px;
+    --header-height: 48px;
+    --border-radius-xl: 1.5rem;
+    --gradient-primary: linear-gradient(135deg, hsl(239 84% 67%), hsl(280 80% 70%));
   }
 
   .dark {
@@ -64,6 +72,14 @@
     --warning-foreground: 0 0% 100%;
     --info: 199 89% 38%;
     --info-foreground: 0 0% 100%;
+
+    /* New UI layout tokens */
+    --chat-max-width: 48rem;
+    --canvas-min-width: 320px;
+    --canvas-max-width: 600px;
+    --header-height: 48px;
+    --border-radius-xl: 1.5rem;
+    --gradient-primary: linear-gradient(135deg, hsl(239 84% 67%), hsl(280 80% 70%));
   }
 }
 
@@ -481,55 +497,61 @@ button:focus-visible {
   @apply max-w-full h-auto;
 }
 
-/* Table styles */
+/* Table styles - enhanced */
 .markdown-table {
-  @apply w-full border-collapse;
+  @apply w-full border-collapse text-sm;
 }
 
 .markdown-table th {
-  @apply bg-muted/50 px-4 py-2 text-left font-semibold;
-  @apply border-b-2 border-border;
+  @apply bg-muted/70 px-4 py-3 text-left font-semibold text-foreground;
+  @apply border-b-2 border-primary/30;
 }
 
 .markdown-table td {
-  @apply px-4 py-2 border-b border-border/50;
+  @apply px-4 py-3 border-b border-border/50;
 }
 
-.markdown-table tr:hover {
+.markdown-table tr:hover td {
+  @apply bg-muted/40;
+}
+
+.markdown-table tr:nth-child(even) td {
+  @apply bg-muted/20;
+}
+
+/* Prose table styling */
+.prose table {
+  @apply w-full my-5 text-sm;
+  @apply border border-border/50 rounded-xl overflow-hidden;
+}
+
+.prose thead {
+  @apply bg-muted/60;
+}
+
+.prose th {
+  @apply px-4 py-3 text-left font-semibold text-foreground;
+  @apply border-b-2 border-primary/20;
+}
+
+.prose td {
+  @apply px-4 py-3 border-b border-border/30;
+}
+
+.prose tbody tr:hover {
   @apply bg-muted/30;
 }
 
-/* Blockquote */
+.prose tbody tr:nth-child(even) {
+  @apply bg-muted/10;
+}
+
+/* Blockquote - used by ChatMessage component */
 .blockquote {
-  @apply pl-4 border-l-4 border-primary/50;
-  @apply bg-primary/5 py-2 pr-4 rounded-r-lg;
-  @apply italic text-muted-foreground;
-}
-
-/* List styles */
-.markdown-list {
-  @apply space-y-1.5 pl-6;
-}
-
-.markdown-list li {
-  @apply relative;
-}
-
-.markdown-list li::before {
-  @apply absolute -left-4 text-primary;
-}
-
-/* Heading styles */
-.markdown-h1 {
-  @apply text-2xl font-bold mb-4 pb-2 border-b border-border/50;
-}
-
-.markdown-h2 {
-  @apply text-xl font-semibold mb-3 mt-6;
-}
-
-.markdown-h3 {
-  @apply text-lg font-semibold mb-2 mt-4;
+  @apply pl-5 py-3 pr-4 my-4;
+  @apply border-l-4 border-primary/60 rounded-r-lg;
+  @apply bg-primary/5;
+  @apply italic text-foreground/80;
 }
 
 /* Link styles */
@@ -542,7 +564,7 @@ button:focus-visible {
 /* Improved prose for chat messages */
 .prose {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.7;
   color: hsl(var(--foreground) / 0.95);
   letter-spacing: -0.01em;
@@ -555,20 +577,121 @@ button:focus-visible {
 
 .prose strong {
   @apply font-semibold text-foreground;
+  color: hsl(var(--foreground));
 }
 
-.prose ul, .prose ol {
-  @apply my-4 space-y-2;
+.prose em {
+  @apply italic;
+  color: hsl(var(--foreground) / 0.85);
 }
 
-.prose li {
-  @apply pl-1;
-  line-height: 1.6;
+/* Headings with visual distinction */
+.prose h1 {
+  @apply text-2xl font-bold mt-8 mb-4 pb-3;
+  @apply border-b-2 border-primary/30;
+  @apply text-foreground;
+  letter-spacing: -0.03em;
 }
 
-.prose h1, .prose h2, .prose h3 {
-  @apply text-foreground font-semibold tracking-tight;
+.prose h2 {
+  @apply text-xl font-bold mt-7 mb-3 pb-2;
+  @apply border-b border-border/50;
+  @apply text-foreground;
   letter-spacing: -0.02em;
+}
+
+.prose h3 {
+  @apply text-lg font-semibold mt-6 mb-2;
+  @apply text-foreground;
+  letter-spacing: -0.01em;
+}
+
+.prose h4 {
+  @apply text-base font-semibold mt-5 mb-2;
+  @apply text-foreground/90;
+}
+
+/* Lists with better visibility */
+.prose ul {
+  @apply my-4 ml-1 space-y-2;
+  list-style: none;
+}
+
+.prose ul > li {
+  @apply relative pl-6;
+  line-height: 1.65;
+}
+
+.prose ul > li::before {
+  content: '•';
+  @apply absolute left-0 text-primary font-bold text-lg;
+  top: -1px;
+}
+
+.prose ol {
+  @apply my-4 ml-1 space-y-2;
+  list-style: none;
+  counter-reset: list-counter;
+}
+
+.prose ol > li {
+  @apply relative pl-8;
+  line-height: 1.65;
+  counter-increment: list-counter;
+}
+
+.prose ol > li::before {
+  content: counter(list-counter) ".";
+  @apply absolute left-0 font-semibold text-primary;
+}
+
+/* Nested lists */
+.prose ul ul, .prose ol ol, .prose ul ol, .prose ol ul {
+  @apply mt-2 mb-0 ml-2;
+}
+
+/* Blockquotes */
+.prose blockquote {
+  @apply my-5 pl-5 py-3 pr-4;
+  @apply border-l-4 border-primary/60 rounded-r-lg;
+  @apply bg-primary/5;
+  @apply italic text-foreground/80;
+}
+
+.prose blockquote p {
+  @apply my-1;
+}
+
+/* Horizontal rules */
+.prose hr {
+  @apply my-8 border-0 h-px;
+  @apply bg-gradient-to-r from-transparent via-border to-transparent;
+}
+
+/* Links */
+.prose a {
+  @apply text-primary font-medium;
+  @apply underline decoration-primary/40 underline-offset-2;
+  @apply hover:decoration-primary transition-colors;
+}
+
+/* Task lists (checkboxes) */
+.prose input[type="checkbox"] {
+  @apply mr-2 w-4 h-4 rounded;
+  @apply accent-primary;
+}
+
+/* Definition lists */
+.prose dl {
+  @apply my-4;
+}
+
+.prose dt {
+  @apply font-semibold text-foreground mt-4 mb-1;
+}
+
+.prose dd {
+  @apply ml-6 text-foreground/85;
 }
 
 /* File path indicator for code blocks */
@@ -723,4 +846,76 @@ button:focus-visible {
   .text-responsive {
     @apply text-base;
   }
+}
+
+/* New UI slide animations */
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slide-in-bottom {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-out-left {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(-100%); }
+}
+
+.slide-in-left {
+  animation: slide-in-left 0.3s ease-out;
+}
+
+.slide-in-bottom {
+  animation: slide-in-bottom 0.3s ease-out;
+}
+
+/* Floating input style */
+.floating-input {
+  @apply fixed bottom-0 left-0 right-0 z-30;
+  @apply bg-gradient-to-t from-background via-background/95 to-transparent;
+  @apply pt-8 pb-4 px-4;
+  backdrop-filter: blur(20px);
+}
+
+/* Chat stream container */
+.chat-stream {
+  @apply flex-1 overflow-y-auto;
+  @apply pb-32; /* Space for floating input */
+}
+
+/* Minimal header style */
+.minimal-header {
+  height: var(--header-height);
+}
+
+/* Status pill styles */
+.status-pill {
+  @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm;
+  @apply bg-muted/50 border border-border/30;
+}
+
+.status-pill-thinking {
+  @apply bg-violet-500/10 border-violet-500/30 text-violet-400;
+}
+
+.status-pill-streaming {
+  @apply bg-emerald-500/10 border-emerald-500/30 text-emerald-400;
+}
+
+/* Agent card inline style */
+.agent-card-inline {
+  @apply my-3 p-4 rounded-xl border;
+  @apply bg-card/50 border-border/30;
+  @apply shadow-sm;
+}
+
+/* Project card inline style */
+.project-card-inline {
+  @apply my-3 p-4 rounded-xl border;
+  @apply bg-gradient-to-br from-indigo-950/40 to-violet-950/30;
+  @apply border-indigo-500/20;
+  @apply shadow-lg shadow-indigo-500/5;
 }

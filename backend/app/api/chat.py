@@ -35,6 +35,27 @@ logger = logging.getLogger(__name__)
 # Pattern to match [SPAWN:agent_id] task description
 SPAWN_PATTERN = re.compile(r'\[SPAWN:(\w+)\]\s*(.+?)(?=\[SPAWN:|\Z)', re.DOTALL)
 
+# Auto-routing patterns - detect user intent and route to appropriate agent
+AUTO_ROUTE_PATTERNS = [
+    (re.compile(r'\b(analyze|review|audit|examine)\b.*\b(code|codebase|project|directory|file)', re.I), 'reviewer'),
+    (re.compile(r'\b(implement|build|create|fix|add|update)\b.*\b(feature|function|bug|code)', re.I), 'coder'),
+    (re.compile(r'\b(design|architect)\b.*\b(system|api|architecture)', re.I), 'architect'),
+    (re.compile(r'\b(write|generate|create)\b.*\b(test|tests|spec)', re.I), 'tester'),
+    (re.compile(r'\b(write|create|update)\b.*\b(doc|documentation|readme)', re.I), 'docs'),
+    (re.compile(r'\b(deploy|docker|ci|cd|pipeline|kubernetes|k8s)\b', re.I), 'devops'),
+]
+
+
+def detect_auto_route(message: str) -> tuple[str | None, str]:
+    """Detect if message should be auto-routed to a specific agent.
+
+    Returns (agent_id, task_description) or (None, "") if no match.
+    """
+    for pattern, agent_id in AUTO_ROUTE_PATTERNS:
+        if pattern.search(message):
+            return agent_id, message
+    return None, ""
+
 # Pattern to match [CANVAS:type attr="value"] content [/CANVAS]
 CANVAS_PATTERN = re.compile(
     r'\[CANVAS:(\w+)([^\]]*)\](.*?)\[/CANVAS\]',
@@ -266,6 +287,10 @@ class ChatRequest(BaseModel):
     agent_id: str | None = None  # Optional: specify agent (mo, architect, reviewer)
     context: dict[str, Any] | None = None
 
+    # Inline project control
+    project_action: str | None = None  # approve, adjust, pause, resume, cancel
+    project_adjustments: dict[str, Any] | None = None  # For adjust action
+
     @field_validator("message")
     @classmethod
     def message_not_empty(cls, v: str) -> str:
@@ -463,6 +488,147 @@ async def chat(
         from app.config import settings
         current_model = settings.default_model or "claude-sonnet-4.5"
         yield f"data: {{\"session_id\": \"{session.id}\", \"agent\": \"{agent_id}\", \"model\": \"{current_model}\"}}\n\n"
+
+        # Handle inline project actions (approve, pause, cancel, etc.)
+        if chat_request.project_action:
+            from app.autonomous.inline_orchestrator import handle_project_action
+            try:
+                async for event in handle_project_action(
+                    session_id=session.id,
+                    action=chat_request.project_action,
+                    data=chat_request.project_adjustments,
+                ):
+                    yield event.to_sse()
+                yield "data: [DONE]\n\n"
+                return
+            except Exception as e:
+                logger.error(f"Project action failed: {e}", exc_info=True)
+                yield f'data: {{"error": "Project action failed: {str(e)}"}}\n\n'
+                yield "data: [DONE]\n\n"
+                return
+
+        # Check for existing inline project that might need action
+        from app.autonomous.inline_project import get_inline_project, InlineProjectStatus
+        existing_project = get_inline_project(session.id)
+        if existing_project and existing_project.is_active:
+            from app.autonomous.inline_orchestrator import InlineOrchestrator
+
+            # Check if this is a plan approval/rejection
+            message_lower = actual_message.lower().strip()
+            if existing_project.status == InlineProjectStatus.AWAITING_APPROVAL:
+                if message_lower in ("start", "approve", "yes", "go", "proceed", "ok", "okay", "lgtm"):
+                    # Approve and start execution
+                    orchestrator = InlineOrchestrator(session.id, existing_project.workspace_path)
+                    orchestrator.project = existing_project
+                    async for event in orchestrator.approve_plan():
+                        yield event.to_sse()
+                    yield "data: [DONE]\n\n"
+                    return
+                elif message_lower in ("cancel", "no", "abort", "stop", "nevermind"):
+                    # Cancel the project
+                    orchestrator = InlineOrchestrator(session.id, existing_project.workspace_path)
+                    orchestrator.project = existing_project
+                    async for event in orchestrator.cancel_project():
+                        yield event.to_sse()
+                    yield "data: [DONE]\n\n"
+                    return
+                else:
+                    # Treat as adjustment request
+                    orchestrator = InlineOrchestrator(session.id, existing_project.workspace_path)
+                    orchestrator.project = existing_project
+                    async for event in orchestrator.adjust_plan({"message": actual_message}):
+                        yield event.to_sse()
+                    yield "data: [DONE]\n\n"
+                    return
+            else:
+                # Project is executing - handle as interrupt
+                orchestrator = InlineOrchestrator(session.id, existing_project.workspace_path)
+                orchestrator.project = existing_project
+                async for event in orchestrator._handle_interrupt(actual_message):
+                    yield event.to_sse()
+                yield "data: [DONE]\n\n"
+                return
+
+        # Detect if this message should trigger a project
+        from app.autonomous.detection import project_detector
+        detection_result = project_detector.detect(actual_message)
+
+        if detection_result.should_project and agent_id == "mo":
+            from app.autonomous.inline_orchestrator import InlineOrchestrator
+            from app.autonomous.models import ProjectConfig
+
+            # Get workspace from context or use default
+            workspace = chat_request.context.get("workspace", "") if chat_request.context else ""
+
+            orchestrator = InlineOrchestrator(session.id, workspace)
+
+            try:
+                async for event in orchestrator.detect_and_plan(
+                    actual_message,
+                    config=ProjectConfig(),
+                ):
+                    yield event.to_sse()
+                yield "data: [DONE]\n\n"
+                return
+            except Exception as e:
+                logger.error(f"Project detection/planning failed: {e}", exc_info=True)
+                # Fall through to normal chat processing
+                yield f'data: {{"content": "Note: Project mode unavailable, handling as regular request.\\n\\n"}}\n\n'
+
+        # Auto-route: detect if this request should go directly to a specialized agent
+        auto_route_agent, auto_route_task = detect_auto_route(actual_message)
+        if auto_route_agent and agent_id == "mo":
+            logger.info(f"Auto-routing to {auto_route_agent}: {auto_route_task[:50]}...")
+            yield 'data: {"thinking": true}\n\n'
+            yield f'data: {{"content": "Routing to {auto_route_agent} agent...\\n\\n"}}\n\n'
+            yield 'data: {"thinking": false}\n\n'
+            yield 'data: {"orchestrating": true}\n\n'
+
+            try:
+                task = await subagent_runner.run_task(
+                    task_description=auto_route_task,
+                    agent_id=auto_route_agent,
+                    context=chat_request.context,
+                    callback_session=session.id,
+                )
+                escaped_task = auto_route_task[:100].replace("\n", " ").replace('"', '\\"')
+                yield f'data: {{"subagent": "{auto_route_agent}", "task_id": "{task.id}", "task": "{escaped_task}", "status": "running"}}\n\n'
+
+                # Wait for completion
+                while True:
+                    await asyncio.sleep(1)
+                    current = subagent_manager.get(task.id)
+                    if not current:
+                        break
+                    if current.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+                        if current.status == TaskStatus.COMPLETED:
+                            result_text = current.result.get("response", "") if current.result else ""
+                            result_text = clean_cli_output(result_text)
+                            result_text = convert_numbered_lines_to_codeblock(result_text)
+                            yield f'data: {{"subagent": "{auto_route_agent}", "task_id": "{task.id}", "status": "completed"}}\n\n'
+                            result_event = json.dumps({"subagent_result": auto_route_agent, "content": result_text})
+                            yield f'data: {result_event}\n\n'
+                            # Save to DB
+                            async with db.begin():
+                                subagent_msg = DBMessage(
+                                    id=str(uuid.uuid4()),
+                                    session_id=session.id,
+                                    role="assistant",
+                                    content=f"**[{auto_route_agent.upper()}]**\n\n{result_text}",
+                                )
+                                db.add(subagent_msg)
+                        else:
+                            error = current.error or "Unknown error"
+                            yield f'data: {{"subagent": "{auto_route_agent}", "task_id": "{task.id}", "status": "failed", "error": "{error}"}}\n\n'
+                        break
+            except Exception as e:
+                logger.error(f"Auto-route spawn failed: {e}")
+                escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
+                yield f'data: {{"error": "Failed to spawn agent: {escaped_err}"}}\n\n'
+
+            yield 'data: {"orchestrating": false}\n\n'
+            yield "data: [DONE]\n\n"
+            return
 
         # If command returned a direct response, yield it and return
         if command_response:

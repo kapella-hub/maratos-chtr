@@ -89,6 +89,23 @@ export type ChatEventType =
   | 'canvas_create'
   | 'canvas_update'
   | 'canvas_delete'
+  // Inline project events
+  | 'project_detected'
+  | 'planning_started'
+  | 'plan_ready'
+  | 'awaiting_approval'
+  | 'plan_approved'
+  | 'task_started'
+  | 'task_progress'
+  | 'task_completed'
+  | 'task_failed'
+  | 'project_paused'
+  | 'project_resumed'
+  | 'project_completed'
+  | 'project_failed'
+  | 'project_cancelled'
+  | 'git_commit'
+  | 'git_pr_created'
 
 export interface SubagentGoal {
   id: number
@@ -108,6 +125,34 @@ export interface SubagentGoalProgress {
   items: SubagentGoal[]
 }
 
+// Inline project types for events
+export interface InlineProjectPlan {
+  id: string
+  name: string
+  original_prompt: string
+  workspace_path: string
+  status: string
+  tasks: Array<{
+    id: string
+    title: string
+    description: string
+    agent_type: string
+    status: string
+    depends_on: string[]
+    quality_gates: Array<{ type: string; passed: boolean; error?: string }>
+    progress?: number
+    current_attempt?: number
+    max_attempts?: number
+    error?: string
+  }>
+  progress: number
+  tasks_completed: number
+  tasks_failed: number
+  tasks_pending: number
+  branch_name?: string
+  pr_url?: string
+}
+
 export interface ChatEvent {
   type: ChatEventType
   data?: string | boolean | number
@@ -123,6 +168,16 @@ export interface ChatEvent {
   max_attempts?: number
   is_fallback?: boolean
   original_task_id?: string
+  // Inline project data
+  project?: InlineProjectPlan
+  projectId?: string
+  task?: InlineProjectPlan['tasks'][0]
+  reason?: string
+  complexity?: number
+  estimatedTasks?: number
+  commitSha?: string
+  commitMessage?: string
+  prUrl?: string
 }
 
 // Chat
@@ -216,8 +271,177 @@ export async function* streamChat(
               yield { type: 'canvas_update', data: parsed.canvas_update }
             } else if (parsed.canvas_delete) {
               yield { type: 'canvas_delete', data: parsed.canvas_delete }
+            }
+            // Inline project events - backend sends {type: "event_type", ...data}
+            else if (parsed.type === 'project_detected') {
+              yield {
+                type: 'project_detected',
+                reason: parsed.reason,
+                complexity: parsed.complexity,
+                estimatedTasks: parsed.estimated_tasks,
+              }
+            } else if (parsed.type === 'planning_started') {
+              yield { type: 'planning_started', projectId: parsed.project_id }
+            } else if (parsed.type === 'plan_ready') {
+              yield { type: 'plan_ready', project: parsed.plan }
+            } else if (parsed.type === 'awaiting_approval') {
+              yield { type: 'awaiting_approval', projectId: parsed.project_id }
+            } else if (parsed.type === 'plan_approved') {
+              yield { type: 'plan_approved', projectId: parsed.project_id }
+            } else if (parsed.type === 'task_started') {
+              yield {
+                type: 'task_started',
+                projectId: parsed.project_id,
+                task: parsed.task,
+              }
+            } else if (parsed.type === 'task_progress') {
+              yield {
+                type: 'task_progress',
+                projectId: parsed.project_id,
+                taskId: parsed.task_id,
+                progress: parsed.progress,
+                status: parsed.status,
+              }
+            } else if (parsed.type === 'task_completed') {
+              yield {
+                type: 'task_completed',
+                projectId: parsed.project_id,
+                taskId: parsed.task_id,
+                task: parsed.task,
+              }
+            } else if (parsed.type === 'task_failed') {
+              yield {
+                type: 'task_failed',
+                projectId: parsed.project_id,
+                taskId: parsed.task_id,
+                error: parsed.error,
+              }
+            } else if (parsed.type === 'project_paused') {
+              yield { type: 'project_paused', projectId: parsed.project_id }
+            } else if (parsed.type === 'project_resumed') {
+              yield { type: 'project_resumed', projectId: parsed.project_id }
+            } else if (parsed.type === 'project_completed') {
+              yield {
+                type: 'project_completed',
+                projectId: parsed.project_id,
+                project: parsed.project,
+              }
+            } else if (parsed.type === 'project_failed') {
+              yield {
+                type: 'project_failed',
+                projectId: parsed.project_id,
+                error: parsed.error,
+              }
+            } else if (parsed.type === 'project_cancelled') {
+              yield { type: 'project_cancelled', projectId: parsed.project_id }
+            } else if (parsed.type === 'git_commit') {
+              yield {
+                type: 'git_commit',
+                projectId: parsed.project_id,
+                commitSha: parsed.commit_sha,
+                commitMessage: parsed.commit_message,
+              }
+            } else if (parsed.type === 'git_pr_created') {
+              yield {
+                type: 'git_pr_created',
+                projectId: parsed.project_id,
+                prUrl: parsed.pr_url,
+              }
             } else if (parsed.content) {
               // Only yield content if NOT part of subagent_result
+              yield { type: 'content', data: parsed.content.replace(/\\n/g, '\n') }
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+      }
+    }
+  }
+}
+
+// Inline Project Actions
+export interface ProjectActionRequest {
+  project_action: 'approve' | 'pause' | 'resume' | 'cancel' | 'adjust'
+  project_adjustments?: {
+    message?: string
+    add_tasks?: string[]
+    remove_tasks?: string[]
+    modify_tasks?: Record<string, unknown>
+  }
+}
+
+export async function* streamChatWithProjectAction(
+  message: string,
+  agentId: string = 'mo',
+  sessionId: string,
+  action: ProjectActionRequest,
+  signal?: AbortSignal
+): AsyncGenerator<ChatEvent> {
+  const res = await fetch(`${API_BASE}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message,
+      agent_id: agentId,
+      session_id: sessionId,
+      ...action,
+    }),
+    signal,
+  })
+
+  if (!res.ok) throw new Error('Failed to send message')
+
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error('No response body')
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6)
+        if (data === '[DONE]') {
+          yield { type: 'done' }
+        } else {
+          try {
+            const parsed = JSON.parse(data)
+            // Handle project events - backend sends {type: "event_type", ...data}
+            if (parsed.type === 'plan_approved') {
+              yield { type: 'plan_approved', projectId: parsed.project_id }
+            } else if (parsed.type === 'plan_ready') {
+              yield { type: 'plan_ready', project: parsed.plan }
+            } else if (parsed.type === 'plan_adjusted') {
+              yield { type: 'plan_ready', project: parsed.plan }  // Re-emit as plan_ready
+            } else if (parsed.type === 'awaiting_approval') {
+              yield { type: 'awaiting_approval', projectId: parsed.project_id }
+            } else if (parsed.type === 'project_paused') {
+              yield { type: 'project_paused', projectId: parsed.project_id }
+            } else if (parsed.type === 'project_resumed') {
+              yield { type: 'project_resumed', projectId: parsed.project_id }
+            } else if (parsed.type === 'project_cancelled') {
+              yield { type: 'project_cancelled', projectId: parsed.project_id }
+            } else if (parsed.type === 'task_started') {
+              yield { type: 'task_started', projectId: parsed.project_id, task: parsed.task }
+            } else if (parsed.type === 'task_progress') {
+              yield { type: 'task_progress', projectId: parsed.project_id, taskId: parsed.task_id, progress: parsed.progress }
+            } else if (parsed.type === 'task_completed') {
+              yield { type: 'task_completed', projectId: parsed.project_id, taskId: parsed.task_id }
+            } else if (parsed.type === 'task_failed') {
+              yield { type: 'task_failed', projectId: parsed.project_id, taskId: parsed.task_id, error: parsed.error }
+            } else if (parsed.type === 'project_completed') {
+              yield { type: 'project_completed', projectId: parsed.project_id, project: parsed.project }
+            } else if (parsed.type === 'project_failed') {
+              yield { type: 'project_failed', projectId: parsed.project_id, error: parsed.error }
+            } else if (parsed.content) {
               yield { type: 'content', data: parsed.content.replace(/\\n/g, '\n') }
             }
           } catch {

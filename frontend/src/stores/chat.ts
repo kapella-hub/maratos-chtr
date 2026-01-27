@@ -48,6 +48,51 @@ export interface QueuedMessage {
   timestamp: Date
 }
 
+// Inline project types
+export interface ProjectTask {
+  id: string
+  title: string
+  description: string
+  agent_type: string
+  status: 'pending' | 'blocked' | 'ready' | 'in_progress' | 'testing' | 'reviewing' | 'fixing' | 'completed' | 'failed' | 'skipped'
+  depends_on: string[]
+  quality_gates: { type: string; passed: boolean; error?: string }[]
+  progress?: number
+  current_attempt?: number
+  max_attempts?: number
+  error?: string
+}
+
+export interface ProjectPlan {
+  id: string
+  name: string
+  original_prompt: string
+  workspace_path: string
+  status: string
+  tasks: ProjectTask[]
+  progress: number
+  tasks_completed: number
+  tasks_failed: number
+  tasks_pending: number
+  branch_name?: string
+  pr_url?: string
+}
+
+export interface InlineProject {
+  id: string | null
+  status: 'none' | 'detecting' | 'planning' | 'awaiting_approval' | 'executing' | 'paused' | 'interrupted' | 'completed' | 'failed' | 'cancelled'
+  plan: ProjectPlan | null
+  currentTaskId: string | null
+  events: ProjectEvent[]
+  error: string | null
+}
+
+export interface ProjectEvent {
+  type: string
+  data: Record<string, unknown>
+  timestamp: string
+}
+
 interface ChatStore {
   messages: ChatMessage[]
   messageQueue: QueuedMessage[]
@@ -60,6 +105,9 @@ interface ChatStore {
   isOrchestrating: boolean
   activeSubagents: SubagentTask[]
   abortController: AbortController | null
+
+  // Inline project state
+  inlineProject: InlineProject
 
   setSessionId: (id: string | null) => void
   setAgentId: (id: string) => void
@@ -76,11 +124,28 @@ interface ChatStore {
   setAbortController: (controller: AbortController | null) => void
   stopGeneration: () => void
   clearMessages: () => void
-  
+
   // Queue management
   enqueueMessage: (content: string) => void
   dequeueMessage: () => QueuedMessage | undefined
   clearQueue: () => void
+
+  // Inline project actions
+  setProjectStatus: (status: InlineProject['status']) => void
+  setProjectPlan: (plan: ProjectPlan) => void
+  updateProjectTask: (taskId: string, updates: Partial<ProjectTask>) => void
+  addProjectEvent: (event: ProjectEvent) => void
+  setProjectError: (error: string | null) => void
+  clearProject: () => void
+}
+
+const initialProject: InlineProject = {
+  id: null,
+  status: 'none',
+  plan: null,
+  currentTaskId: null,
+  events: [],
+  error: null,
 }
 
 export const useChatStore = create<ChatStore>((set, get) => ({
@@ -95,6 +160,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   isOrchestrating: false,
   activeSubagents: [],
   abortController: null,
+  inlineProject: { ...initialProject },
 
   setSessionId: (id) => set({ sessionId: id }),
   setAgentId: (id) => set({ agentId: id }),
@@ -178,6 +244,57 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   }),
   
   clearSubagents: () => set({ activeSubagents: [], isOrchestrating: false }),
-  
-  clearMessages: () => set({ messages: [], messageQueue: [], sessionId: null, currentModel: null, isThinking: false, isModelThinking: false, isOrchestrating: false, activeSubagents: [] }),
+
+  clearMessages: () => set({
+    messages: [],
+    messageQueue: [],
+    sessionId: null,
+    currentModel: null,
+    isThinking: false,
+    isModelThinking: false,
+    isOrchestrating: false,
+    activeSubagents: [],
+    inlineProject: { ...initialProject },
+  }),
+
+  // Inline project actions
+  setProjectStatus: (status) => set((state) => ({
+    inlineProject: { ...state.inlineProject, status },
+  })),
+
+  setProjectPlan: (plan) => set((state) => ({
+    inlineProject: {
+      ...state.inlineProject,
+      id: plan.id,
+      plan,
+      status: 'awaiting_approval',
+    },
+  })),
+
+  updateProjectTask: (taskId, updates) => set((state) => {
+    if (!state.inlineProject.plan) return state
+    const tasks = state.inlineProject.plan.tasks.map(task =>
+      task.id === taskId ? { ...task, ...updates } : task
+    )
+    return {
+      inlineProject: {
+        ...state.inlineProject,
+        currentTaskId: updates.status === 'in_progress' ? taskId : state.inlineProject.currentTaskId,
+        plan: { ...state.inlineProject.plan, tasks },
+      },
+    }
+  }),
+
+  addProjectEvent: (event) => set((state) => ({
+    inlineProject: {
+      ...state.inlineProject,
+      events: [...state.inlineProject.events.slice(-99), event],  // Keep last 100
+    },
+  })),
+
+  setProjectError: (error) => set((state) => ({
+    inlineProject: { ...state.inlineProject, error, status: error ? 'failed' : state.inlineProject.status },
+  })),
+
+  clearProject: () => set({ inlineProject: { ...initialProject } }),
 }))

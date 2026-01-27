@@ -29,6 +29,10 @@ class Session(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
+    # Inline project tracking (for unified chat + autonomous)
+    inline_project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    inline_project_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
 
 class Message(Base):
     """Chat message model."""

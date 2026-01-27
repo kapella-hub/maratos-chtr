@@ -36,6 +36,8 @@ export function saveChatSession(sessionId: string, messages: ChatMessage[], titl
 
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+    // Dispatch custom event for same-tab listeners
+    window.dispatchEvent(new CustomEvent('chatHistoryUpdated'))
   } catch (error) {
     // localStorage quota exceeded - try removing older sessions
     console.warn('Failed to save chat session, trying to free space:', error)
