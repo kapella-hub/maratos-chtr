@@ -4,15 +4,43 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
-
-import litellm
+from uuid import uuid4
 
 from app.config import settings
 from app.tools import ToolResult, registry as tool_registry
 
+# Import thinking module for structured thinking
+try:
+    from app.thinking import (
+        ThinkingManager,
+        ThinkingLevel,
+        ThinkingSession,
+        ThinkingBlock,
+        AdaptiveThinkingManager,
+        ThinkingMetrics,
+        get_template,
+        detect_template,
+    )
+    from app.thinking.adaptive import determine_thinking_level
+    from app.thinking.metrics import get_metrics
+    THINKING_AVAILABLE = True
+except ImportError:
+    THINKING_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
+
+# Import kiro provider for LLM access
+# All LLM calls are routed through kiro-cli
+try:
+    from app.llm import kiro_provider, KiroProvider
+    from app.llm.kiro_provider import KiroConfig
+    KIRO_AVAILABLE = True
+except ImportError:
+    KIRO_AVAILABLE = False
+    logger.warning("Kiro provider not available, LLM calls will fail")
 
 
 # Model name translation: kiro-cli friendly names -> LiteLLM format
@@ -154,6 +182,8 @@ class Agent:
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
         self._tool_schemas = tool_registry.get_schemas(config.tools) if config.tools else []
+        self._thinking_manager = ThinkingManager() if THINKING_AVAILABLE else None
+        self._current_thinking_session: ThinkingSession | None = None
 
     @property
     def id(self) -> str:
@@ -194,19 +224,48 @@ class Agent:
             if "files" in context:
                 prompt += f"\n\n## Files to Work With\n{context['files']}\n"
 
-        # Inject Thinking Level Instructions
-        thinking_level = settings.thinking_level or "medium"
-        if thinking_level != "off":
-             prompt += f"\n\n## Current Thinking Level\n**{thinking_level.upper()}** - "
-             level_descriptions = {
-                "minimal": "Quick sanity check before execution",
-                "low": "Brief problem breakdown",
-                "medium": "Structured analysis with approach evaluation",
-                "high": "Deep analysis, multiple approaches, risk assessment",
-                "max": "Exhaustive analysis with self-critique",
-             }
-             prompt += level_descriptions.get(thinking_level, "Standard analysis")
-             prompt += "\n"
+        # Inject Thinking Level Instructions using the thinking module
+        if THINKING_AVAILABLE:
+            base_level = ThinkingLevel.from_string(settings.thinking_level or "medium")
+
+            # Use adaptive thinking if we have a user message
+            user_message = context.get("user_message", "") if context else ""
+            if user_message:
+                adaptive_result = determine_thinking_level(user_message, base_level, context)
+                thinking_level = adaptive_result.adaptive_level
+                template = adaptive_result.template
+
+                # Store adaptive result for metrics
+                if context is not None:
+                    context["_adaptive_thinking"] = adaptive_result.to_dict()
+            else:
+                thinking_level = base_level
+                template = None
+
+            if thinking_level != ThinkingLevel.OFF:
+                prompt += f"\n\n## Thinking Mode\n**Level:** {thinking_level.value.upper()} - {thinking_level.description}\n"
+
+                # Add template-specific guidance
+                if template and self._thinking_manager:
+                    prompt += self._thinking_manager.generate_thinking_prompt(thinking_level, template.id)
+                else:
+                    prompt += self._thinking_manager.generate_thinking_prompt(thinking_level) if self._thinking_manager else ""
+
+                prompt += "\n\nWrap your thinking in <thinking>...</thinking> tags. This will be processed but not shown to the user.\n"
+        else:
+            # Fallback to old behavior if thinking module not available
+            thinking_level_str = settings.thinking_level or "medium"
+            if thinking_level_str != "off":
+                prompt += f"\n\n## Current Thinking Level\n**{thinking_level_str.upper()}** - "
+                level_descriptions = {
+                    "minimal": "Quick sanity check before execution",
+                    "low": "Brief problem breakdown",
+                    "medium": "Structured analysis with approach evaluation",
+                    "high": "Deep analysis, multiple approaches, risk assessment",
+                    "max": "Exhaustive analysis with self-critique",
+                }
+                prompt += level_descriptions.get(thinking_level_str, "Standard analysis")
+                prompt += "\n"
 
         return prompt, matched_skills
 
@@ -302,13 +361,55 @@ class Agent:
     ) -> AsyncIterator[str]:
         """Chat with the agent, yielding response chunks.
 
+        All LLM calls are routed through kiro-cli.
+
         Args:
             messages: List of conversation messages
             context: Optional context dict (workspace, memory, files, etc.)
             model_override: Optional model to use instead of agent's default
-            temperature_override: Optional temperature to use
-            max_tokens_override: Optional max tokens to use
+            temperature_override: Optional temperature (not used with kiro)
+            max_tokens_override: Optional max tokens (not used with kiro)
         """
+        if not KIRO_AVAILABLE:
+            yield "Error: Kiro provider not available. Please ensure kiro-cli is installed."
+            return
+
+        # Check kiro-cli availability
+        if not await kiro_provider.is_available():
+            yield "Error: kiro-cli not found. Please install: curl -fsSL https://cli.kiro.dev/install | bash"
+            return
+
+        # Initialize thinking session for this message
+        message_id = str(uuid4())[:8]
+        thinking_session: ThinkingSession | None = None
+        thinking_start_time: float | None = None
+
+        if THINKING_AVAILABLE and self._thinking_manager:
+            base_level = ThinkingLevel.from_string(settings.thinking_level or "medium")
+            # Get user message for adaptive thinking
+            user_message = ""
+            if messages:
+                for msg in reversed(messages):
+                    if msg.role == "user":
+                        user_message = msg.content
+                        break
+
+            if context is None:
+                context = {}
+            context["user_message"] = user_message
+
+            # Determine adaptive level
+            adaptive_result = determine_thinking_level(user_message, base_level, context)
+
+            thinking_session = self._thinking_manager.create_session(
+                message_id=message_id,
+                level=adaptive_result.adaptive_level,
+                complexity_score=adaptive_result.complexity_score,
+            )
+            thinking_session.original_level = base_level
+            thinking_session.adaptive_level = adaptive_result.adaptive_level
+            self._current_thinking_session = thinking_session
+
         # Build message list
         api_messages = []
 
@@ -320,52 +421,40 @@ class Agent:
         # Conversation messages
         api_messages.extend([m.to_dict() for m in messages])
 
-        # Use overrides or defaults
+        # Get model - use kiro-cli friendly names
         model = model_override or self.config.model
-        # Translate friendly model names (kiro-cli format) to LiteLLM format
-        model = translate_model_name(model)
-        temperature = temperature_override if temperature_override is not None else self.config.temperature
-        max_tokens = max_tokens_override or settings.max_response_tokens
+        # Strip anthropic/ prefix if present (kiro uses short names)
+        if model.startswith("anthropic/"):
+            model = model.replace("anthropic/", "")
+        # Convert full model IDs to short names
+        model = _kiro_model_name(model)
 
-        # Make API call with streaming and timeout
-        tool_names = [t['function']['name'] for t in self._tool_schemas] if self._tool_schemas else []
-        logger.info(f"Agent {self.id} calling LLM with model={model}, {len(tool_names)} tools: {tool_names}")
+        # Configure kiro
+        kiro_config = KiroConfig(
+            model=model,
+            trust_tools=True,  # Let kiro handle tools
+            interactive=False,
+            timeout=settings.llm_timeout,
+            workdir=context.get("workspace") if context else None,
+        )
 
-        try:
-            async with asyncio.timeout(settings.llm_timeout):
-                response = await litellm.acompletion(
-                    model=model,
-                    messages=api_messages,
-                    tools=self._tool_schemas if self._tool_schemas else None,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    stream=True,
-                )
-        except asyncio.TimeoutError:
-            logger.error(f"LLM call timed out after {settings.llm_timeout}s for agent {self.id}")
-            yield f"\n\n⚠️ **Request timed out** after {settings.llm_timeout} seconds. The model took too long to respond. Please try again or simplify your request.\n"
-            return
+        logger.info(f"Agent {self.id} calling kiro-cli with model={model}")
 
-        # Collect for tool calls
-        full_content = ""
-        tool_calls: list[dict] = []
-        
         # Buffer for filtering <thinking> and <analysis> blocks
         buffer = ""
+        thinking_buffer = ""  # Accumulate thinking content for metrics
         in_hidden_block = False
         hidden_tag = ""  # Which tag we're currently inside
+        current_block: ThinkingBlock | None = None
 
-        async for chunk in response:
-            delta = chunk.choices[0].delta
+        try:
+            async for chunk in kiro_provider.chat_completion_stream(api_messages, kiro_config):
+                # Add chunk to buffer
+                buffer += chunk
 
-            # Stream content (filter out <thinking> and <analysis> blocks)
-            if delta.content:
-                full_content += delta.content
-                buffer += delta.content
-                
                 # Hidden tags to filter out (thinking shows indicator, analysis is silent)
                 hidden_tags = ["thinking", "analysis"]
-                
+
                 # Process buffer to filter hidden blocks
                 while True:
                     if in_hidden_block:
@@ -373,15 +462,37 @@ class Agent:
                         end_tag = f"</{hidden_tag}>"
                         end_idx = buffer.find(end_tag)
                         if end_idx != -1:
+                            # Capture thinking content before discarding
+                            thinking_buffer += buffer[:end_idx]
+
+                            # Complete the thinking block with parsed steps
+                            if current_block and thinking_session and self._thinking_manager:
+                                steps = self._thinking_manager.parse_legacy_content(thinking_buffer)
+                                duration_ms = int((time.time() - thinking_start_time) * 1000) if thinking_start_time else 0
+                                for step in steps:
+                                    step.duration_ms = duration_ms // max(len(steps), 1)
+                                    current_block.add_step(step)
+                                self._thinking_manager.complete_block(current_block)
+
                             # Discard everything up to and including closing tag
                             buffer = buffer[end_idx + len(end_tag):]
-                            # Signal end of thinking block
+                            thinking_buffer = ""
+
+                            # Signal end of thinking block with structured data
                             if hidden_tag == "thinking":
-                                yield "__THINKING_END__"
+                                if current_block and THINKING_AVAILABLE:
+                                    # Yield structured thinking complete event
+                                    yield f"__THINKING_COMPLETE__:{json.dumps(current_block.to_dict())}"
+                                else:
+                                    yield "__THINKING_END__"
+
                             in_hidden_block = False
                             hidden_tag = ""
+                            current_block = None
                         else:
-                            # Still in hidden block, keep buffering (don't yield)
+                            # Still in hidden block, accumulate thinking content
+                            thinking_buffer += buffer
+                            buffer = ""
                             break
                     else:
                         # Look for any opening tag
@@ -392,7 +503,7 @@ class Agent:
                             if idx != -1 and (found_idx == -1 or idx < found_idx):
                                 found_idx = idx
                                 found_tag = tag
-                        
+
                         if found_tag:
                             # Yield content before the tag
                             if found_idx > 0:
@@ -400,8 +511,20 @@ class Agent:
                             buffer = buffer[found_idx + len(found_tag) + 2:]  # +2 for < and >
                             in_hidden_block = True
                             hidden_tag = found_tag
-                            # Signal start of thinking block
-                            if found_tag == "thinking":
+                            thinking_buffer = ""
+                            thinking_start_time = time.time()
+
+                            # Start a thinking block
+                            if found_tag == "thinking" and thinking_session and self._thinking_manager:
+                                # Detect template from user message
+                                template = detect_template(context.get("user_message", "")) if THINKING_AVAILABLE and context else None
+                                current_block = self._thinking_manager.start_block(
+                                    thinking_session,
+                                    template=template.id if template else None,
+                                )
+                                # Yield structured thinking start event
+                                yield f"__THINKING_START__:{json.dumps({'block_id': current_block.id, 'level': thinking_session.effective_level.value})}"
+                            elif found_tag == "thinking":
                                 yield "__THINKING_START__"
                         else:
                             # No hidden tag, but keep potential partial tag in buffer
@@ -415,54 +538,54 @@ class Agent:
                                 yield buffer
                                 buffer = ""
                             break
-        
-        # Flush remaining buffer (if not in hidden block)
-        if buffer and not in_hidden_block:
-            yield buffer
 
-            # Collect tool calls
-            if delta.tool_calls:
-                for tc in delta.tool_calls:
-                    if tc.index >= len(tool_calls):
-                        tool_calls.append({
-                            "id": tc.id or "",
-                            "type": "function",
-                            "function": {"name": "", "arguments": ""},
-                        })
-                    if tc.id:
-                        tool_calls[tc.index]["id"] = tc.id
-                    if tc.function:
-                        if tc.function.name:
-                            tool_calls[tc.index]["function"]["name"] = tc.function.name
-                        if tc.function.arguments:
-                            tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+            # Flush remaining buffer (if not in hidden block)
+            if buffer and not in_hidden_block:
+                yield buffer
 
-        # Handle tool calls if any
-        if tool_calls:
-            logger.info(f"Agent {self.id} received {len(tool_calls)} tool calls from LLM")
-            yield "\n\n"
-            for tc in tool_calls:
-                tool_name = tc["function"]["name"]
+            # Record thinking metrics
+            if thinking_session and THINKING_AVAILABLE:
                 try:
-                    tool_args = json.loads(tc["function"]["arguments"])
-                except json.JSONDecodeError:
-                    tool_args = {}
+                    metrics = get_metrics()
+                    metrics.record(thinking_session, outcome="success")
+                except Exception as e:
+                    logger.debug(f"Failed to record thinking metrics: {e}")
 
-                yield f"🔧 **{tool_name}**\n"
+        except Exception as e:
+            logger.error(f"Kiro chat error for agent {self.id}: {e}", exc_info=True)
 
-                # Execute tool
-                result = await tool_registry.execute(tool_name, **tool_args)
+            # Record error in metrics
+            if thinking_session and THINKING_AVAILABLE:
+                try:
+                    metrics = get_metrics()
+                    metrics.record(thinking_session, outcome="error")
+                except Exception:
+                    pass
 
-                if result.success:
-                    yield f"```\n{result.output[:2000]}\n```\n"
-                    # Check for canvas events in tool result data
-                    if result.data and result.data.get("action") == "canvas_create":
-                        # Yield special marker for chat API to parse and send as SSE
-                        artifact_json = json.dumps(result.data["artifact"])
-                        yield f"__CANVAS_CREATE__{artifact_json}__CANVAS_END__"
-                else:
-                    yield f"❌ Error: {result.error}\n"
+            yield f"\n\n⚠️ **Error:** {str(e)}\n"
+
+        finally:
+            # Clean up thinking session
+            if thinking_session and self._thinking_manager:
+                self._thinking_manager.close_session(thinking_session.id)
+                self._current_thinking_session = None
+
 
     async def run_tool(self, tool_id: str, **kwargs: Any) -> ToolResult:
         """Run a specific tool."""
         return await tool_registry.execute(tool_id, **kwargs)
+
+
+def _kiro_model_name(model: str) -> str:
+    """Convert model ID to kiro-cli friendly name."""
+    model_map = {
+        "claude-opus-4-5-20251101": "claude-opus-4.5",
+        "claude-sonnet-4-5-20241022": "claude-sonnet-4.5",
+        "claude-sonnet-4-20250514": "claude-sonnet-4",
+        "claude-haiku-4-5-20241022": "claude-haiku-4.5",
+        "claude-3-opus-20240229": "claude-opus-4.5",
+        "claude-3-sonnet-20240229": "claude-sonnet-4",
+        "claude-3-haiku-20240307": "claude-haiku-4.5",
+        "claude-3-5-sonnet-20241022": "claude-sonnet-4.5",
+    }
+    return model_map.get(model, model)

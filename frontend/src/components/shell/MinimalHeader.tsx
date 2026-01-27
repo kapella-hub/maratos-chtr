@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { Sparkles, ChevronDown, Menu, Settings, History, Command, Plus } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Sparkles, ChevronDown, Menu, Settings, History, Command, Plus, Cpu, Brain, Check } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
-import { fetchConfig } from '@/lib/api'
+import { fetchConfig, updateConfig } from '@/lib/api'
 import { useChatStore } from '@/stores/chat'
 
 interface MinimalHeaderProps {
@@ -12,29 +12,65 @@ interface MinimalHeaderProps {
   onToggleCommand: () => void
 }
 
-// Format model name for display
-function formatModelName(model: string): string {
-  if (!model) return 'Claude'
-  return model
-    .replace(/-\d{8}$/, '')
-    .replace('claude-', '')
-    .replace(/-/g, ' ')
-    .split(' ')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
-}
+// Kiro CLI available models
+const kiroModels = [
+  { id: 'Auto', name: 'Auto', credits: '1x' },
+  { id: 'claude-sonnet-4.5', name: 'Sonnet 4.5', credits: '1.3x' },
+  { id: 'claude-sonnet-4', name: 'Sonnet 4', credits: '1.3x' },
+  { id: 'claude-haiku-4.5', name: 'Haiku 4.5', credits: '0.4x' },
+  { id: 'claude-opus-4.5', name: 'Opus 4.5', credits: '2.2x' },
+]
+
+// Thinking levels
+const thinkingLevels = [
+  { id: 'off', name: 'Off', color: 'text-gray-400' },
+  { id: 'minimal', name: 'Minimal', color: 'text-blue-400' },
+  { id: 'low', name: 'Low', color: 'text-cyan-400' },
+  { id: 'medium', name: 'Medium', color: 'text-green-400' },
+  { id: 'high', name: 'High', color: 'text-yellow-400' },
+  { id: 'max', name: 'Max', color: 'text-orange-400' },
+]
 
 export default function MinimalHeader({ onToggleHistory, onToggleCommand }: MinimalHeaderProps) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [showMenu, setShowMenu] = useState(false)
-  const { currentModel, clearMessages, setSessionId } = useChatStore()
+  const [showModelDropdown, setShowModelDropdown] = useState(false)
+  const [showThinkingDropdown, setShowThinkingDropdown] = useState(false)
+  const modelRef = useRef<HTMLDivElement>(null)
+  const thinkingRef = useRef<HTMLDivElement>(null)
+  const { currentModel, clearMessages, setSessionId, isStreaming } = useChatStore()
 
   const { data: config } = useQuery({
     queryKey: ['config'],
     queryFn: fetchConfig,
   })
 
-  const modelName = formatModelName(currentModel || config?.default_model || 'claude-sonnet-4')
+  const configMutation = useMutation({
+    mutationFn: updateConfig,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config'] })
+    },
+  })
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelRef.current && !modelRef.current.contains(e.target as Node)) {
+        setShowModelDropdown(false)
+      }
+      if (thinkingRef.current && !thinkingRef.current.contains(e.target as Node)) {
+        setShowThinkingDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const selectedModel = currentModel || config?.default_model || 'Auto'
+  const selectedThinking = config?.thinking_level || 'medium'
+  const currentModelInfo = kiroModels.find(m => m.id === selectedModel) || kiroModels[0]
+  const currentThinkingInfo = thinkingLevels.find(t => t.id === selectedThinking) || thinkingLevels[3]
 
   const handleNewChat = () => {
     clearMessages()
@@ -58,20 +94,130 @@ export default function MinimalHeader({ onToggleHistory, onToggleCommand }: Mini
         </button>
       </div>
 
-      {/* Center: Model selector */}
-      <button
-        onClick={onToggleCommand}
-        className={cn(
-          'flex items-center gap-2 px-3 py-1.5 rounded-lg',
-          'text-sm text-muted-foreground',
-          'hover:bg-muted/50 hover:text-foreground',
-          'transition-colors'
-        )}
-      >
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-        <span className="font-medium">{modelName}</span>
-        <ChevronDown className="w-3.5 h-3.5" />
-      </button>
+      {/* Center: Model & Thinking selectors */}
+      <div className="flex items-center gap-2">
+        {/* Model Selector */}
+        <div className="relative" ref={modelRef}>
+          <button
+            onClick={() => {
+              if (!isStreaming) {
+                setShowModelDropdown(!showModelDropdown)
+                setShowThinkingDropdown(false)
+              }
+            }}
+            disabled={isStreaming}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm',
+              'hover:bg-muted/50 transition-colors',
+              'disabled:opacity-50 disabled:cursor-not-allowed'
+            )}
+          >
+            <Cpu className="w-3.5 h-3.5 text-muted-foreground" />
+            <span className="font-medium">{currentModelInfo.name}</span>
+            <span className="text-xs text-emerald-400">{currentModelInfo.credits}</span>
+            <ChevronDown className={cn(
+              'w-3 h-3 text-muted-foreground transition-transform',
+              showModelDropdown && 'rotate-180'
+            )} />
+          </button>
+
+          <AnimatePresence>
+            {showModelDropdown && (
+              <motion.div
+                initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                transition={{ duration: 0.15 }}
+                className="absolute top-full left-0 mt-2 w-48 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden"
+              >
+                <div className="p-1">
+                  {kiroModels.map((model) => (
+                    <button
+                      key={model.id}
+                      onClick={() => {
+                        configMutation.mutate({ default_model: model.id })
+                        setShowModelDropdown(false)
+                      }}
+                      className={cn(
+                        'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm',
+                        'hover:bg-muted/50 transition-colors',
+                        model.id === selectedModel && 'bg-primary/10'
+                      )}
+                    >
+                      <span className="flex-1 font-medium">{model.name}</span>
+                      <span className="text-xs text-emerald-400">{model.credits}</span>
+                      {model.id === selectedModel && (
+                        <Check className="w-3.5 h-3.5 text-primary" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <span className="text-border">|</span>
+
+        {/* Thinking Level Selector */}
+        <div className="relative" ref={thinkingRef}>
+          <button
+            onClick={() => {
+              if (!isStreaming) {
+                setShowThinkingDropdown(!showThinkingDropdown)
+                setShowModelDropdown(false)
+              }
+            }}
+            disabled={isStreaming}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm',
+              'hover:bg-muted/50 transition-colors',
+              'disabled:opacity-50 disabled:cursor-not-allowed'
+            )}
+          >
+            <Brain className="w-3.5 h-3.5 text-violet-400" />
+            <span className={cn('font-medium', currentThinkingInfo.color)}>{currentThinkingInfo.name}</span>
+            <ChevronDown className={cn(
+              'w-3 h-3 text-muted-foreground transition-transform',
+              showThinkingDropdown && 'rotate-180'
+            )} />
+          </button>
+
+          <AnimatePresence>
+            {showThinkingDropdown && (
+              <motion.div
+                initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                transition={{ duration: 0.15 }}
+                className="absolute top-full left-0 mt-2 w-40 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden"
+              >
+                <div className="p-1">
+                  {thinkingLevels.map((level) => (
+                    <button
+                      key={level.id}
+                      onClick={() => {
+                        configMutation.mutate({ thinking_level: level.id })
+                        setShowThinkingDropdown(false)
+                      }}
+                      className={cn(
+                        'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm',
+                        'hover:bg-muted/50 transition-colors',
+                        level.id === selectedThinking && 'bg-violet-500/10'
+                      )}
+                    >
+                      <span className={cn('flex-1 font-medium', level.color)}>{level.name}</span>
+                      {level.id === selectedThinking && (
+                        <Check className="w-3.5 h-3.5 text-violet-400" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
 
       {/* Right: Actions */}
       <div className="flex items-center gap-1">

@@ -10,7 +10,8 @@ from app.agents.coder import CoderAgent
 from app.agents.tester import TesterAgent
 from app.agents.docs import DocsAgent
 from app.agents.devops import DevOpsAgent
-from app.agents.kiro import create_kiro_agent
+# KiroAgent import disabled - base Agent now uses kiro_provider
+# from app.agents.kiro import create_kiro_agent
 
 
 class AgentRegistry:
@@ -101,56 +102,7 @@ agent_registry.register(TesterAgent())
 agent_registry.register(DocsAgent())
 agent_registry.register(DevOpsAgent())
 
-# Kiro CLI agent (Claude via AWS - no API key needed)
-# Uses the model from settings.default_model
-from app.config import settings
-
-# Import the authoritative MO prompt (single source of truth)
-from app.agents.mo import MO_SYSTEM_PROMPT
-
-kiro_mo = create_kiro_agent(
-    agent_id="mo",
-    name="MO",
-    description="Your AI partner, powered by Kiro CLI",
-    model=settings.default_model or "claude-sonnet-4.5",
-    system_prompt=MO_SYSTEM_PROMPT,
-)
-
-# If Kiro is available, replace ALL agents with Kiro-powered versions
-# Canvas support is handled by post-processing mermaid blocks in chat.py
-if kiro_mo.available:
-    # Import system prompts from agent modules
-    from app.agents.architect import ARCHITECT_SYSTEM_PROMPT
-    from app.agents.reviewer import REVIEWER_SYSTEM_PROMPT
-    from app.agents.coder import CODER_SYSTEM_PROMPT
-    from app.agents.tester import TESTER_SYSTEM_PROMPT
-    from app.agents.docs import DOCS_SYSTEM_PROMPT
-    from app.agents.devops import DEVOPS_SYSTEM_PROMPT
-
-    # Create Kiro-powered versions of all agents
-    # Format: (id, name, desc, prompt, icon)
-    # All agents use trust_all_tools=True for non-interactive mode
-    kiro_agents = [
-        ("mo", "MO", "Your AI partner", MO_SYSTEM_PROMPT, "🤖"),
-        ("architect", "Architect", "System design and architecture", ARCHITECT_SYSTEM_PROMPT, "🏗️"),
-        ("reviewer", "Reviewer", "Code review and security audit", REVIEWER_SYSTEM_PROMPT, "🔍"),
-        ("coder", "Coder", "Clean implementation", CODER_SYSTEM_PROMPT, "💻"),
-        ("tester", "Tester", "Test generation", TESTER_SYSTEM_PROMPT, "🧪"),
-        ("docs", "Docs", "Documentation", DOCS_SYSTEM_PROMPT, "📝"),
-        ("devops", "DevOps", "Infrastructure and CI/CD", DEVOPS_SYSTEM_PROMPT, "🚀"),
-    ]
-
-    for agent_id, name, desc, prompt, icon in kiro_agents:
-        kiro_agent = create_kiro_agent(
-            agent_id=agent_id,
-            name=name,
-            description=desc,
-            model=settings.default_model or "claude-sonnet-4.5",
-            system_prompt=prompt,
-            trust_all_tools=True,  # Required for non-interactive mode
-        )
-        kiro_agent.config.icon = icon
-        agent_registry._agents[agent_id] = kiro_agent
-        agent_registry._configs[agent_id] = kiro_agent.config
-
-    agent_registry._default_id = "mo"
+# NOTE: KiroAgent replacement is DISABLED
+# The base Agent class now uses kiro_provider which handles all LLM calls
+# through kiro-cli with proper model name translation.
+# This avoids the complexity of maintaining two separate kiro integrations.

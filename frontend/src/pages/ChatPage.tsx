@@ -8,7 +8,7 @@ import { useChatStore } from '@/stores/chat'
 import type { ProjectPlan, ProjectTask } from '@/stores/chat'
 import { useToastStore } from '@/stores/toast'
 import { useCanvasStore } from '@/stores/canvas'
-import { streamChat, streamChatWithProjectAction, fetchConfig } from '@/lib/api'
+import { streamChat, streamChatWithProjectAction, fetchConfig, ThinkingBlock } from '@/lib/api'
 import { saveChatSession, getChatSession } from '@/lib/chatHistory'
 
 export default function ChatPage() {
@@ -48,12 +48,14 @@ export default function ChatPage() {
     addProjectEvent,
     setProjectError,
     clearProject,
+    setCurrentThinkingBlock,
+    setLastMessageThinking,
   } = useChatStore()
 
   const { addToast } = useToastStore()
   const { addArtifact: addCanvasArtifact, artifacts: canvasArtifacts, panelVisible, togglePanel } = useCanvasStore()
 
-  // Fetch config (for potential use with models)
+  // Fetch config (for potential use)
   useQuery({
     queryKey: ['config'],
     queryFn: fetchConfig,
@@ -119,6 +121,12 @@ export default function ChatPage() {
           setThinking(event.data as boolean)
         } else if (event.type === 'model_thinking') {
           setModelThinking(event.data as boolean)
+        } else if (event.type === 'thinking_block' && event.data) {
+          // Structured thinking block started
+          setCurrentThinkingBlock(event.data as unknown as Partial<ThinkingBlock>)
+        } else if (event.type === 'thinking_complete' && event.data) {
+          // Structured thinking complete - attach to message
+          setLastMessageThinking(event.data as unknown as ThinkingBlock)
         } else if (event.type === 'orchestrating') {
           setOrchestrating(event.data as boolean)
         } else if (event.type === 'subagent' && event.subagent) {
@@ -226,7 +234,7 @@ export default function ChatPage() {
       setAbortController(null)
       clearSubagents()
     }
-  }, [agentId, sessionId, addMessage, appendToLastMessage, setSessionId, setLastMessageAgent, setCurrentModel, setStreaming, setThinking, setModelThinking, setOrchestrating, updateSubagent, clearSubagents, setAbortController, setProjectStatus, setProjectPlan, updateProjectTask, addProjectEvent, setProjectError, addCanvasArtifact, addToast])
+  }, [agentId, sessionId, addMessage, appendToLastMessage, setSessionId, setLastMessageAgent, setCurrentModel, setStreaming, setThinking, setModelThinking, setCurrentThinkingBlock, setLastMessageThinking, setOrchestrating, updateSubagent, clearSubagents, setAbortController, setProjectStatus, setProjectPlan, updateProjectTask, addProjectEvent, setProjectError, addCanvasArtifact, addToast])
 
   // Project action handlers
   const handleProjectApprove = useCallback(async () => {

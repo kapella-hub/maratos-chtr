@@ -9,6 +9,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.config import get_allowed_write_dirs, get_config_dict, settings, update_config
+from app.autonomous.model_selector import (
+    _get_available_models,
+    refresh_available_models,
+    get_available_models_info,
+    KIRO_MODEL_CREDITS,
+)
 
 logger = logging.getLogger(__name__)
 from app.tools import registry as tool_registry
@@ -62,6 +68,10 @@ class ConfigUpdate(BaseModel):
 async def get_config() -> dict[str, Any]:
     """Get current configuration."""
     config = get_config_dict()
+
+    # Add available models from kiro-cli
+    config["available_models"] = _get_available_models()
+    config["model_credits"] = KIRO_MODEL_CREDITS
 
     # Add workspace info
     fs_tool = tool_registry.get("filesystem")
@@ -140,17 +150,18 @@ async def set_config(update: ConfigUpdate) -> dict[str, Any]:
 @router.get("/schema")
 async def get_schema() -> dict[str, Any]:
     """Get config schema for UI generation."""
+    # Get available models from kiro-cli
+    available_models = _get_available_models()
+    # Filter out "Auto" for explicit model selection, but keep it as an option
+    model_options = available_models if available_models else ["claude-sonnet-4", "claude-haiku-4.5", "claude-opus-4.5"]
+
     return {
         "properties": {
             "default_model": {
                 "type": "string",
                 "title": "Default Model",
-                "description": "Default LLM model to use",
-                "enum": [
-                    "claude-sonnet-4.5",
-                    "claude-haiku-4.5",
-                    "claude-opus-4.5",
-                ],
+                "description": "Default LLM model to use (from kiro-cli)",
+                "enum": model_options,
             },
             "thinking_level": {
                 "type": "string",
@@ -186,6 +197,22 @@ async def get_schema() -> dict[str, Any]:
                 "description": "Enable debug logging",
             },
         },
+    }
+
+
+@router.get("/models")
+async def list_models() -> dict[str, Any]:
+    """List available LLM models from kiro-cli."""
+    return get_available_models_info()
+
+
+@router.post("/models/refresh")
+async def refresh_models() -> dict[str, Any]:
+    """Refresh the available models list from kiro-cli."""
+    models = refresh_available_models()
+    return {
+        "models": models,
+        "info": get_available_models_info(),
     }
 
 

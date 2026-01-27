@@ -19,6 +19,14 @@ success() { echo -e "${GREEN}[MaratOS]${NC} $1"; }
 warn() { echo -e "${YELLOW}[MaratOS]${NC} $1"; }
 error() { echo -e "${RED}[MaratOS]${NC} $1"; }
 
+# Check for kiro-cli (required for LLM access)
+if ! command -v kiro-cli &> /dev/null && ! command -v kiro &> /dev/null; then
+    error "kiro-cli not found! Install with: curl -fsSL https://cli.kiro.dev/install | bash"
+    error "Then authenticate: kiro-cli login"
+    exit 1
+fi
+success "kiro-cli found: $(which kiro-cli 2>/dev/null || which kiro)"
+
 # Kill existing processes
 log "Stopping existing processes..."
 pkill -f "python run.py" 2>/dev/null || true

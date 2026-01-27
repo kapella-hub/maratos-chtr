@@ -8,6 +8,7 @@ from app.tools.kiro import KiroTool
 from app.tools.orchestrate import OrchestrateTool
 from app.tools.sessions import SessionsTool
 from app.tools.canvas import CanvasTool
+from app.tools.routing import RoutingTool
 
 __all__ = [
     "Tool",
@@ -21,4 +22,5 @@ __all__ = [
     "OrchestrateTool",
     "SessionsTool",
     "CanvasTool",
+    "RoutingTool",
 ]

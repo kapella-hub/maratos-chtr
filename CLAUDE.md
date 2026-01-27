@@ -6,6 +6,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MaratOS is a self-hostable AI platform with a web interface and multi-channel messaging support. The primary agent is **MO** — an opinionated AI partner that orchestrates specialized subagents for coding tasks.
 
+**Important:** All LLM calls are routed through **kiro-cli** — no Anthropic API key required. The `llm/kiro_provider.py` module handles model name translation and streaming.
+
+**Development Rules:**
+- Claude has full access to this project
+- Validate and test every change before considering it complete
+- Retain memory of changes made (document significant modifications below)
+
+## Change Log
+
+### 2026-01-27: Kiro-CLI Exclusive LLM Integration
+- Created `backend/app/llm/kiro_provider.py` - routes all LLM calls through kiro-cli
+- Modified `backend/app/agents/base.py` - replaced litellm with kiro_provider
+- Modified `backend/app/agents/registry.py` - disabled KiroAgent replacement (base Agent now uses kiro_provider)
+- Modified `backend/app/api/chat.py` - updated title generation to use kiro
+- Created stub modules for missing autonomous features:
+  - `backend/app/autonomous/detection.py`
+  - `backend/app/autonomous/inline_project.py`
+  - `backend/app/autonomous/inline_orchestrator.py`
+- Updated `restart.sh` - added kiro-cli availability check at startup
+- Updated `backend/app/api/config.py` - dynamic model list from kiro-cli:
+  - `GET /api/config` now includes `available_models` and `model_credits`
+  - `GET /api/config/schema` uses dynamic model list
+  - Added `GET /api/config/models` - list available models with tier info
+  - Added `POST /api/config/models/refresh` - refresh model cache from kiro-cli
+
 ## Development Commands
 
 ### Backend (Python)
@@ -56,11 +81,16 @@ docker build -t maratos .           # Build image manually
 - `manager.py` — Task spawning, tracking, and status management (`SubagentTask`, `TaskStatus`)
 - `runner.py` — Executes agent tasks with memory context, reports progress via SSE
 
+**LLM Provider** (`llm/`):
+- `kiro_provider.py` — All LLM calls route through kiro-cli subprocess
+- Handles model name translation (e.g., `anthropic/claude-sonnet-4-20250514` → `claude-sonnet-4`)
+- Streams responses with ANSI/banner cleanup
+
 **Tools** (`tools/`):
 - `filesystem.py` — Sandboxed: read anywhere, write only to `~/maratos-workspace`
 - `shell.py` — Command execution
 - `web.py` — Web search and fetch
-- `kiro.py` — Enterprise AI integration with quality-focused prompts (architect/validate/test/prompt actions)
+- `kiro.py` — Kiro tool for analysis-only actions (validate/test/prompt)
 
 **Memory** (`memory/`): Infinite memory with semantic search
 - `manager.py` — Context retrieval, auto-extraction from conversations
@@ -127,13 +157,32 @@ For coding tasks, use Kiro CLI actions:
 ## Configuration
 
 Environment variables prefixed with `MARATOS_`:
-- `MARATOS_ANTHROPIC_API_KEY` — Required
-- `MARATOS_DEFAULT_MODEL` — Default: `claude-sonnet-4-20250514`
+- `MARATOS_DEFAULT_MODEL` — Default: `claude-sonnet-4` (kiro-cli model name)
 - `MARATOS_TELEGRAM_ENABLED/TOKEN`, `MARATOS_IMESSAGE_ENABLED`, `MARATOS_WEBEX_ENABLED/TOKEN`
+
+**Note:** No `MARATOS_ANTHROPIC_API_KEY` needed — all LLM calls go through kiro-cli.
+
+Available kiro-cli models: `Auto`, `claude-sonnet-4`, `claude-sonnet-4.5`, `claude-haiku-4.5`, `claude-opus-4.5`
 
 ## Tech Stack
 
-- **Backend**: FastAPI, SQLAlchemy (async), SQLite, LiteLLM, Pydantic
+- **Backend**: FastAPI, SQLAlchemy (async), SQLite, Pydantic
+- **LLM**: kiro-cli (exclusive provider, no API keys needed)
 - **Frontend**: React 18, Vite, Zustand, TailwindCSS, React Query
 - **Python**: 3.11+, ruff for linting
 - **Node**: 18+
+
+## Change Log
+
+### 2026-01-27: Settings Page Redesign
+- Simplified `frontend/src/pages/SettingsPage.tsx` - cleaner card-based layout
+- Removed: MO Info card, Messaging Channels, GitLab Integration, Skills, Agent Metrics, Workspace Management sections
+- Kept: Projects, Filesystem Access, Git Settings, Debug Mode
+- Deleted unused components: `AgentMetrics.tsx`, `WorkspaceManager.tsx`
+
+### 2026-01-27: Model & Thinking Selectors in Header
+- Modified `frontend/src/components/shell/MinimalHeader.tsx` - added model and thinking level dropdowns in the center header area
+- Removed model/thinking from SettingsPage (now in header)
+- Model selector shows: Auto, Sonnet 4.5, Sonnet 4, Haiku 4.5, Opus 4.5 with credit costs
+- Thinking level shows: Off, Minimal, Low, Medium, High, Max with color coding
+- Selectors disabled during streaming

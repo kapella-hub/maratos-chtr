@@ -246,35 +246,34 @@ def clean_cli_output(text: str) -> str:
     return result.strip()
 
 
+def _extract_title_heuristic(user_message: str) -> str:
+    """Extract a title from user message using simple heuristics."""
+    first_line = user_message.split('\n')[0].strip()
+    for prefix in ["please ", "can you ", "i want to ", "help me "]:
+        if first_line.lower().startswith(prefix):
+            first_line = first_line[len(prefix):]
+            break
+    if len(first_line) > 50:
+        return first_line[:47] + "..."
+    return first_line or "New Chat"
+
+
 async def generate_title(user_message: str, assistant_response: str) -> str:
-    """Generate a concise title for the chat session."""
-    import litellm
-    from app.config import settings
-    
+    """Generate a concise title for the chat session using kiro-cli."""
     try:
-        response = await litellm.acompletion(
-            model=settings.default_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Generate a brief, descriptive title (max 50 chars) for this conversation. Return ONLY the title, no quotes or explanation."
-                },
-                {
-                    "role": "user", 
-                    "content": f"User: {user_message[:500]}\n\nAssistant: {assistant_response[:500]}"
-                }
-            ],
-            max_tokens=60,
-            temperature=0.3,
+        from app.llm import kiro_provider
+
+        if not await kiro_provider.is_available():
+            return _extract_title_heuristic(user_message)
+
+        title = await kiro_provider.generate_short_response(
+            prompt=f"User asked: {user_message[:300]}\nAssistant replied about: {assistant_response[:200]}",
+            max_length=50,
         )
-        title = response.choices[0].message.content.strip()
-        # Clean up any quotes
-        title = title.strip('"\'')
-        return title[:100]  # Safety limit
+        return title or _extract_title_heuristic(user_message)
     except Exception as e:
-        logger.warning(f"Failed to generate title: {e}")
-        # Fallback to simple extraction
-        return user_message[:50].split('\n')[0] + "..." if len(user_message) > 50 else user_message.split('\n')[0]
+        logger.warning(f"Failed to generate title via kiro: {e}")
+        return _extract_title_heuristic(user_message)
 
 router = APIRouter(prefix="/chat")
 
@@ -691,10 +690,28 @@ async def chat(
 
         first_chunk = True
         in_model_thinking = False
+        thinking_data = None  # Store thinking data for persistence
         try:
             async for chunk in agent.chat(messages, context):
-                # Handle thinking block markers
-                if chunk == "__THINKING_START__":
+                # Handle structured thinking events (new format)
+                if chunk.startswith("__THINKING_START__:"):
+                    in_model_thinking = True
+                    try:
+                        thinking_info = json.loads(chunk.split(":", 1)[1])
+                        yield f'data: {{"model_thinking": true, "thinking_block": {json.dumps(thinking_info)}}}\n\n'
+                    except json.JSONDecodeError:
+                        yield 'data: {"model_thinking": true}\n\n'
+                    continue
+                elif chunk.startswith("__THINKING_COMPLETE__:"):
+                    in_model_thinking = False
+                    try:
+                        thinking_data = json.loads(chunk.split(":", 1)[1])
+                        yield f'data: {{"model_thinking": false, "thinking_complete": {json.dumps(thinking_data)}}}\n\n'
+                    except json.JSONDecodeError:
+                        yield 'data: {"model_thinking": false}\n\n'
+                    continue
+                # Handle legacy thinking markers (backward compatibility)
+                elif chunk == "__THINKING_START__":
                     in_model_thinking = True
                     yield 'data: {"model_thinking": true}\n\n'
                     continue
@@ -749,6 +766,7 @@ async def chat(
         # Save assistant message (convert numbered lines to code blocks for cleaner display)
         processed_response = convert_numbered_lines_to_codeblock(full_response)
         message_id = str(uuid.uuid4())
+
         try:
             async with db.begin():
                 db_assistant_msg = DBMessage(
@@ -756,6 +774,7 @@ async def chat(
                     session_id=session.id,
                     role="assistant",
                     content=processed_response,
+                    thinking_data=json.dumps(thinking_data) if thinking_data else None,
                 )
                 db.add(db_assistant_msg)
                 # Update session timestamp

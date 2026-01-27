@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { ThinkingBlock } from '@/lib/api'
 
 export interface ChatMessage {
   id: string
@@ -7,6 +8,7 @@ export interface ChatMessage {
   timestamp: Date
   agentId?: string
   isSubagentResult?: boolean
+  thinkingData?: ThinkingBlock  // Structured thinking data
 }
 
 export interface SubagentGoal {
@@ -105,6 +107,7 @@ interface ChatStore {
   isOrchestrating: boolean
   activeSubagents: SubagentTask[]
   abortController: AbortController | null
+  currentThinkingBlock: Partial<ThinkingBlock> | null  // Current thinking block being processed
 
   // Inline project state
   inlineProject: InlineProject
@@ -115,9 +118,11 @@ interface ChatStore {
   addMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void
   appendToLastMessage: (content: string) => void
   setLastMessageAgent: (agentId: string) => void
+  setLastMessageThinking: (thinkingData: ThinkingBlock) => void
   setStreaming: (streaming: boolean) => void
   setThinking: (thinking: boolean) => void
   setModelThinking: (thinking: boolean) => void
+  setCurrentThinkingBlock: (block: Partial<ThinkingBlock> | null) => void
   setOrchestrating: (orchestrating: boolean) => void
   updateSubagent: (task: SubagentTask) => void
   clearSubagents: () => void
@@ -160,6 +165,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   isOrchestrating: false,
   activeSubagents: [],
   abortController: null,
+  currentThinkingBlock: null,
   inlineProject: { ...initialProject },
 
   setSessionId: (id) => set({ sessionId: id }),
@@ -227,7 +233,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setThinking: (thinking) => set({ isThinking: thinking }),
   setModelThinking: (thinking) => set({ isModelThinking: thinking }),
+  setCurrentThinkingBlock: (block) => set({ currentThinkingBlock: block }),
   setOrchestrating: (orchestrating) => set({ isOrchestrating: orchestrating }),
+
+  setLastMessageThinking: (thinkingData) => set((state) => {
+    const messages = [...state.messages]
+    if (messages.length > 0) {
+      messages[messages.length - 1] = {
+        ...messages[messages.length - 1],
+        thinkingData,
+      }
+    }
+    return { messages, currentThinkingBlock: null }
+  }),
   
   updateSubagent: (task) => set((state) => {
     // First try to match by id, then by agent name (for when id changes between spawning/running)

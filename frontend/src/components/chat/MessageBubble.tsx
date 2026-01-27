@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import CodeBlock, { InlineCode } from '@/components/CodeBlock'
 import type { ChatMessage } from '@/stores/chat'
+import type { ThinkingBlock, ThinkingStep } from '@/lib/api'
 
 // Lazy load heavy components
 const MermaidDiagram = lazy(() => import('@/components/MermaidDiagram'))
@@ -74,11 +75,25 @@ function stripHiddenBlocks(text: string): { content: string; hadThinking: boolea
 
 function filterToolLogs(text: string): string {
   const toolLogPatterns = [
+    // Goal/checkpoint markers
     /^\[GOAL:\d+\]\s*.*/gm,
     /^\[GOAL_DONE:\d+\]\s*$/gm,
     /^\[GOAL_FAILED:\d+\]\s*.*/gm,
     /^\[CHECKPOINT:\w+\]\s*.*/gm,
     /^\[(CODER|ARCHITECT|REVIEWER|TESTER|DOCS|DEVOPS)\]\s*/gm,
+    // Kiro-cli tool execution output
+    /^Reading (?:file|directory):.*\(using tool:.*\).*$/gm,
+    /^↱ Operation \d+:.*$/gm,
+    /^[✓✗] Successfully (?:read|wrote|deleted).*$/gm,
+    /^Batch \w+ operation with \d+ operations.*$/gm,
+    /^⋮$/gm,
+    /^Summary: \d+ operations processed.*$/gm,
+    /^Completed in [\d.]+s$/gm,
+    // Tool result markers
+    /^Purpose:.*$/gm,
+    /^Code$/gm,
+    /^\d+ lines?$/gm,
+    /^Copy$/gm,
   ]
 
   let result = text
@@ -127,6 +142,91 @@ function ComponentLoading() {
         <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
         <span>Loading...</span>
       </div>
+    </div>
+  )
+}
+
+// Thinking step type colors
+const thinkingStepColors: Record<string, string> = {
+  analysis: 'text-blue-400',
+  evaluation: 'text-amber-400',
+  decision: 'text-emerald-400',
+  validation: 'text-cyan-400',
+  risk: 'text-red-400',
+  implementation: 'text-violet-400',
+  critique: 'text-orange-400',
+}
+
+// Level display info
+const levelInfo: Record<string, { label: string; color: string }> = {
+  off: { label: 'Off', color: 'text-gray-400' },
+  minimal: { label: 'Minimal', color: 'text-gray-400' },
+  low: { label: 'Low', color: 'text-blue-400' },
+  medium: { label: 'Medium', color: 'text-amber-400' },
+  high: { label: 'High', color: 'text-violet-400' },
+  max: { label: 'Maximum', color: 'text-rose-400' },
+}
+
+// Thinking Data Display component
+function ThinkingDataDisplay({ thinkingData }: { thinkingData: ThinkingBlock }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const levelDisplay = levelInfo[thinkingData.level] || levelInfo.medium
+  const hasSteps = thinkingData.steps && thinkingData.steps.length > 0
+  const duration = thinkingData.duration_ms ? `${(thinkingData.duration_ms / 1000).toFixed(1)}s` : null
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <div className="flex items-center gap-1.5">
+          <Brain className="w-3.5 h-3.5 text-violet-400" />
+          <span className={levelDisplay.color}>{levelDisplay.label} Reasoning</span>
+          {thinkingData.template && (
+            <span className="px-1.5 py-0.5 rounded bg-muted/50 text-[10px] uppercase tracking-wide">
+              {thinkingData.template}
+            </span>
+          )}
+          {duration && (
+            <span className="text-muted-foreground/70">• {duration}</span>
+          )}
+        </div>
+        {hasSteps && (
+          <span className="text-muted-foreground/50">
+            {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          </span>
+        )}
+      </button>
+
+      <AnimatePresence>
+        {isExpanded && hasSteps && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="mt-2 pl-5 border-l-2 border-violet-500/30 space-y-2">
+              {thinkingData.steps?.map((step: ThinkingStep, idx: number) => (
+                <div key={idx} className="text-xs">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className={cn('font-medium capitalize', thinkingStepColors[step.type] || 'text-muted-foreground')}>
+                      {step.type}
+                    </span>
+                    {step.confidence !== undefined && (
+                      <span className="text-muted-foreground/60">
+                        {Math.round(step.confidence * 100)}% confidence
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-muted-foreground leading-relaxed">{step.content}</p>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -244,6 +344,11 @@ export default function MessageBubble({ message, isThinking, showTimestamp = tru
           </motion.div>
         ) : (
           <div className="prose prose-sm dark:prose-invert max-w-none">
+            {/* Structured Thinking Data Display */}
+            {message.thinkingData && (
+              <ThinkingDataDisplay thinkingData={message.thinkingData} />
+            )}
+
             {/* Extended Thinking Indicator */}
             <AnimatePresence>
               {processedContent.isThinkingInProgress && (

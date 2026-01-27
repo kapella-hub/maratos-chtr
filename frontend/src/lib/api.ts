@@ -74,6 +74,33 @@ export async function deleteSession(id: string): Promise<void> {
   if (!res.ok) throw new Error('Failed to delete session')
 }
 
+// Thinking step types
+export type ThinkingStepType = 'analysis' | 'evaluation' | 'decision' | 'validation' | 'risk' | 'implementation' | 'critique'
+
+// Thinking step data
+export interface ThinkingStep {
+  id: string
+  type: ThinkingStepType
+  content: string
+  duration_ms?: number
+  tokens?: number
+  confidence?: number  // Optional confidence score (0-1)
+}
+
+// Thinking block data
+export interface ThinkingBlock {
+  id: string
+  level: string
+  template?: string | null
+  steps?: ThinkingStep[]
+  total_duration_ms?: number
+  duration_ms?: number  // Alias for backward compatibility
+  total_tokens?: number
+  started_at?: string
+  completed_at?: string | null
+  is_complete?: boolean
+}
+
 // Chat event types
 export type ChatEventType =
   | 'session_id'
@@ -83,6 +110,8 @@ export type ChatEventType =
   | 'model'
   | 'thinking'
   | 'model_thinking'
+  | 'thinking_block'      // New: structured thinking block start
+  | 'thinking_complete'   // New: structured thinking block complete
   | 'orchestrating'
   | 'subagent'
   | 'subagent_result'
@@ -232,6 +261,13 @@ export async function* streamChat(
             }
             if (parsed.model_thinking !== undefined) {
               yield { type: 'model_thinking', data: parsed.model_thinking }
+              // Also yield structured thinking data if present
+              if (parsed.thinking_block) {
+                yield { type: 'thinking_block', data: parsed.thinking_block }
+              }
+            }
+            if (parsed.thinking_complete) {
+              yield { type: 'thinking_complete', data: parsed.thinking_complete }
             }
             if (parsed.orchestrating !== undefined) {
               yield { type: 'orchestrating', data: parsed.orchestrating }

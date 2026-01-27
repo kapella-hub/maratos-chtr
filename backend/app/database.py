@@ -44,6 +44,7 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(20))  # user, assistant, system, tool
     content: Mapped[str] = mapped_column(Text)
     tool_calls: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    thinking_data: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON string for thinking blocks
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
