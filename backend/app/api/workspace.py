@@ -140,8 +140,10 @@ async def browse_directory(
                         pass
 
                 entries.append(entry_data)
-    except PermissionError:
+    except PermissionError as e:
         raise HTTPException(status_code=403, detail=f"Permission denied: {path}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading directory: {str(e)}")
 
     # Calculate parent path
     parent = browse_path.parent

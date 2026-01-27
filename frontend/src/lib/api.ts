@@ -1069,7 +1069,7 @@ export async function browseDirectory(
       let errorMessage = 'Failed to browse directory'
       try {
         const errorJson = JSON.parse(errorBody)
-        errorMessage = errorJson.error || errorJson.message || errorMessage
+        errorMessage = errorJson.detail || errorJson.error || errorJson.message || errorMessage
       } catch {
         errorMessage = errorBody || errorMessage
       }

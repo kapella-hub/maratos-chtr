@@ -100,6 +100,7 @@ export default function AutonomousPage() {
   // Browse directory function
   const browsePath = useCallback(async (path: string) => {
     console.log('[Browse] browsePath called with path:', path)
+    console.log('[Browse] API_BASE:', '/api')
     setBrowserLoading(true)
     setBrowserError(null)
     try {
@@ -111,7 +112,9 @@ export default function AutonomousPage() {
       setBrowserParent(result.parent_path)
     } catch (e) {
       console.error('[Browse] API error:', e)
-      setBrowserError(e instanceof Error ? e.message : 'Failed to browse directory')
+      const errorMessage = e instanceof Error ? e.message : 'Failed to browse directory'
+      console.error('[Browse] Error message:', errorMessage)
+      setBrowserError(errorMessage)
     } finally {
       setBrowserLoading(false)
     }
