@@ -21,6 +21,7 @@ class ConfigUpdate(BaseModel):
     """Config update request."""
 
     default_model: str | None = None
+    thinking_level: str | None = None
     max_context_tokens: int | None = None
     max_response_tokens: int | None = None
     debug: bool | None = None
@@ -150,6 +151,20 @@ async def get_schema() -> dict[str, Any]:
                     "claude-haiku-4.5",
                     "claude-opus-4.5",
                 ],
+            },
+            "thinking_level": {
+                "type": "string",
+                "title": "Thinking Level",
+                "description": "Controls depth of analysis before code execution",
+                "enum": ["off", "minimal", "low", "medium", "high", "max"],
+                "enumLabels": {
+                    "off": "Off - Direct execution",
+                    "minimal": "Minimal - Quick sanity check",
+                    "low": "Low - Brief analysis",
+                    "medium": "Medium - Structured analysis",
+                    "high": "High - Deep analysis",
+                    "max": "Max - Exhaustive analysis",
+                },
             },
             "max_context_tokens": {
                 "type": "integer",
@@ -307,6 +322,7 @@ class DirectoryEntry(BaseModel):
     path: str
     is_dir: bool
     is_project: bool = False  # Has package.json, pyproject.toml, etc.
+    is_git: bool = False  # Has .git directory (alias for compatibility)
 
 
 class BrowseResponse(BaseModel):
@@ -350,12 +366,14 @@ async def browse_directory(request: BrowseRequest) -> BrowseResponse:
             if item.is_dir():
                 # Check if this is a project directory
                 is_project = any((item / marker).exists() for marker in project_markers)
+                is_git = (item / ".git").exists()
 
                 entries.append(DirectoryEntry(
                     name=item.name,
                     path=str(item),
                     is_dir=True,
                     is_project=is_project,
+                    is_git=is_git,
                 ))
     except PermissionError:
         raise HTTPException(status_code=403, detail=f"Permission denied: {request.path}")

@@ -25,20 +25,23 @@ export default function AgentStatusBar({
 
   const statusConfig = {
     thinking: {
-      label: 'Thinking',
-      color: 'from-violet-500 to-purple-500',
+      label: 'Thinking...',
+      iconColor: 'text-violet-500',
+      gradientColor: 'from-violet-500 to-purple-500',
       bgColor: 'bg-violet-500/10',
       borderColor: 'border-violet-500/20'
     },
     streaming: {
-      label: 'Responding',
-      color: 'from-indigo-500 to-violet-500',
+      label: 'Generating response...',
+      iconColor: 'text-indigo-500',
+      gradientColor: 'from-indigo-500 to-violet-500',
       bgColor: 'bg-indigo-500/10',
       borderColor: 'border-indigo-500/20'
     },
     orchestrating: {
-      label: 'Orchestrating',
-      color: 'from-purple-500 to-pink-500',
+      label: 'Coordinating agents...',
+      iconColor: 'text-purple-500',
+      gradientColor: 'from-purple-500 to-pink-500',
       bgColor: 'bg-purple-500/10',
       borderColor: 'border-purple-500/20'
     }
@@ -62,9 +65,9 @@ export default function AgentStatusBar({
         {/* Animated spinner */}
         <motion.div
           animate={{ rotate: 360 }}
-          transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+          transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
         >
-          <Loader2 className={cn('w-4 h-4 bg-gradient-to-r bg-clip-text', config.color)} />
+          <Loader2 className={cn('w-4 h-4', config.iconColor)} />
         </motion.div>
 
         {/* Status info */}
@@ -82,7 +85,7 @@ export default function AgentStatusBar({
           {progress > 0 && (
             <div className="h-1 bg-background/50 rounded-full overflow-hidden">
               <motion.div
-                className={cn('h-full bg-gradient-to-r rounded-full', config.color)}
+                className={cn('h-full bg-gradient-to-r rounded-full', config.gradientColor)}
                 initial={{ width: 0 }}
                 animate={{ width: `${progress}%` }}
                 transition={{ duration: 0.3 }}

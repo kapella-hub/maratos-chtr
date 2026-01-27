@@ -15,7 +15,7 @@ export default function FolderBrowser({
   isOpen,
   onClose,
   onSelect,
-  initialPath = '~',
+  initialPath = '',  // Empty string = show roots
   title = 'Select Folder',
 }: FolderBrowserProps) {
   const [currentPath, setCurrentPath] = useState(initialPath)
@@ -158,15 +158,15 @@ export default function FolderBrowser({
                     selectedPath === entry.path && 'bg-primary/20 border border-primary/50'
                   )}
                 >
-                  {entry.is_project ? (
+                  {entry.is_git ? (
                     <FolderGit2 className="w-5 h-5 text-green-500 shrink-0" />
                   ) : (
                     <FolderOpen className="w-5 h-5 text-yellow-500 shrink-0" />
                   )}
                   <span className="flex-1 truncate">{entry.name}</span>
-                  {entry.is_project && (
+                  {entry.is_git && (
                     <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 shrink-0">
-                      project
+                      git
                     </span>
                   )}
                 </button>

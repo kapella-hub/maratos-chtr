@@ -1,10 +1,10 @@
 import { useState, useMemo, Suspense, lazy } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { User, Copy, Check, Image as ImageIcon, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react'
+import { User, Copy, Check, Image as ImageIcon, ExternalLink, ChevronDown, ChevronRight, Brain } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
-import ThinkingIndicator from '@/components/ThinkingIndicator'
+// ThinkingIndicator moved inline for simplicity
 import CodeBlock, { InlineCode } from '@/components/CodeBlock'
 import type { ChatMessage as ChatMessageType } from '@/stores/chat'
 
@@ -90,49 +90,145 @@ function fixCodeBlocks(text: string): string {
   return text.replace(/```(\w+)\s+([^\n])/g, '```$1\n$2')
 }
 
+// Detect orphaned code-like content and wrap in code blocks
+function wrapOrphanedCode(text: string): string {
+  const lines = text.split('\n')
+  const result: string[] = []
+  let codeBuffer: string[] = []
+  let inFence = false
+
+  // Patterns that indicate code-like content
+  const codePatterns = [
+    /^\s*(?:const|let|var|function|class|import|export|return|if|else|for|while|switch|try|catch|async|await|throw|new|typeof|instanceof)\b/,
+    /^\s*(?:from|import)\s+['"]/, // Python/JS imports
+    /^\s*[@#]\w+/, // Decorators
+    /^\s*\w+\s*[=:]\s*[{[\('"<]/, // Assignments
+    /^\s*[{}[\]();,]\s*$/, // Lone brackets
+    /^\s*\.\w+\s*[({]/, // Method chains
+    /^\s*(?:public|private|protected|static|readonly)\s/, // Access modifiers
+    /^\s*(?:def|fn|pub|impl|struct|enum|trait|type|interface)\s/, // Rust/Python/TS
+    /=>\s*[{(]/, // Arrow functions
+  ]
+
+  const isCodeLike = (line: string) => codePatterns.some(p => p.test(line))
+
+  for (const line of lines) {
+    if (line.startsWith('```')) {
+      inFence = !inFence
+      if (codeBuffer.length >= 2) {
+        result.push('```')
+        result.push(...codeBuffer)
+        result.push('```')
+        codeBuffer = []
+      } else if (codeBuffer.length > 0) {
+        result.push(...codeBuffer)
+        codeBuffer = []
+      }
+      result.push(line)
+      continue
+    }
+
+    if (inFence) {
+      result.push(line)
+      continue
+    }
+
+    if (isCodeLike(line)) {
+      codeBuffer.push(line)
+    } else {
+      if (codeBuffer.length >= 2) {
+        result.push('```')
+        result.push(...codeBuffer)
+        result.push('```')
+      } else if (codeBuffer.length > 0) {
+        result.push(...codeBuffer)
+      }
+      codeBuffer = []
+      result.push(line)
+    }
+  }
+
+  if (codeBuffer.length >= 2) {
+    result.push('```')
+    result.push(...codeBuffer)
+    result.push('```')
+  } else if (codeBuffer.length > 0) {
+    result.push(...codeBuffer)
+  }
+
+  return result.join('\n')
+}
+
 // Inject file paths into code fences from surrounding context
-// Detects patterns like "In `path/to/file.ts`:" followed by code block
-// and modifies the fence to ```typescript:path/to/file.ts
 function injectFilePathsIntoCodeFences(text: string): string {
   const lines = text.split('\n')
   const result: string[] = []
 
-  // Patterns to detect file references before code blocks
-  const fileRefPatterns = [
-    /^(?:In|File|Update|Create|Edit|Modify|Change|Modified|Updated|Created)\s*[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)[`"']?\s*:?\s*$/i,
-    /^\*\*([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)\*\*:?\s*$/,
-    /^`([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)`:?\s*$/,
-    /^([a-zA-Z0-9_\-./]+\/[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+):?\s*$/,
+  // Multiple patterns to extract file paths from text
+  const filePathPatterns = [
+    // Backtick quoted paths: `src/components/file.tsx`
+    /[`]([a-zA-Z0-9_\-./]+\.[a-zA-Z]{1,6})[`]/,
+    // Double/single quoted paths
+    /["']([a-zA-Z0-9_\-./]+\.[a-zA-Z]{1,6})["']/,
+    // "File: path/to/file.ts" or "In path/to/file.ts:"
+    /(?:file|in|update|create|modify|edit)[:\s]+([a-zA-Z0-9_\-./]+\.[a-zA-Z]{1,6})/i,
+    // "path/to/file.ts:" at end of line
+    /([a-zA-Z0-9_\-./]+\.[a-zA-Z]{1,6}):?\s*$/,
+    // Relative or absolute paths
+    /((?:\.{0,2}\/)?[a-zA-Z0-9_\-]+(?:\/[a-zA-Z0-9_\-]+)*\.[a-zA-Z]{1,6})/,
   ]
 
+  const extractFilePath = (text: string): string | null => {
+    for (const pattern of filePathPatterns) {
+      const match = text.match(pattern)
+      if (match?.[1]) {
+        // Filter out common false positives
+        const path = match[1]
+        if (path.includes('http') || path.includes('www.') || path === '.md' || path === '.ts') {
+          continue
+        }
+        // Must have a directory separator or be a recognizable filename
+        if (path.includes('/') || /^[a-zA-Z0-9_\-]+\.[a-zA-Z]{2,6}$/.test(path)) {
+          return path
+        }
+      }
+    }
+    return null
+  }
+
   let pendingFilePath: string | null = null
+  const lookbackLines = 5 // Check up to 5 lines back for file references
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    const trimmedLine = line.trim()
 
-    // Check if this line matches a file reference pattern
-    for (const pattern of fileRefPatterns) {
-      const match = trimmedLine.match(pattern)
-      if (match) {
-        pendingFilePath = match[1]
-        break
+    // Check if this is a code fence
+    const fenceMatch = line.match(/^```(\w*)$/)
+    if (fenceMatch) {
+      const lang = fenceMatch[1] || ''
+
+      // Look back for file path in recent lines
+      if (!pendingFilePath) {
+        for (let j = Math.max(0, result.length - lookbackLines); j < result.length; j++) {
+          const prevLine = result[j]
+          const foundPath = extractFilePath(prevLine)
+          if (foundPath) {
+            pendingFilePath = foundPath
+          }
+        }
+      }
+
+      if (pendingFilePath) {
+        result.push(`\`\`\`${lang}:${pendingFilePath}`)
+        pendingFilePath = null
+        continue
       }
     }
 
-    // Check if this is a code fence and we have a pending file path
-    if (pendingFilePath && line.match(/^```(\w*)$/)) {
-      const langMatch = line.match(/^```(\w*)$/)
-      const lang = langMatch?.[1] || ''
-      // Inject file path into the fence
-      result.push(`\`\`\`${lang}:${pendingFilePath}`)
-      pendingFilePath = null
-      continue
-    }
-
-    // If line doesn't look like a file reference or code fence, clear pending
-    if (trimmedLine && !line.match(/^```/) && !fileRefPatterns.some(p => p.test(trimmedLine))) {
-      pendingFilePath = null
+    // Track file paths mentioned in this line for next code block
+    const foundPath = extractFilePath(line)
+    if (foundPath) {
+      pendingFilePath = foundPath
     }
 
     result.push(line)
@@ -507,7 +603,8 @@ export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
     const withFixedCodeBlocks = fixCodeBlocks(filtered)
     const withSpawnCards = convertSpawnMarkers(withFixedCodeBlocks)
     const withNumberedLines = convertNumberedLinesToCodeBlocks(withSpawnCards)
-    const withFilePaths = injectFilePathsIntoCodeFences(withNumberedLines)
+    const withOrphanedCode = wrapOrphanedCode(withNumberedLines)
+    const withFilePaths = injectFilePathsIntoCodeFences(withOrphanedCode)
     const content = withFilePaths
     const summary = isSubagent ? extractAgentSummary(rawContent, agentId) : ''
     return { content: stripAnsi(content), hadThinking, isThinkingInProgress, summary }
@@ -558,31 +655,48 @@ export default function ChatMessage({ message, isThinking }: ChatMessageProps) {
           <span className="text-xs text-muted-foreground ml-auto">
             {message.timestamp?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
-          {!isUser && message.content && showCopy && (
-            <CopyButton text={message.content} className="copy-button" />
+          {!isUser && message.content && (
+            <CopyButton text={message.content} className={cn('copy-button', !showCopy && 'opacity-0 group-hover:opacity-100')} />
           )}
         </div>
 
         {/* Message Body */}
         {isThinking ? (
-          <ThinkingIndicator />
+          /* Simple typing indicator - header shows detailed status */
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex items-center gap-2 py-2"
+          >
+            <div className="flex gap-1">
+              {[0, 1, 2].map((i) => (
+                <motion.span
+                  key={i}
+                  className="w-2 h-2 bg-violet-500 rounded-full"
+                  animate={{ y: [0, -4, 0], opacity: [0.4, 1, 0.4] }}
+                  transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
+                />
+              ))}
+            </div>
+          </motion.div>
         ) : (
           <div className="prose prose-sm dark:prose-invert max-w-none">
-            {/* Thinking Indicators */}
+            {/* Extended Thinking Indicator - only show when model reports active thinking */}
             <AnimatePresence>
               {processedContent.isThinkingInProgress && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="flex items-center gap-3 text-sm text-violet-400 mb-4 p-3 rounded-xl bg-violet-500/10 border border-violet-500/20"
+                  className="flex items-center gap-2 text-sm text-violet-400 mb-3"
                 >
-                  <div className="flex gap-1">
-                    <span className="w-2 h-2 bg-violet-500 rounded-full typing-dot" />
-                    <span className="w-2 h-2 bg-violet-500 rounded-full typing-dot" />
-                    <span className="w-2 h-2 bg-violet-500 rounded-full typing-dot" />
-                  </div>
-                  <span>Thinking through the problem...</span>
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
+                  >
+                    <Brain className="w-4 h-4" />
+                  </motion.div>
+                  <span>Analyzing...</span>
                 </motion.div>
               )}
             </AnimatePresence>

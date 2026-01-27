@@ -33,10 +33,19 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite+aiosqlite:///./data/maratos.db"
 
-    # LLM
-    default_model: str = "claude-sonnet-4.5"
+    # LLM - use anthropic/ prefix for LiteLLM compatibility
+    default_model: str = "anthropic/claude-sonnet-4-20250514"
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
+
+    # Thinking Level - controls depth of analysis before execution
+    # off: Direct execution, no analysis
+    # minimal: Quick sanity check
+    # low: Brief problem breakdown
+    # medium: Structured analysis with pros/cons
+    # high: Deep analysis, multiple approaches considered
+    # max: Exhaustive analysis with self-critique
+    thinking_level: str = "medium"
 
     # Paths
     data_dir: Path = Field(default_factory=lambda: Path("./data"))
@@ -115,6 +124,15 @@ class Settings(BaseSettings):
             raise ValueError("Rate limit must be in format 'N/period' (e.g., '20/minute')")
         return v
 
+    @field_validator("thinking_level")
+    @classmethod
+    def validate_thinking_level(cls, v: str) -> str:
+        """Validate thinking level."""
+        valid_levels = ["off", "minimal", "low", "medium", "high", "max"]
+        if v not in valid_levels:
+            raise ValueError(f"thinking_level must be one of: {', '.join(valid_levels)}")
+        return v
+
 
 settings = Settings()
 
@@ -125,6 +143,7 @@ def get_config_dict() -> dict[str, Any]:
         "app_name": settings.app_name,
         "debug": settings.debug,
         "default_model": settings.default_model,
+        "thinking_level": settings.thinking_level,
         "max_context_tokens": settings.max_context_tokens,
         "max_response_tokens": settings.max_response_tokens,
     }
@@ -173,7 +192,7 @@ def save_settings() -> None:
     """Save current settings to file."""
     # Only save settings that should persist (not from .env)
     persist_keys = [
-        "default_model", "debug", "allowed_write_dirs",
+        "default_model", "thinking_level", "debug", "allowed_write_dirs",
         "telegram_enabled", "telegram_token", "telegram_allowed_users",
         "imessage_enabled", "imessage_allowed_senders",
         "webex_enabled", "webex_token", "webex_webhook_secret",

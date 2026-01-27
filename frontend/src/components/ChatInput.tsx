@@ -5,10 +5,14 @@ import { cn } from '@/lib/utils'
 import SkillSelector from './SkillSelector'
 import type { Skill } from '@/lib/api'
 
+// Session commands
+export type SessionCommand = 'reset' | 'status' | 'help'
+
 interface ChatInputProps {
   onSend: (message: string, skill?: Skill | null) => void
   onQueue?: (message: string) => void
   onStop?: () => void
+  onCommand?: (command: SessionCommand) => void
   isLoading?: boolean
   hasQueue?: boolean
   placeholder?: string
@@ -19,6 +23,7 @@ export default function ChatInput({
   onSend,
   onQueue,
   onStop,
+  onCommand,
   isLoading,
   placeholder = 'Ask MO anything...',
   showSkills = true
@@ -45,11 +50,23 @@ export default function ChatInput({
   const handleSubmit = () => {
     if (!input.trim()) return
 
+    const trimmed = input.trim()
+
+    // Check for commands
+    if (trimmed.startsWith('/') && onCommand) {
+      const cmd = trimmed.slice(1).toLowerCase().split(' ')[0]
+      if (cmd === 'reset' || cmd === 'status' || cmd === 'help') {
+        onCommand(cmd as SessionCommand)
+        setInput('')
+        return
+      }
+    }
+
     if (isLoading && onQueue) {
-      onQueue(input.trim())
+      onQueue(trimmed)
       setInput('')
     } else if (!isLoading) {
-      onSend(input.trim(), selectedSkill)
+      onSend(trimmed, selectedSkill)
       setInput('')
       setSelectedSkill(null) // Clear skill after sending
     }
@@ -76,6 +93,7 @@ export default function ChatInput({
   const charCount = input.length
   const showCharCount = charCount > 100
   const isOverLimit = charCount > 2000
+  const isCommand = input.trim().startsWith('/')
 
   return (
     <div className="border-t border-border/30 bg-gradient-to-t from-background via-background to-transparent">
@@ -105,7 +123,7 @@ export default function ChatInput({
             </AnimatePresence>
 
             {/* Skill Selector */}
-            {showSkills && input.length > 0 && (
+            {showSkills && input.length > 0 && !isCommand && (
               <div className="absolute -top-10 left-3">
                 <SkillSelector
                   prompt={input}
@@ -114,6 +132,43 @@ export default function ChatInput({
                 />
               </div>
             )}
+
+            {/* Command hints */}
+            <AnimatePresence>
+              {isCommand && input.trim() === '/' && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  className="absolute -top-32 left-3 bg-card border border-border rounded-xl p-3 shadow-xl z-10"
+                >
+                  <div className="text-xs text-muted-foreground mb-2">Commands:</div>
+                  <div className="space-y-1">
+                    <button
+                      onClick={() => setInput('/reset')}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-muted/50 text-sm transition-colors"
+                    >
+                      <span className="font-mono text-violet-400">/reset</span>
+                      <span className="ml-2 text-muted-foreground">Clear session</span>
+                    </button>
+                    <button
+                      onClick={() => setInput('/status')}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-muted/50 text-sm transition-colors"
+                    >
+                      <span className="font-mono text-violet-400">/status</span>
+                      <span className="ml-2 text-muted-foreground">Show session info</span>
+                    </button>
+                    <button
+                      onClick={() => setInput('/help')}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-muted/50 text-sm transition-colors"
+                    >
+                      <span className="font-mono text-violet-400">/help</span>
+                      <span className="ml-2 text-muted-foreground">Show available commands</span>
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Textarea */}
             <div className="flex items-end gap-2 p-3">

@@ -1,5 +1,6 @@
 """Chat API endpoints."""
 
+import json
 import re
 import uuid
 import asyncio
@@ -33,6 +34,149 @@ logger = logging.getLogger(__name__)
 
 # Pattern to match [SPAWN:agent_id] task description
 SPAWN_PATTERN = re.compile(r'\[SPAWN:(\w+)\]\s*(.+?)(?=\[SPAWN:|\Z)', re.DOTALL)
+
+# Pattern to match [CANVAS:type attr="value"] content [/CANVAS]
+CANVAS_PATTERN = re.compile(
+    r'\[CANVAS:(\w+)([^\]]*)\](.*?)\[/CANVAS\]',
+    re.DOTALL
+)
+
+
+def parse_canvas_attrs(attr_string: str) -> dict[str, str]:
+    """Parse attributes from canvas marker like title="..." lang="..."."""
+    attrs = {}
+    # Match attr="value" or attr='value'
+    attr_pattern = re.compile(r'(\w+)=["\']([^"\']*)["\']')
+    for match in attr_pattern.finditer(attr_string):
+        attrs[match.group(1)] = match.group(2)
+    return attrs
+
+
+async def process_canvas_markers(
+    content: str,
+    session_id: str,
+    message_id: str,
+) -> list[dict[str, Any]]:
+    """Parse and save canvas artifacts from response content.
+
+    Returns list of artifact data for SSE events.
+    """
+    from app.database import CanvasArtifact, async_session_factory
+
+    artifacts = []
+    matches = CANVAS_PATTERN.findall(content)
+
+    if not matches:
+        return artifacts
+
+    async with async_session_factory() as db:
+        for artifact_type, attr_string, artifact_content in matches:
+            attrs = parse_canvas_attrs(attr_string)
+
+            title = attrs.get("title", f"Untitled {artifact_type}")
+            language = attrs.get("lang") or attrs.get("language")
+            editable = attrs.get("editable", "").lower() == "true"
+
+            metadata = {}
+            if language:
+                metadata["language"] = language
+            if editable:
+                metadata["editable"] = True
+
+            artifact = CanvasArtifact(
+                id=str(uuid.uuid4()),
+                session_id=session_id,
+                message_id=message_id,
+                artifact_type=artifact_type.lower(),
+                title=title,
+                content=artifact_content.strip(),
+                extra_data=metadata if metadata else None,
+            )
+
+            db.add(artifact)
+
+            artifacts.append({
+                "id": artifact.id,
+                "type": artifact_type.lower(),
+                "title": title,
+                "content": artifact_content.strip(),
+                "metadata": metadata,
+            })
+
+        await db.commit()
+
+    return artifacts
+
+
+# Pattern to match mermaid code blocks: ```mermaid ... ```
+MERMAID_PATTERN = re.compile(
+    r'```mermaid\s*\n(.*?)\n```',
+    re.DOTALL | re.IGNORECASE
+)
+
+
+async def process_mermaid_blocks(
+    content: str,
+    session_id: str,
+    message_id: str,
+) -> list[dict[str, Any]]:
+    """Detect mermaid code blocks and create canvas artifacts.
+
+    This enables canvas support for kiro-cli which outputs mermaid as code blocks.
+    Returns list of artifact data for SSE events.
+    """
+    from app.database import CanvasArtifact, async_session_factory
+
+    artifacts = []
+    matches = MERMAID_PATTERN.findall(content)
+
+    if not matches:
+        return artifacts
+
+    async with async_session_factory() as db:
+        for i, mermaid_content in enumerate(matches):
+            # Generate a title from the first line or type of diagram
+            first_line = mermaid_content.strip().split('\n')[0]
+            if first_line.startswith('flowchart'):
+                title = "Flowchart"
+            elif first_line.startswith('sequenceDiagram'):
+                title = "Sequence Diagram"
+            elif first_line.startswith('classDiagram'):
+                title = "Class Diagram"
+            elif first_line.startswith('erDiagram'):
+                title = "ER Diagram"
+            elif first_line.startswith('gantt'):
+                title = "Gantt Chart"
+            elif first_line.startswith('pie'):
+                title = "Pie Chart"
+            elif first_line.startswith('graph'):
+                title = "Graph"
+            else:
+                title = f"Diagram {i + 1}" if i > 0 else "Diagram"
+
+            artifact = CanvasArtifact(
+                id=str(uuid.uuid4()),
+                session_id=session_id,
+                message_id=message_id,
+                artifact_type="diagram",
+                title=title,
+                content=mermaid_content.strip(),
+                extra_data=None,
+            )
+
+            db.add(artifact)
+
+            artifacts.append({
+                "id": artifact.id,
+                "type": "diagram",
+                "title": title,
+                "content": mermaid_content.strip(),
+                "metadata": None,
+            })
+
+        await db.commit()
+
+    return artifacts
 
 
 def clean_cli_output(text: str) -> str:
@@ -198,6 +342,19 @@ async def chat(
         await db.rollback()
         logger.error(f"Database error creating session: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Database error")
+
+    # Set current session for cross-session and canvas tools
+    try:
+        from app.tools.sessions import sessions_tool
+        sessions_tool.set_current_session(session.id)
+    except ImportError:
+        pass  # Sessions tool not available
+
+    try:
+        from app.tools.canvas import canvas_tool
+        canvas_tool.set_session(session.id)
+    except ImportError:
+        pass  # Canvas tool not available
 
     # Load conversation history with pagination to prevent OOM
     # First, count total messages
@@ -380,6 +537,19 @@ async def chat(
                     yield 'data: {"model_thinking": false}\n\n'
                     continue
 
+                # Handle canvas tool events (from tool result data)
+                if "__CANVAS_CREATE__" in chunk:
+                    import re
+                    canvas_match = re.search(r'__CANVAS_CREATE__(.+?)__CANVAS_END__', chunk)
+                    if canvas_match:
+                        artifact_json = canvas_match.group(1)
+                        yield f'data: {{"canvas_create": {artifact_json}}}\n\n'
+                        logger.info(f"Canvas tool created artifact")
+                        # Remove the marker from chunk so it doesn't appear in content
+                        chunk = re.sub(r'__CANVAS_CREATE__.+?__CANVAS_END__', '', chunk)
+                        if not chunk.strip():
+                            continue
+
                 # Signal initial thinking done on first real content
                 if first_chunk and chunk.strip():
                     yield 'data: {"thinking": false}\n\n'
@@ -393,6 +563,16 @@ async def chat(
             escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
             yield f'data: {{"error": "{escaped_err}"}}\n\n'
 
+        # Auto-execute skill workflows if applicable
+        try:
+            user_msg = request.message if hasattr(request, 'message') else (messages[-1].content if messages else "")
+            async for workflow_chunk in agent.maybe_execute_skill_workflows(context, user_msg):
+                full_response += workflow_chunk
+                escaped = workflow_chunk.replace("\n", "\\n").replace('"', '\\"')
+                yield f'data: {{"content": "{escaped}"}}\n\n'
+        except Exception as e:
+            logger.warning(f"Skill workflow error: {e}")
+
         # If no content was streamed, still signal thinking done
         if first_chunk:
             logger.warning(f"No content received from agent {agent_id}")
@@ -402,10 +582,11 @@ async def chat(
 
         # Save assistant message (convert numbered lines to code blocks for cleaner display)
         processed_response = convert_numbered_lines_to_codeblock(full_response)
+        message_id = str(uuid.uuid4())
         try:
             async with db.begin():
                 db_assistant_msg = DBMessage(
-                    id=str(uuid.uuid4()),
+                    id=message_id,
                     session_id=session.id,
                     role="assistant",
                     content=processed_response,
@@ -416,6 +597,28 @@ async def chat(
         except SQLAlchemyError as e:
             logger.error(f"Failed to save assistant message: {e}", exc_info=True)
             # Don't fail the stream - message was already sent to client
+
+        # Process canvas markers and emit SSE events
+        try:
+            canvas_artifacts = await process_canvas_markers(
+                full_response, session.id, message_id
+            )
+            for artifact in canvas_artifacts:
+                yield f'data: {{"canvas_create": {json.dumps(artifact)}}}\n\n'
+                logger.info(f"Created canvas artifact: {artifact['type']} - {artifact['title']}")
+        except Exception as e:
+            logger.error(f"Canvas marker processing error: {e}", exc_info=True)
+
+        # Process mermaid code blocks and create canvas artifacts (for kiro-cli output)
+        try:
+            mermaid_artifacts = await process_mermaid_blocks(
+                full_response, session.id, message_id
+            )
+            for artifact in mermaid_artifacts:
+                yield f'data: {{"canvas_create": {json.dumps(artifact)}}}\n\n'
+                logger.info(f"Created mermaid canvas artifact: {artifact['title']}")
+        except Exception as e:
+            logger.error(f"Mermaid processing error: {e}", exc_info=True)
 
         # Generate better title for new sessions (first message)
         if len(db_messages) == 0 and full_response:
@@ -509,7 +712,6 @@ async def chat(
                         last_progress[task.id] = current.progress
 
                         # Build progress event with goal data
-                        import json
                         progress_data = {
                             "subagent": agent_id_spawn,
                             "task_id": task.id,
@@ -557,7 +759,6 @@ async def chat(
                             yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "completed"}}\n\n'
                             
                             # Stream result
-                            import json
                             result_event = json.dumps({
                                 "subagent_result": agent_id_spawn,
                                 "content": result_text

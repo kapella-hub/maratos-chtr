@@ -9,12 +9,16 @@ import {
   retryAutonomousTask,
   fetchConfig,
   createGitLabProject,
+  browseDirectory,
+  fetchWorkspaceProjects,
   StartProjectRequest,
+  DirectoryEntry,
+  WorkspaceProject,
 } from '../lib/api'
 import AutonomousProgress from '../components/autonomous/AutonomousProgress'
 import TaskCard from '../components/autonomous/TaskCard'
 import EventLog from '../components/autonomous/EventLog'
-import { Settings, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
+import { Settings, Loader2, CheckCircle, AlertCircle, Folder, FolderGit, ChevronRight, ArrowLeft, X, FileCode } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 export default function AutonomousPage() {
@@ -60,6 +64,15 @@ export default function AutonomousPage() {
     project?: { ssh_url_to_repo: string; web_url: string }
   }>({ status: 'idle' })
 
+  // Project browser state
+  const [showBrowser, setShowBrowser] = useState(false)
+  const [browserPath, setBrowserPath] = useState('')
+  const [browserEntries, setBrowserEntries] = useState<DirectoryEntry[]>([])
+  const [browserParent, setBrowserParent] = useState<string | null>(null)
+  const [browserLoading, setBrowserLoading] = useState(false)
+  const [workspaceProjects, setWorkspaceProjects] = useState<WorkspaceProject[]>([])
+  const [browserError, setBrowserError] = useState<string | null>(null)
+
   // Fetch config to get git defaults
   const { data: config } = useQuery({
     queryKey: ['config'],
@@ -78,6 +91,50 @@ export default function AutonomousPage() {
       }))
     }
   }, [config])
+
+  // Load workspace projects on mount
+  useEffect(() => {
+    fetchWorkspaceProjects().then(setWorkspaceProjects).catch(console.error)
+  }, [])
+
+  // Browse directory function
+  const browsePath = useCallback(async (path: string) => {
+    console.log('[Browse] browsePath called with path:', path)
+    setBrowserLoading(true)
+    setBrowserError(null)
+    try {
+      console.log('[Browse] Calling browseDirectory API...')
+      const result = await browseDirectory(path, false)
+      console.log('[Browse] API response:', result)
+      setBrowserPath(result.current_path)
+      setBrowserEntries(result.entries)
+      setBrowserParent(result.parent_path)
+    } catch (e) {
+      console.error('[Browse] API error:', e)
+      setBrowserError(e instanceof Error ? e.message : 'Failed to browse directory')
+    } finally {
+      setBrowserLoading(false)
+    }
+  }, [])
+
+  // Open browser
+  const openBrowser = useCallback(() => {
+    console.log('[Browse] openBrowser clicked - setting showBrowser to true')
+    setShowBrowser(true)
+    console.log('[Browse] Calling browsePath with empty string')
+    browsePath('')
+  }, [browsePath])
+
+  // Select a project from browser
+  const selectProject = useCallback((path: string, name?: string) => {
+    console.log('[Browse] selectProject called with path:', path, 'name:', name)
+    setFormData(prev => ({
+      ...prev,
+      workspace_path: path,
+      name: name || prev.name || path.split('/').pop() || '',
+    }))
+    setShowBrowser(false)
+  }, [])
 
   // Start a new project
   const startProject = useCallback(async () => {
@@ -362,20 +419,67 @@ export default function AutonomousPage() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">
-                        Workspace Path (optional)
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.workspace_path || ''}
-                        onChange={(e) => setFormData({ ...formData, workspace_path: e.target.value || undefined })}
-                        className="w-full px-4 py-2 bg-[#0a0a1a] border border-[#2a2a4a] rounded-lg focus:outline-none focus:border-blue-500"
-                        placeholder="~/maratos-workspace/project"
-                      />
-                    </div>
+                  {/* Existing Project Section */}
+                  <div className="p-4 rounded-lg bg-[#0a0a1a] border border-[#2a2a4a]">
+                    <h3 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                      <FileCode className="w-4 h-4" />
+                      Work on Existing Code
+                    </h3>
 
+                    {/* Quick select from workspace */}
+                    {workspaceProjects.length > 0 && (
+                      <div className="mb-4">
+                        <label className="block text-xs text-gray-500 mb-2">Quick select from workspace:</label>
+                        <div className="flex flex-wrap gap-2">
+                          {workspaceProjects.slice(0, 6).map((proj) => (
+                            <button
+                              key={proj.path}
+                              type="button"
+                              onClick={() => selectProject(proj.path, proj.name)}
+                              className={`px-3 py-1.5 rounded-lg text-sm transition-colors flex items-center gap-1.5 ${
+                                formData.workspace_path === proj.path
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-[#1a1a2e] text-gray-400 hover:bg-[#2a2a4a]'
+                              }`}
+                            >
+                              {proj.is_git ? <FolderGit className="w-3 h-3" /> : <Folder className="w-3 h-3" />}
+                              {proj.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <label className="block text-sm font-medium text-gray-400 mb-1">
+                          Project Path
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.workspace_path || ''}
+                          onChange={(e) => setFormData({ ...formData, workspace_path: e.target.value || undefined })}
+                          className="w-full px-4 py-2 bg-[#1a1a2e] border border-[#2a2a4a] rounded-lg focus:outline-none focus:border-blue-500"
+                          placeholder="~/Projects/my-app or leave empty for new"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <button
+                          type="button"
+                          onClick={openBrowser}
+                          className="px-4 py-2 bg-[#1a1a2e] hover:bg-[#2a2a4a] border border-[#2a2a4a] rounded-lg transition-colors flex items-center gap-2"
+                        >
+                          <Folder className="w-4 h-4" />
+                          Browse
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Select an existing project to refactor, add features, or fix bugs
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-400 mb-1">
                         Max Runtime (hours)
@@ -387,6 +491,19 @@ export default function AutonomousPage() {
                         className="w-full px-4 py-2 bg-[#0a0a1a] border border-[#2a2a4a] rounded-lg focus:outline-none focus:border-blue-500"
                         min={1}
                         max={24}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-1">
+                        Max Iterations
+                      </label>
+                      <input
+                        type="number"
+                        value={formData.max_total_iterations}
+                        onChange={(e) => setFormData({ ...formData, max_total_iterations: Number(e.target.value) })}
+                        className="w-full px-4 py-2 bg-[#0a0a1a] border border-[#2a2a4a] rounded-lg focus:outline-none focus:border-blue-500"
+                        min={1}
+                        max={200}
                       />
                     </div>
                   </div>
@@ -755,6 +872,112 @@ export default function AutonomousPage() {
           </div>
         )}
       </div>
+
+      {/* Directory Browser Modal */}
+      {showBrowser && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a2a4a]">
+              <h3 className="text-lg font-semibold">Select Project Directory</h3>
+              <button
+                onClick={() => setShowBrowser(false)}
+                className="p-1 hover:bg-[#2a2a4a] rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Breadcrumb */}
+            <div className="px-4 py-2 border-b border-[#2a2a4a] bg-[#0a0a1a] flex items-center gap-2 text-sm">
+              {browserParent !== null && (
+                <button
+                  onClick={() => browsePath(browserParent || '')}
+                  className="p-1 hover:bg-[#2a2a4a] rounded transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+              )}
+              <span className="text-gray-400 truncate font-mono">
+                {browserPath || 'Select a location'}
+              </span>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-2">
+              {browserLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+                </div>
+              ) : browserError ? (
+                <div className="p-4 text-red-400 text-center">{browserError}</div>
+              ) : browserEntries.length === 0 ? (
+                <div className="p-4 text-gray-500 text-center">No directories found</div>
+              ) : (
+                <div className="space-y-1">
+                  {browserEntries.map((entry) => (
+                    <div
+                      key={entry.path}
+                      className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#2a2a4a] transition-colors group"
+                    >
+                      <button
+                        onClick={() => entry.is_dir && browsePath(entry.path)}
+                        className="flex-1 flex items-center gap-3 text-left"
+                        disabled={!entry.is_dir}
+                      >
+                        {entry.is_git ? (
+                          <FolderGit className="w-5 h-5 text-orange-400 shrink-0" />
+                        ) : entry.is_dir ? (
+                          <Folder className="w-5 h-5 text-blue-400 shrink-0" />
+                        ) : (
+                          <FileCode className="w-5 h-5 text-gray-500 shrink-0" />
+                        )}
+                        <span className="truncate">{entry.name}</span>
+                        {entry.is_git && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400">
+                            git
+                          </span>
+                        )}
+                      </button>
+                      {entry.is_dir && (
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => selectProject(entry.path, entry.name)}
+                            className="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                          >
+                            Select
+                          </button>
+                          <button
+                            onClick={() => browsePath(entry.path)}
+                            className="p-1 hover:bg-[#3a3a5a] rounded transition-colors"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-4 py-3 border-t border-[#2a2a4a] flex items-center justify-between">
+              <p className="text-xs text-gray-500">
+                Select a directory containing code to refactor or enhance
+              </p>
+              {browserPath && (
+                <button
+                  onClick={() => selectProject(browserPath)}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors text-sm font-medium"
+                >
+                  Use Current Directory
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

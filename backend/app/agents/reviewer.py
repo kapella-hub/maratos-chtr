@@ -119,9 +119,9 @@ class ReviewerAgent(Agent):
             )
         )
 
-    def get_system_prompt(self, context: dict[str, Any] | None = None) -> str:
+    def get_system_prompt(self, context: dict[str, Any] | None = None) -> tuple[str, list]:
         """Build system prompt with context."""
-        prompt = super().get_system_prompt(context)
+        prompt, matched_skills = super().get_system_prompt(context)
 
         if context:
             if "files" in context:
@@ -129,4 +129,4 @@ class ReviewerAgent(Agent):
             if "pr_description" in context:
                 prompt += f"\n\n## Change Description\n{context['pr_description']}\n"
 
-        return prompt
+        return prompt, matched_skills

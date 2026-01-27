@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-from pathlib import Path
 from typing import Any
 
 from app.tools.base import Tool, ToolParameter, ToolResult, registry
@@ -195,44 +194,40 @@ class KiroTool(Tool):
                 error="Kiro CLI not found. Install: curl -fsSL https://cli.kiro.dev/install | bash",
             )
 
-        # Write prompt to temp file for complex prompts
-        prompt_file = Path("/tmp/kiro_prompt.txt")
-        prompt_file.write_text(prompt)
-
-        # Run kiro with the prompt file using proper flags for non-interactive mode
+        # Kiro CLI chat subcommand with trust flags
+        # --trust-all-tools: Auto-approve all tool usage
         # --no-interactive: Don't prompt for input
-        # --trust-all-tools: Auto-approve tool usage
-        cmd = f"{kiro_cmd} --no-interactive --trust-all-tools -p \"$(cat {prompt_file})\""
+        # Use subprocess with stdin pipe to pass the prompt
+        cmd = [kiro_cmd, "chat", "--trust-all-tools", "--no-interactive"]
 
-        process = await asyncio.create_subprocess_shell(
-            cmd,
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=workdir,
             env={**os.environ},
         )
 
-        # No timeout - let Kiro work until completion
-        stdout, stderr = await process.communicate()
+        # Send prompt via stdin and wait for completion
+        stdout, stderr = await process.communicate(input=prompt.encode("utf-8"))
 
         output = stdout.decode("utf-8", errors="replace")
+        stderr_text = stderr.decode("utf-8", errors="replace")
+
+        # Check for permission errors
+        if "Tool approval" in output or "permission" in stderr_text.lower():
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Kiro CLI permission error. {stderr_text or output}",
+            )
 
         # Clean the output to remove ASCII art and banners
         output = self._clean_kiro_output(output)
 
-        if stderr:
-            stderr_text = stderr.decode("utf-8", errors="replace")
-            # Filter out common non-error messages from stderr
-            if stderr_text.strip() and 'warning' not in stderr_text.lower():
-                output += f"\n[stderr]\n{self._clean_kiro_output(stderr_text)}"
-
-        # Check for specific error patterns
-        if "Tool approval required" in output:
-            return ToolResult(
-                success=False,
-                output="",
-                error="Kiro CLI requires tool approval. Try running with --trust-all-tools flag.",
-            )
+        if stderr_text.strip() and 'warning' not in stderr_text.lower():
+            output += f"\n[stderr]\n{self._clean_kiro_output(stderr_text)}"
 
         return ToolResult(
             success=process.returncode == 0,

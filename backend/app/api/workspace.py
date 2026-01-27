@@ -1,11 +1,14 @@
 """Workspace management API endpoints."""
 
+import os
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.tools.workspace import workspace_manager, cleanup_kiro_temp_files
+from app.config import settings
 
 router = APIRouter(prefix="/workspace")
 
@@ -18,6 +21,187 @@ async def get_workspace_stats() -> dict[str, Any]:
         "workspace_path": str(workspace_manager.workspace_dir),
         **stats.to_dict(),
     }
+
+
+class DirectoryEntry(BaseModel):
+    """A directory or file entry."""
+    name: str
+    path: str
+    is_dir: bool
+    is_git: bool = False
+    size: int | None = None
+    modified: float | None = None
+
+
+@router.get("/browse")
+async def browse_directory(
+    path: str = Query(default="", description="Path to browse (relative to allowed roots or absolute)"),
+    show_files: bool = Query(default=False, description="Include files in listing"),
+) -> dict[str, Any]:
+    """Browse directories for project selection.
+
+    Allows browsing:
+    - The maratos workspace directory
+    - User's home directory projects
+    - Absolute paths (with validation)
+    """
+    # Determine the path to browse
+    if not path or path == "":
+        # Return list of root locations
+        home = Path.home()
+        workspace = Path(settings.workspace)
+
+        roots = []
+
+        # Add workspace
+        if workspace.exists():
+            roots.append({
+                "name": "Maratos Workspace",
+                "path": str(workspace),
+                "is_dir": True,
+                "is_git": False,
+            })
+
+        # Add common project directories
+        common_dirs = [
+            home / "Projects",
+            home / "projects",
+            home / "Code",
+            home / "code",
+            home / "Development",
+            home / "dev",
+            home / "repos",
+            home / "src",
+        ]
+
+        for d in common_dirs:
+            if d.exists() and d.is_dir():
+                roots.append({
+                    "name": d.name,
+                    "path": str(d),
+                    "is_dir": True,
+                    "is_git": (d / ".git").exists(),
+                })
+
+        # Add home directory
+        roots.append({
+            "name": "Home Directory",
+            "path": str(home),
+            "is_dir": True,
+            "is_git": False,
+        })
+
+        return {
+            "current_path": "",
+            "parent_path": None,
+            "entries": roots,
+            "is_root": True,
+        }
+
+    # Expand user home
+    browse_path = Path(path).expanduser()
+
+    # Validate path exists
+    if not browse_path.exists():
+        raise HTTPException(status_code=404, detail=f"Path not found: {path}")
+
+    if not browse_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Not a directory: {path}")
+
+    # Security: prevent browsing sensitive system directories
+    blocked_prefixes = ["/etc", "/var", "/usr", "/bin", "/sbin", "/System", "/Library"]
+    path_str = str(browse_path)
+    if any(path_str.startswith(p) for p in blocked_prefixes):
+        raise HTTPException(status_code=403, detail="Access to system directories is not allowed")
+
+    entries = []
+    try:
+        for entry in sorted(browse_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+            # Skip hidden files/dirs unless in workspace
+            if entry.name.startswith('.') and entry.name not in ['.git']:
+                continue
+
+            if entry.is_dir() or show_files:
+                is_git = (entry / ".git").exists() if entry.is_dir() else False
+
+                entry_data = {
+                    "name": entry.name,
+                    "path": str(entry),
+                    "is_dir": entry.is_dir(),
+                    "is_git": is_git,
+                }
+
+                if not entry.is_dir():
+                    try:
+                        stat = entry.stat()
+                        entry_data["size"] = stat.st_size
+                        entry_data["modified"] = stat.st_mtime
+                    except OSError:
+                        pass
+
+                entries.append(entry_data)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {path}")
+
+    # Calculate parent path
+    parent = browse_path.parent
+    parent_path = str(parent) if parent != browse_path else None
+
+    return {
+        "current_path": str(browse_path),
+        "parent_path": parent_path,
+        "entries": entries,
+        "is_root": False,
+        "is_git": (browse_path / ".git").exists(),
+    }
+
+
+@router.get("/projects")
+async def list_workspace_projects() -> list[dict[str, Any]]:
+    """List all projects in the workspace directory."""
+    workspace = Path(settings.workspace)
+
+    if not workspace.exists():
+        return []
+
+    projects = []
+    for entry in sorted(workspace.iterdir(), key=lambda x: x.name.lower()):
+        if entry.is_dir() and not entry.name.startswith('.'):
+            is_git = (entry / ".git").exists()
+
+            # Try to get git info
+            git_info = {}
+            if is_git:
+                try:
+                    # Get current branch
+                    head_file = entry / ".git" / "HEAD"
+                    if head_file.exists():
+                        head_content = head_file.read_text().strip()
+                        if head_content.startswith("ref: refs/heads/"):
+                            git_info["branch"] = head_content.replace("ref: refs/heads/", "")
+                except Exception:
+                    pass
+
+            # Count files
+            file_count = 0
+            try:
+                for _ in entry.rglob("*"):
+                    file_count += 1
+                    if file_count > 1000:  # Cap for performance
+                        break
+            except Exception:
+                pass
+
+            projects.append({
+                "name": entry.name,
+                "path": str(entry),
+                "is_git": is_git,
+                "git_info": git_info if git_info else None,
+                "file_count": file_count if file_count <= 1000 else "1000+",
+                "modified": entry.stat().st_mtime,
+            })
+
+    return projects
 
 
 class CleanupRequest(BaseModel):

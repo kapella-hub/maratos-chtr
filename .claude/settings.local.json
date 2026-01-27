@@ -29,7 +29,13 @@
       "Bash(git add:*)",
       "Bash(pytest:*)",
       "Bash(npm install:*)",
-      "Bash(~/.local/bin/kiro-cli:*)"
+      "Bash(~/.local/bin/kiro-cli:*)",
+      "Bash(/Users/P2799106/.local/bin/kiro-cli:*)",
+      "Bash(tail:*)",
+      "Bash(gh repo view:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebSearch"
     ]
   }
 }

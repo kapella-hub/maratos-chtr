@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 from app.agents.base import Agent, AgentConfig
+from app.tools.base import registry as tool_registry
+import json
 
 # Regex to strip ANSI escape codes
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
@@ -95,18 +97,17 @@ class KiroAgentConfig(AgentConfig):
     """Configuration for Kiro agent."""
 
     model: str = "claude-sonnet-4.5"  # claude-opus-4.5, claude-sonnet-4.5, claude-haiku-4.5
-    trust_all_tools: bool = False  # If True, uses --trust-all-tools (allows writes)
-    # Trusted tools for read-only operations (safe to auto-approve)
+    trust_all_tools: bool = True  # Auto-approve all tools for non-interactive mode
+    # Trusted tools (only used if trust_all_tools is False)
     trusted_tools: list = None  # Default set in __post_init__
 
     def __post_init__(self):
         if self.trusted_tools is None:
-            # Trust read-only tools by default for non-interactive mode
-            # Note: Some tools require @mcpserver/ prefix - using built-in tool names
+            # Trust common tools for coding tasks
             self.trusted_tools = [
-                "fs_read",
-                "web_search",
-                "web_fetch",
+                "Read", "Edit", "Write", "Bash", "Glob", "Grep",
+                "fs_read", "fs_write", "execute_bash",
+                "web_search", "web_fetch",
             ]
 
 
@@ -131,6 +132,42 @@ class KiroAgent(Agent):
     def available(self) -> bool:
         """Check if kiro-cli is available."""
         return self._kiro_path is not None
+
+    def get_system_prompt(self, context: dict[str, Any] | None = None) -> tuple[str, list]:
+        """Get system prompt with Kiro-specific additions."""
+        prompt, matched_skills = super().get_system_prompt(context)
+        
+        # Add Canvas/Tool instructions since kiro-cli can't see Python tools natively
+        tool_instructions = """
+## Tool Usage
+You have access to a specialized 'Canvas' tool for creating visual artifacts like flowcharts, diagrams, code blocks, and forms.
+To use the Canvas tool (or any other tool), you MUST output a tool block using this EXACT format:
+
+<tool_code>
+{
+  "tool": "canvas",
+  "action": "create",
+  "artifact_type": "diagram",
+  "title": "Flowchart Title",
+  "content": "mermaid code for flowchart..."
+}
+</tool_code>
+
+Supported artifact_types: code, preview (html), form, chart, diagram (mermaid), table, diff, terminal, markdown.
+For 'diagram' type, put Mermaid syntax in 'content'.
+For 'code' type, put source code in 'content' and specify 'language'.
+
+## Thinking Process
+You have a "thinking" capability. Use it to plan and reason before answering complex questions or writing code.
+Wrap your thought process in `<thinking>` tags. This content will be shown as a process indicator to the user but not in the final answer.
+
+<thinking>
+Analyzing the request...
+1. Check file X
+2. Plan modification Y
+</thinking>
+"""
+        return prompt + tool_instructions, matched_skills
 
     async def chat(
         self,
@@ -216,63 +253,154 @@ class KiroAgent(Agent):
             )
 
             # Stream stdout with line-based filtering
+            # Stream stdout with line-based filtering AND block parsing
             buffer = ""
             total_received = 0
             lines_yielded = 0
             lines_filtered = 0
-            in_banner = True  # Start assuming we're in banner
-
+            in_banner = True
+            
+            # State for block parsing
+            block_buffer = ""  # Accumulates content across lines for parsing (tool/thinking)
+            current_block_type = None  # 'tool' or 'thinking' or None
+            
             while True:
                 chunk = await process.stdout.read(512)
+                
                 if not chunk:
-                    # Flush remaining buffer
-                    if buffer.strip():
-                        buffer = ANSI_ESCAPE.sub('', buffer)
-                        cleaned = buffer.strip()
-                        # Strip leading > from kiro response
-                        if cleaned.startswith('> '):
-                            cleaned = cleaned[2:]
-                        if cleaned and not is_tool_log_line(cleaned) and not is_kiro_banner_line(cleaned):
-                            yield cleaned
-                            lines_yielded += 1
-                    break
+                    # Flush remaining buffer by forcing a newline
+                    if buffer:
+                        buffer += '\n'
+                    else:
+                        break
 
-                text = chunk.decode("utf-8", errors="replace")
-                buffer += text
-                total_received += len(text)
+                if chunk:
+                    text = chunk.decode("utf-8", errors="replace")
+                    buffer += text
+                    total_received += len(text)
 
-                # Process complete lines only
+                # Process complete lines
                 while '\n' in buffer:
                     line, buffer = buffer.split('\n', 1)
-                    line = ANSI_ESCAPE.sub('', line)
-                    cleaned = line.strip()
+                    
+                    # 1. Clean the line (ANSI strip)
+                    line_clean = ANSI_ESCAPE.sub('', line)
+                    cleaned = line_clean.strip()
 
-                    # Skip empty lines at start (banner area)
-                    if not cleaned and in_banner:
-                        lines_filtered += 1
+                    # 2. Filter noise (banners, logs) - ONLY if not inside a block (to avoid filtering useful json/thought content)
+                    # Although tools might output logs, we generally want to hide them.
+                    # But if we are in a <tool_code> block, we want the JSON as-is.
+                    
+                    if not current_block_type:
+                        # Skip empty lines at start
+                        if not cleaned and in_banner:
+                            lines_filtered += 1
+                            continue
+                        # Check for banner
+                        if is_kiro_banner_line(cleaned):
+                            lines_filtered += 1
+                            continue
+                        # Check for tool logs
+                        if is_tool_log_line(cleaned):
+                            lines_filtered += 1
+                            continue
+                        
+                        in_banner = False
+                        
+                        # Strip leading >
+                        if cleaned.startswith('> '):
+                            cleaned = cleaned[2:]
+                            line_clean = cleaned # Use cleaned for processing
+
+                    # 3. Block Detection State Machine
+                    
+                    # Check for start tags
+                    if not current_block_type:
+                        if '<tool_code>' in line_clean:
+                            current_block_type = 'tool'
+                            # Start buffering tool code (strip the tag if on same line, or keep it?)
+                            # Simplest: extract what is after the tag
+                            start_idx = line_clean.find('<tool_code>') + 11
+                            block_buffer = line_clean[start_idx:] + "\n"
+                            
+                            # Check if it ends on same line
+                            if '</tool_code>' in block_buffer:
+                                end_idx = block_buffer.find('</tool_code>')
+                                json_str = block_buffer[:end_idx]
+                                
+                                # Process Tool Execution immediately
+                                try:
+                                    tool_call = json.loads(json_str)
+                                    tool_name = tool_call.pop("tool", "canvas")
+                                    yield f"\n\n🔧 **{tool_name}** (executing)...\n"
+                                    result = await tool_registry.execute(tool_name, **tool_call)
+                                    if result.success:
+                                        yield f"```\n{result.output[:1000]}\n```\n"
+                                        if result.data and result.data.get("action") == "canvas_create":
+                                            artifact_json = json.dumps(result.data["artifact"])
+                                            yield f"__CANVAS_CREATE__{artifact_json}__CANVAS_END__"
+                                    else:
+                                        yield f"❌ Tool Error: {result.error}\n"
+                                except Exception as e:
+                                    yield f"⚠️ Tool Parse Error: {e}\n"
+                                
+                                # Reset
+                                current_block_type = None
+                                block_buffer = ""
+                            continue # Don't yield this line to user
+                        
+                        elif '<thinking>' in line_clean:
+                            current_block_type = 'thinking'
+                            yield "__THINKING_START__"
+                            # If there is content after tag on same line, that counts as thought
+                            # But we hide it.
+                            
+                            # Check for immediate close
+                            if '</thinking>' in line_clean:
+                                yield "__THINKING_END__"
+                                current_block_type = None
+                            continue # Hide line
+
+                    # Check for end tags if inside block
+                    elif current_block_type == 'tool':
+                        if '</tool_code>' in line_clean:
+                            # End of tool block found
+                            end_idx = line_clean.find('</tool_code>')
+                            block_buffer += line_clean[:end_idx]
+                            
+                            # Process Accumulated Tool Execution
+                            try:
+                                json_str = block_buffer.strip()
+                                tool_call = json.loads(json_str)
+                                tool_name = tool_call.pop("tool", "canvas")
+                                yield f"\n\n🔧 **{tool_name}** (executing)...\n"
+                                result = await tool_registry.execute(tool_name, **tool_call)
+                                if result.success:
+                                    yield f"```\n{result.output[:1000]}\n```\n"
+                                    if result.data and result.data.get("action") == "canvas_create":
+                                        artifact_json = json.dumps(result.data["artifact"])
+                                        yield f"__CANVAS_CREATE__{artifact_json}__CANVAS_END__"
+                                else:
+                                    yield f"❌ Tool Error: {result.error}\n"
+                            except Exception as e:
+                                yield f"⚠️ Tool Parse Error: {e}\n"
+                            
+                            current_block_type = None
+                            block_buffer = ""
+                        else:
+                            block_buffer += line_clean + "\n"
+                        continue # Don't yield tool code lines to user
+
+                    elif current_block_type == 'thinking':
+                        if '</thinking>' in line_clean:
+                            yield "__THINKING_END__"
+                            current_block_type = None
+                        # Else: Swallow content (don't yield)
                         continue
 
-                    # Check for banner content
-                    if is_kiro_banner_line(cleaned):
-                        lines_filtered += 1
-                        continue
-
-                    # Check for tool logs and startup noise
-                    if is_tool_log_line(cleaned):
-                        lines_filtered += 1
-                        continue
-
-                    # Real content found - no longer in banner
-                    in_banner = False
-
-                    # Strip leading > from kiro response prefix
-                    if cleaned.startswith('> '):
-                        cleaned = cleaned[2:]
-                        line = cleaned
-
-                    # Yield non-empty content
+                    # 4. Normal Output Yielding (if not in block and not filtered)
                     if cleaned:
-                        yield line + '\n'
+                        yield line_clean + '\n'
                         lines_yielded += 1
                     else:
                         lines_filtered += 1

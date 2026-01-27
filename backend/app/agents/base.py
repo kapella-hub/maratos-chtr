@@ -15,6 +15,32 @@ from app.tools import ToolResult, registry as tool_registry
 logger = logging.getLogger(__name__)
 
 
+# Model name translation: kiro-cli friendly names -> LiteLLM format
+# kiro-cli uses short names, LiteLLM needs anthropic/ prefix and full model IDs
+MODEL_NAME_MAP = {
+    "claude-opus-4.5": "anthropic/claude-opus-4-5-20251101",
+    "claude-sonnet-4.5": "anthropic/claude-sonnet-4-5-20241022",
+    "claude-sonnet-4": "anthropic/claude-sonnet-4-20250514",
+    "claude-haiku-4.5": "anthropic/claude-haiku-4-5-20241022",
+    # Older models
+    "claude-3-opus": "anthropic/claude-3-opus-20240229",
+    "claude-3-sonnet": "anthropic/claude-3-sonnet-20240229",
+    "claude-3-haiku": "anthropic/claude-3-haiku-20240307",
+    "claude-3-5-sonnet": "anthropic/claude-3-5-sonnet-20241022",
+}
+
+
+def translate_model_name(model: str) -> str:
+    """Translate friendly model names to LiteLLM-compatible format."""
+    if model in MODEL_NAME_MAP:
+        return MODEL_NAME_MAP[model]
+    # If already has provider prefix or is a full model ID, use as-is
+    if "/" in model or model.startswith("anthropic"):
+        return model
+    # Default: add anthropic prefix
+    return f"anthropic/{model}"
+
+
 # Regex to detect numbered line format: "1: code", "• 1: code", "1, 1: code" (diff), "  220: code" (indented)
 NUMBERED_LINE_PATTERN = re.compile(r'^\s*(?:[•\-\*]\s*)?(\d+)(?:,\s*\d+)?\s*:\s?(.*)$')
 
@@ -137,16 +163,18 @@ class Agent:
     def name(self) -> str:
         return self.config.name
 
-    def get_system_prompt(self, context: dict[str, Any] | None = None) -> str:
+    def get_system_prompt(self, context: dict[str, Any] | None = None) -> tuple[str, list]:
         """Get system prompt, optionally with context.
 
-        Automatically detects and injects matching skills based on task/query.
+        Returns:
+            Tuple of (prompt_string, matched_skills_list)
         """
         prompt = self.config.system_prompt
+        matched_skills = []
 
         if context:
             # AUTO-SELECT SKILLS: Check for matching skills based on task/query
-            skill_context = self._get_skill_context(context)
+            skill_context, matched_skills = self._get_skill_context(context)
             if skill_context:
                 prompt += f"\n\n{skill_context}"
 
@@ -166,20 +194,18 @@ class Agent:
             if "files" in context:
                 prompt += f"\n\n## Files to Work With\n{context['files']}\n"
 
-        return prompt
+        return prompt, matched_skills
 
-    def _get_skill_context(self, context: dict[str, Any]) -> str:
+    def _get_skill_context(self, context: dict[str, Any]) -> tuple[str, list]:
         """Find matching skills and generate context to inject.
 
-        Searches for skills based on:
-        1. Explicit skill_id in context
-        2. Task description triggers
-        3. Query/message triggers
+        Returns:
+            Tuple of (context_string, matched_skills_list)
         """
         try:
             from app.skills.base import skill_registry
         except ImportError:
-            return ""
+            return "", []
 
         matched_skills = []
 
@@ -189,29 +215,15 @@ class Agent:
             if skill:
                 matched_skills.append(skill)
 
-        # Check task description for triggers
-        if "task" in context and context["task"]:
-            matches = skill_registry.find_by_trigger(context["task"])
-            for skill in matches:
-                if skill not in matched_skills:
-                    matched_skills.append(skill)
-
-        # Check query/message for triggers
-        if "query" in context and context["query"]:
-            matches = skill_registry.find_by_trigger(context["query"])
-            for skill in matches:
-                if skill not in matched_skills:
-                    matched_skills.append(skill)
-
-        # Check user message for triggers
-        if "user_message" in context and context["user_message"]:
-            matches = skill_registry.find_by_trigger(context["user_message"])
-            for skill in matches:
-                if skill not in matched_skills:
-                    matched_skills.append(skill)
+        # Check task/query/user_message for triggers
+        for key in ["task", "query", "user_message"]:
+            if key in context and context[key]:
+                for skill in skill_registry.find_by_trigger(context[key]):
+                    if skill not in matched_skills:
+                        matched_skills.append(skill)
 
         if not matched_skills:
-            return ""
+            return "", []
 
         # Generate skill context
         parts = ["## 🎯 Applicable Skills Detected"]
@@ -221,9 +233,50 @@ class Agent:
             logger.info(f"Auto-selected skill: {skill.id} for agent {self.id}")
             parts.append(f"### {skill.name}")
             parts.append(skill.to_kiro_context())
-            parts.append("")  # blank line between skills
+            parts.append("")
 
-        return "\n".join(parts)
+        return "\n".join(parts), matched_skills
+
+    def _should_auto_execute_workflow(self, skill, user_message: str) -> bool:
+        """Decide if skill workflow should auto-execute based on task complexity."""
+        if not skill.workflow or len(skill.workflow) < 3:
+            return False
+        if len(user_message) < 50:
+            return False
+        # Check for auto_execute flag in skill (default False)
+        return getattr(skill, 'auto_execute', False) or skill.id in ['bug-fix', 'security-review', 'refactor']
+
+    async def maybe_execute_skill_workflows(
+        self, 
+        context: dict[str, Any], 
+        user_message: str
+    ) -> AsyncIterator[str]:
+        """Execute skill workflows if conditions are met. Yields progress updates."""
+        from app.skills.executor import SkillExecutor
+        
+        _, matched_skills = self._get_skill_context(context)
+        
+        for skill in matched_skills:
+            if self._should_auto_execute_workflow(skill, user_message):
+                yield f"\n\n🎯 **Auto-executing {skill.name} workflow...**\n"
+                
+                executor = SkillExecutor(context.get("workspace"))
+                exec_context = {
+                    "bug_description": user_message,
+                    "task": user_message,
+                    "files": context.get("files", ""),
+                }
+                
+                result = await executor.execute(skill, exec_context)
+                
+                if result["success"]:
+                    yield f"✅ Workflow completed ({result['steps_run']} steps)\n"
+                else:
+                    yield f"⚠️ Workflow partially completed\n"
+                
+                for step_result in result["results"]:
+                    status = "✓" if step_result["success"] else "✗"
+                    yield f"  {status} {step_result['step']}\n"
 
     async def chat(
         self,
@@ -245,8 +298,8 @@ class Agent:
         # Build message list
         api_messages = []
 
-        # System prompt
-        system_prompt = self.get_system_prompt(context)
+        # System prompt and matched skills
+        system_prompt, _ = self.get_system_prompt(context)
         if system_prompt:
             api_messages.append({"role": "system", "content": system_prompt})
 
@@ -255,10 +308,15 @@ class Agent:
 
         # Use overrides or defaults
         model = model_override or self.config.model
+        # Translate friendly model names (kiro-cli format) to LiteLLM format
+        model = translate_model_name(model)
         temperature = temperature_override if temperature_override is not None else self.config.temperature
         max_tokens = max_tokens_override or settings.max_response_tokens
 
         # Make API call with streaming and timeout
+        tool_names = [t['function']['name'] for t in self._tool_schemas] if self._tool_schemas else []
+        logger.info(f"Agent {self.id} calling LLM with model={model}, {len(tool_names)} tools: {tool_names}")
+
         try:
             async with asyncio.timeout(settings.llm_timeout):
                 response = await litellm.acompletion(
@@ -367,6 +425,7 @@ class Agent:
 
         # Handle tool calls if any
         if tool_calls:
+            logger.info(f"Agent {self.id} received {len(tool_calls)} tool calls from LLM")
             yield "\n\n"
             for tc in tool_calls:
                 tool_name = tc["function"]["name"]
@@ -382,6 +441,11 @@ class Agent:
 
                 if result.success:
                     yield f"```\n{result.output[:2000]}\n```\n"
+                    # Check for canvas events in tool result data
+                    if result.data and result.data.get("action") == "canvas_create":
+                        # Yield special marker for chat API to parse and send as SSE
+                        artifact_json = json.dumps(result.data["artifact"])
+                        yield f"__CANVAS_CREATE__{artifact_json}__CANVAS_END__"
                 else:
                     yield f"❌ Error: {result.error}\n"
 

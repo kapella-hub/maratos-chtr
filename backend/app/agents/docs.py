@@ -258,9 +258,9 @@ class DocsAgent(Agent):
             )
         )
 
-    def get_system_prompt(self, context: dict[str, Any] | None = None) -> str:
+    def get_system_prompt(self, context: dict[str, Any] | None = None) -> tuple[str, list]:
         """Build system prompt with context."""
-        prompt = super().get_system_prompt(context)
+        prompt, matched_skills = super().get_system_prompt(context)
 
         if context:
             if "workspace" in context:
@@ -268,4 +268,4 @@ class DocsAgent(Agent):
             if "audience" in context:
                 prompt += f"\n\n## Target Audience\n{context['audience']}\n"
 
-        return prompt
+        return prompt, matched_skills

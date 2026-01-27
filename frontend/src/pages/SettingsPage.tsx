@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings, Save, Loader2, MessageSquare, Phone, Building2, ToggleLeft, ToggleRight, FolderOpen, Plus, Trash2, Edit3, X, Check, Link, ExternalLink, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch, GitCommit, GitPullRequest, Wand2, ChevronRight, Activity, HardDrive } from 'lucide-react'
+import { Settings, Save, Loader2, MessageSquare, Phone, Building2, ToggleLeft, ToggleRight, FolderOpen, Plus, Trash2, Edit3, X, Check, Link, ExternalLink, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch, GitCommit, GitPullRequest, Wand2, ChevronRight, Activity, HardDrive, Brain } from 'lucide-react'
 import { fetchConfig, updateConfig, type Config, fetchProjects, createProject, updateProject, deleteProject, analyzeProject, removeAllowedDirectory, addAllowedDirectory, testGitLabConnection, fetchSkills, type Project, type Skill } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useState, useEffect } from 'react'
@@ -31,6 +31,16 @@ const apiModels = [
   { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4 (API)', credits: null, desc: 'Requires Anthropic API key' },
   { id: 'claude-opus-4-20250514', name: 'Claude Opus 4 (API)', credits: null, desc: 'Requires Anthropic API key' },
   { id: 'gpt-4o', name: 'GPT-4o (API)', credits: null, desc: 'Requires OpenAI API key' },
+]
+
+// Thinking levels - controls depth of analysis before execution
+const thinkingLevels = [
+  { id: 'off', name: 'Off', desc: 'Skip analysis, direct execution', color: 'text-gray-400' },
+  { id: 'minimal', name: 'Minimal', desc: 'Quick sanity check before execution', color: 'text-blue-400' },
+  { id: 'low', name: 'Low', desc: 'Brief problem breakdown', color: 'text-cyan-400' },
+  { id: 'medium', name: 'Medium', desc: 'Structured analysis with approach evaluation', color: 'text-green-400' },
+  { id: 'high', name: 'High', desc: 'Deep analysis, multiple approaches, risk assessment', color: 'text-yellow-400' },
+  { id: 'max', name: 'Maximum', desc: 'Exhaustive analysis with self-critique', color: 'text-orange-400' },
 ]
 
 interface ChannelConfig {
@@ -166,9 +176,7 @@ export default function SettingsPage() {
     setProjectError(null)
 
     try {
-      console.log('Analyzing project:', editingProject.path)
       const analysis = await analyzeProject(editingProject.path)
-      console.log('Analysis result:', analysis)
 
       setEditingProject({
         ...editingProject,
@@ -320,6 +328,57 @@ export default function SettingsPage() {
                 ))}
               </div>
             </details>
+          </section>
+
+          {/* Thinking Level */}
+          <section>
+            <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+              <Brain className="w-5 h-5 text-violet-500" />
+              Thinking Level
+            </h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Controls how deeply the Architect analyzes tasks before spawning coders.
+              Higher levels mean more thorough planning but take longer.
+            </p>
+            <div className="space-y-2">
+              {thinkingLevels.map((level) => (
+                <label
+                  key={level.id}
+                  className={cn(
+                    'flex items-center gap-4 p-4 rounded-lg cursor-pointer transition-colors',
+                    'border border-border hover:border-violet-500/50',
+                    localConfig.thinking_level === level.id && 'border-violet-500 bg-violet-500/5'
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="thinking_level"
+                    value={level.id}
+                    checked={localConfig.thinking_level === level.id}
+                    onChange={(e) => setLocalConfig({ ...localConfig, thinking_level: e.target.value })}
+                    className="w-4 h-4"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className={cn('font-medium', level.color)}>{level.name}</span>
+                      {level.id === 'medium' && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">
+                          default
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-sm text-muted-foreground">{level.desc}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div className="mt-4 p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
+              <p className="text-sm text-violet-200">
+                <strong>How it works:</strong> When MO spawns an Architect for complex tasks,
+                the thinking level controls how much analysis happens before code is written.
+                Higher levels catch more edge cases but use more tokens.
+              </p>
+            </div>
           </section>
 
           {/* Messaging Channels */}

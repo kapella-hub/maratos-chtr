@@ -14,8 +14,10 @@ const MAX_SESSIONS = 100
 
 export function saveChatSession(sessionId: string, messages: ChatMessage[], title?: string): void {
   if (!sessionId || messages.length === 0) {
+    console.log('[chatHistory] saveChatSession skipped:', { sessionId, messageCount: messages.length })
     return // Nothing to save
   }
+  console.log('[chatHistory] saveChatSession:', { sessionId, messageCount: messages.length })
 
   const sessions = getChatSessions()
   const existing = sessions.find(s => s.id === sessionId)

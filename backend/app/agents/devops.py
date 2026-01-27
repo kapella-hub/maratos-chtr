@@ -232,9 +232,9 @@ class DevOpsAgent(Agent):
             )
         )
 
-    def get_system_prompt(self, context: dict[str, Any] | None = None) -> str:
+    def get_system_prompt(self, context: dict[str, Any] | None = None) -> tuple[str, list]:
         """Build system prompt with context."""
-        prompt = super().get_system_prompt(context)
+        prompt, matched_skills = super().get_system_prompt(context)
 
         if context:
             if "workspace" in context:
@@ -242,4 +242,4 @@ class DevOpsAgent(Agent):
             if "cloud" in context:
                 prompt += f"\n\n## Cloud Platform\n{context['cloud']}\n"
 
-        return prompt
+        return prompt, matched_skills

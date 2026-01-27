@@ -28,6 +28,7 @@ export interface Config {
   app_name: string
   debug: boolean
   default_model: string
+  thinking_level: string
   max_context_tokens: number
   max_response_tokens: number
   workspace: string
@@ -85,6 +86,9 @@ export type ChatEventType =
   | 'orchestrating'
   | 'subagent'
   | 'subagent_result'
+  | 'canvas_create'
+  | 'canvas_update'
+  | 'canvas_delete'
 
 export interface SubagentGoal {
   id: number
@@ -200,11 +204,18 @@ export async function* streamChat(
                 contentLength: parsed.content?.length,
                 contentPreview: parsed.content?.slice(0, 100),
               })
-              yield { 
-                type: 'subagent_result', 
+              yield {
+                type: 'subagent_result',
                 subagent: parsed.subagent_result,
                 data: parsed.content || '',
               }
+            } else if (parsed.canvas_create) {
+              // Canvas artifact created
+              yield { type: 'canvas_create', data: parsed.canvas_create }
+            } else if (parsed.canvas_update) {
+              yield { type: 'canvas_update', data: parsed.canvas_update }
+            } else if (parsed.canvas_delete) {
+              yield { type: 'canvas_delete', data: parsed.canvas_delete }
             } else if (parsed.content) {
               // Only yield content if NOT part of subagent_result
               yield { type: 'content', data: parsed.content.replace(/\\n/g, '\n') }
@@ -322,32 +333,7 @@ export async function updateConfig(data: Partial<Config>): Promise<Config> {
   return res.json()
 }
 
-// Directory browsing
-export interface DirectoryEntry {
-  name: string
-  path: string
-  is_dir: boolean
-  is_project: boolean
-}
-
-export interface BrowseResponse {
-  current_path: string
-  parent_path: string | null
-  entries: DirectoryEntry[]
-}
-
-export async function browseDirectory(path: string = '~'): Promise<BrowseResponse> {
-  const res = await fetch(`${API_BASE}/config/browse`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path }),
-  })
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: 'Failed to browse directory' }))
-    throw new Error(error.detail || 'Failed to browse directory')
-  }
-  return res.json()
-}
+// Directory browsing (see Workspace Browse API section below for main browse function)
 
 export async function addAllowedDirectory(path: string): Promise<{ added: string; all_allowed: string[] }> {
   const res = await fetch(`${API_BASE}/config/allowed-dirs/add?path=${encodeURIComponent(path)}`, {
@@ -965,5 +951,141 @@ export async function archiveProject(projectName: string): Promise<{
     method: 'POST',
   })
   if (!res.ok) throw new Error('Failed to archive project')
+  return res.json()
+}
+
+// Cross-Session Communication Types
+export interface SessionSummary {
+  id: string
+  title: string | null
+  agent_id: string
+  message_count: number
+  preview: string | null
+  updated_at: string
+}
+
+export interface SessionContext {
+  session_id: string
+  title: string | null
+  agent_id: string
+  message_count: number
+  user_message_count: number
+  created_at: string
+  updated_at: string
+  initial_request: string | null
+  latest_request: string | null
+  mentioned_files: string[]
+}
+
+export interface SessionSearchMatch {
+  message_id: string
+  role: string
+  content: string
+  created_at: string
+}
+
+export interface SessionSearchResult {
+  session_id: string
+  title: string | null
+  agent_id: string
+  matches: SessionSearchMatch[]
+}
+
+// Cross-Session API Functions
+export async function searchSessions(
+  query: string,
+  limit: number = 10,
+  excludeSession?: string
+): Promise<SessionSearchResult[]> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) })
+  if (excludeSession) params.set('exclude_session', excludeSession)
+
+  const res = await fetch(`${API_BASE}/sessions/search?${params}`)
+  if (!res.ok) throw new Error('Failed to search sessions')
+  return res.json()
+}
+
+export async function fetchRecentSessions(
+  limit: number = 20,
+  agentId?: string,
+  excludeSession?: string
+): Promise<SessionSummary[]> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (agentId) params.set('agent_id', agentId)
+  if (excludeSession) params.set('exclude_session', excludeSession)
+
+  const res = await fetch(`${API_BASE}/sessions/recent?${params}`)
+  if (!res.ok) throw new Error('Failed to fetch recent sessions')
+  return res.json()
+}
+
+export async function fetchSessionContext(sessionId: string): Promise<SessionContext> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/context`)
+  if (!res.ok) throw new Error('Failed to fetch session context')
+  return res.json()
+}
+
+// Workspace Browse API
+export interface DirectoryEntry {
+  name: string
+  path: string
+  is_dir: boolean
+  is_git: boolean
+  size?: number
+  modified?: number
+}
+
+export interface BrowseResult {
+  current_path: string
+  parent_path: string | null
+  entries: DirectoryEntry[]
+  is_root: boolean
+  is_git?: boolean
+}
+
+export interface WorkspaceProject {
+  name: string
+  path: string
+  is_git: boolean
+  git_info?: {
+    branch?: string
+  }
+  file_count: number | string
+  modified: number
+}
+
+export async function browseDirectory(
+  path: string = '',
+  showFiles: boolean = false
+): Promise<BrowseResult> {
+  const params = new URLSearchParams()
+  if (path) params.set('path', path)
+  if (showFiles) params.set('show_files', 'true')
+
+  try {
+    const res = await fetch(`${API_BASE}/workspace/browse?${params}`)
+    if (!res.ok) {
+      const errorBody = await res.text()
+      let errorMessage = 'Failed to browse directory'
+      try {
+        const errorJson = JSON.parse(errorBody)
+        errorMessage = errorJson.error || errorJson.message || errorMessage
+      } catch {
+        errorMessage = errorBody || errorMessage
+      }
+      throw new Error(`${errorMessage} (HTTP ${res.status})`)
+    }
+    return res.json()
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error('Network error: Unable to connect to server')
+    }
+    throw error
+  }
+}
+
+export async function fetchWorkspaceProjects(): Promise<WorkspaceProject[]> {
+  const res = await fetch(`${API_BASE}/workspace/projects`)
+  if (!res.ok) throw new Error('Failed to fetch workspace projects')
   return res.json()
 }

@@ -1,15 +1,17 @@
-import { useRef, useEffect, useCallback } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Sparkles } from 'lucide-react'
-import ChatInput from '@/components/ChatInput'
+import { useRef, useEffect, useCallback, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Sparkles, Layers, Brain, ChevronDown } from 'lucide-react'
+import ChatInput, { SessionCommand } from '@/components/ChatInput'
 import ChatMessage from '@/components/ChatMessage'
 import SubagentStatus from '@/components/SubagentStatus'
 import QueueIndicator from '@/components/QueueIndicator'
 import AgentStatusBar from '@/components/AgentStatusBar'
 import ToastContainer from '@/components/ToastContainer'
+import { CanvasPanel } from '@/components/canvas'
 import { useChatStore } from '@/stores/chat'
 import { useToastStore } from '@/stores/toast'
-import { streamChat, fetchConfig } from '@/lib/api'
+import { useCanvasStore } from '@/stores/canvas'
+import { streamChat, fetchConfig, updateConfig } from '@/lib/api'
 import { saveChatSession, getChatSession } from '@/lib/chatHistory'
 
 // Format model name for display
@@ -27,6 +29,7 @@ function formatModelName(model: string): string {
 export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const processingRef = useRef(false)
+  const sessionIdRef = useRef<string | null>(null)
   const {
     messages,
     messageQueue,
@@ -55,9 +58,54 @@ export default function ChatPage() {
     enqueueMessage,
     dequeueMessage,
     clearQueue,
+    clearMessages,
   } = useChatStore()
 
+  // Status dialog state
+  const [showStatus, setShowStatus] = useState(false)
+  // Thinking level dropdown
+  const [showThinkingMenu, setShowThinkingMenu] = useState(false)
+
+  const THINKING_LEVELS = [
+    { value: 'off', label: 'Off', description: 'Direct execution' },
+    { value: 'minimal', label: 'Minimal', description: 'Quick check' },
+    { value: 'low', label: 'Low', description: 'Brief analysis' },
+    { value: 'medium', label: 'Medium', description: 'Structured analysis' },
+    { value: 'high', label: 'High', description: 'Deep analysis' },
+    { value: 'max', label: 'Max', description: 'Exhaustive analysis' },
+  ]
+
+  const handleThinkingLevelChange = async (level: string) => {
+    try {
+      await updateConfig({ thinking_level: level })
+      // Invalidate config query to refetch
+      await queryClient.invalidateQueries({ queryKey: ['config'] })
+      setShowThinkingMenu(false)
+      addToast({
+        type: 'success',
+        title: 'Thinking level updated',
+        description: `Now using ${level} analysis depth`
+      })
+    } catch {
+      addToast({
+        type: 'error',
+        title: 'Error',
+        description: 'Failed to update thinking level'
+      })
+    }
+  }
+
+  // Close thinking menu when clicking outside
+  useEffect(() => {
+    if (!showThinkingMenu) return
+    const handleClick = () => setShowThinkingMenu(false)
+    document.addEventListener('click', handleClick)
+    return () => document.removeEventListener('click', handleClick)
+  }, [showThinkingMenu])
+
   const { addToast } = useToastStore()
+  const queryClient = useQueryClient()
+  const { addArtifact: addCanvasArtifact, artifacts: canvasArtifacts, panelVisible, togglePanel } = useCanvasStore()
 
   // Fetch config to show current model
   const { data: config } = useQuery({
@@ -75,20 +123,30 @@ export default function ChatPage() {
   // Save session after messages update
   useEffect(() => {
     if (sessionId && messages.length > 0 && !isStreaming) {
+      sessionIdRef.current = sessionId
       saveChatSession(sessionId, messages)
     }
   }, [sessionId, messages, isStreaming])
 
+  // Keep ref in sync when sessionId changes
+  useEffect(() => {
+    if (sessionId) {
+      sessionIdRef.current = sessionId
+    }
+  }, [sessionId])
+
   // Save on page unload to prevent data loss during streaming
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (sessionId && messages.length > 0) {
-        saveChatSession(sessionId, messages)
+      const currentSessionId = sessionIdRef.current
+      const currentMessages = useChatStore.getState().messages
+      if (currentSessionId && currentMessages.length > 0) {
+        saveChatSession(currentSessionId, currentMessages)
       }
     }
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [sessionId, messages])
+  }, [])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -108,7 +166,9 @@ export default function ChatPage() {
     try {
       for await (const event of streamChat(content, agentId, sessionId || undefined, controller.signal)) {
         if (event.type === 'session_id' && event.data) {
-          setSessionId(event.data as string)
+          const newSessionId = event.data as string
+          sessionIdRef.current = newSessionId
+          setSessionId(newSessionId)
         } else if (event.type === 'agent' && event.data) {
           setLastMessageAgent(event.data as string)
         } else if (event.type === 'model' && event.data) {
@@ -143,6 +203,22 @@ export default function ChatPage() {
           })
         } else if (event.type === 'content' && event.data) {
           appendToLastMessage(event.data as string)
+        } else if (event.type === 'canvas_create' && event.data) {
+          // Handle canvas artifact creation
+          const artifact = event.data as unknown as {
+            id: string
+            type: string
+            title: string
+            content: string
+            metadata?: { language?: string; editable?: boolean }
+          }
+          addCanvasArtifact({
+            id: artifact.id,
+            type: artifact.type as 'code' | 'preview' | 'form' | 'chart' | 'diagram' | 'table' | 'diff' | 'terminal' | 'markdown',
+            title: artifact.title,
+            content: artifact.content,
+            metadata: artifact.metadata,
+          })
         }
       }
     } catch (error: unknown) {
@@ -163,6 +239,11 @@ export default function ChatPage() {
         })
       }
     } finally {
+      // Save before changing streaming state to ensure we capture final messages
+      if (sessionIdRef.current) {
+        const currentMessages = useChatStore.getState().messages
+        saveChatSession(sessionIdRef.current, currentMessages)
+      }
       setStreaming(false)
       setThinking(false)
       setModelThinking(false)
@@ -200,6 +281,44 @@ export default function ChatPage() {
     enqueueMessage(content)
   }
 
+  // Handle session commands
+  const handleCommand = (command: SessionCommand) => {
+    switch (command) {
+      case 'reset':
+        clearMessages()
+        sessionIdRef.current = null
+        addToast({
+          type: 'success',
+          title: 'Session reset',
+          description: 'Started a new conversation'
+        })
+        break
+      case 'status':
+        setShowStatus(true)
+        break
+      case 'help':
+        // Insert help message as a system message
+        addMessage({
+          role: 'assistant',
+          content: `## Available Commands
+
+| Command | Description |
+|---------|-------------|
+| \`/reset\` | Clear the current session and start fresh |
+| \`/status\` | Show current session information |
+| \`/help\` | Show this help message |
+
+**Keyboard Shortcuts:**
+- **Enter** - Send message
+- **Shift+Enter** - New line
+- **Cmd/Ctrl+Enter** - Send message
+- **Esc** - Stop generation`,
+          agentId: 'mo'
+        })
+        break
+    }
+  }
+
   // Load session from history when sessionId changes (from sidebar)
   // Only load if messages are empty (fresh session load, not a new chat)
   useEffect(() => {
@@ -223,7 +342,7 @@ export default function ChatPage() {
     <div className="flex flex-col h-full relative">
       {/* Progress bar */}
       {(isThinking || isModelThinking || isStreaming) && (
-        <div className="absolute top-0 left-0 right-0 h-0.5 bg-muted overflow-hidden z-50">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-muted overflow-hidden z-50">
           <div
             className="h-full bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500"
             style={{
@@ -276,11 +395,46 @@ export default function ChatPage() {
                 Your capable AI partner for coding, analysis, and creative tasks
               </p>
 
-              {/* Model badge */}
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-zinc-900/50 border border-border/50 text-sm backdrop-blur-sm">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50 animate-pulse" />
-                <span className="text-muted-foreground">Powered by</span>
-                <span className="font-medium">{modelName}</span>
+              {/* Model and thinking badges */}
+              <div className="flex items-center justify-center gap-3 flex-wrap">
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-zinc-900/50 border border-border/50 text-sm backdrop-blur-sm">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50 animate-pulse" />
+                  <span className="text-muted-foreground">Powered by</span>
+                  <span className="font-medium">{modelName}</span>
+                </div>
+
+                {/* Thinking Level Toggle */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowThinkingMenu(!showThinkingMenu)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-zinc-900/50 border border-border/50 text-sm backdrop-blur-sm hover:border-violet-500/40 transition-colors"
+                  >
+                    <Brain className="w-4 h-4 text-violet-400" />
+                    <span className="text-muted-foreground">Thinking:</span>
+                    <span className="font-medium capitalize">{config?.thinking_level || 'medium'}</span>
+                    <ChevronDown className="w-3 h-3 text-muted-foreground" />
+                  </button>
+
+                  {showThinkingMenu && (
+                    <div
+                      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-56 bg-card border border-border rounded-xl shadow-xl z-20 py-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {THINKING_LEVELS.map((level) => (
+                        <button
+                          key={level.value}
+                          onClick={() => handleThinkingLevelChange(level.value)}
+                          className={`w-full text-left px-4 py-2.5 hover:bg-muted/50 transition-colors flex items-center justify-between ${
+                            config?.thinking_level === level.value ? 'bg-violet-500/10' : ''
+                          }`}
+                        >
+                          <span className="font-medium">{level.label}</span>
+                          <span className="text-xs text-muted-foreground">{level.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Quick prompts */}
@@ -341,6 +495,7 @@ export default function ChatPage() {
         onSend={handleSend}
         onQueue={handleQueue}
         onStop={stopGeneration}
+        onCommand={handleCommand}
         isLoading={isStreaming}
         hasQueue={messageQueue.length > 0}
         placeholder="Message MO..."
@@ -348,6 +503,72 @@ export default function ChatPage() {
 
       {/* Toast Notifications */}
       <ToastContainer />
+
+      {/* Status Dialog */}
+      {showStatus && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setShowStatus(false)}
+        >
+          <div
+            className="bg-card rounded-2xl border border-border shadow-2xl max-w-md w-full p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-violet-500" />
+              Session Status
+            </h2>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center py-2 border-b border-border/50">
+                <span className="text-muted-foreground">Session ID</span>
+                <span className="font-mono text-sm">{sessionId ? sessionId.slice(0, 8) + '...' : 'New session'}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-border/50">
+                <span className="text-muted-foreground">Agent</span>
+                <span className="px-2 py-1 rounded-full bg-violet-500/20 text-violet-400 text-sm font-medium">{agentId.toUpperCase()}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-border/50">
+                <span className="text-muted-foreground">Model</span>
+                <span className="font-mono text-sm">{currentModel || config?.default_model || 'claude-sonnet-4'}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-border/50">
+                <span className="text-muted-foreground">Messages</span>
+                <span>{messages.length}</span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-muted-foreground">Status</span>
+                <span className={`flex items-center gap-1.5 text-sm ${isStreaming ? 'text-amber-400' : 'text-emerald-400'}`}>
+                  <span className={`w-2 h-2 rounded-full ${isStreaming ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+                  {isStreaming ? 'Streaming' : 'Ready'}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowStatus(false)}
+              className="mt-6 w-full py-2.5 rounded-xl bg-muted hover:bg-muted/80 transition-colors font-medium"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Canvas toggle button - show when artifacts exist */}
+      {canvasArtifacts.length > 0 && !panelVisible && (
+        <button
+          onClick={togglePanel}
+          className="fixed right-4 bottom-24 z-30 flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground shadow-lg hover:shadow-xl transition-all"
+        >
+          <Layers className="w-4 h-4" />
+          <span className="text-sm font-medium">Canvas</span>
+          <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary-foreground/20">
+            {canvasArtifacts.length}
+          </span>
+        </button>
+      )}
+
+      {/* Canvas Panel */}
+      <CanvasPanel />
     </div>
   )
 }

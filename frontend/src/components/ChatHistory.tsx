@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, Search, Pin, Download, Trash2, MessageSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getChatSessions, deleteChatSession, togglePinSession, exportSessionAsMarkdown, ChatSession } from '@/lib/chatHistory'
@@ -12,7 +12,17 @@ export default function ChatHistory({ onLoadSession }: ChatHistoryProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [sessions, setSessions] = useState<ChatSession[]>(() => getChatSessions())
-  const currentSessionId = useChatStore(state => state.sessionId)
+  const { sessionId: currentSessionId, isStreaming } = useChatStore(state => ({ 
+    sessionId: state.sessionId, 
+    isStreaming: state.isStreaming 
+  }))
+
+  // Refresh sessions when streaming ends (new chat saved)
+  useEffect(() => {
+    if (!isStreaming) {
+      setSessions(getChatSessions())
+    }
+  }, [isStreaming])
 
   const filteredSessions = useMemo(() => {
     const query = searchQuery.toLowerCase()

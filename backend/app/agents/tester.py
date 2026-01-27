@@ -306,9 +306,9 @@ class TesterAgent(Agent):
             )
         )
 
-    def get_system_prompt(self, context: dict[str, Any] | None = None) -> str:
+    def get_system_prompt(self, context: dict[str, Any] | None = None) -> tuple[str, list]:
         """Build system prompt with context."""
-        prompt = super().get_system_prompt(context)
+        prompt, matched_skills = super().get_system_prompt(context)
 
         if context:
             if "files" in context:
@@ -316,4 +316,4 @@ class TesterAgent(Agent):
             if "framework" in context:
                 prompt += f"\n\n## Test Framework\n{context['framework']}\n"
 
-        return prompt
+        return prompt, matched_skills

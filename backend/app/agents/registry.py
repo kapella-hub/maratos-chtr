@@ -117,6 +117,7 @@ kiro_mo = create_kiro_agent(
 )
 
 # If Kiro is available, replace ALL agents with Kiro-powered versions
+# Canvas support is handled by post-processing mermaid blocks in chat.py
 if kiro_mo.available:
     # Import system prompts from agent modules
     from app.agents.architect import ARCHITECT_SYSTEM_PROMPT
@@ -127,26 +128,26 @@ if kiro_mo.available:
     from app.agents.devops import DEVOPS_SYSTEM_PROMPT
 
     # Create Kiro-powered versions of all agents
-    # Format: (id, name, desc, prompt, icon, trust_all_tools)
-    # trust_all_tools=True for agents that need to write files (coder, devops)
+    # Format: (id, name, desc, prompt, icon)
+    # All agents use trust_all_tools=True for non-interactive mode
     kiro_agents = [
-        ("mo", "MO", "Your AI partner", MO_SYSTEM_PROMPT, "🤖", False),
-        ("architect", "Architect", "System design and architecture", ARCHITECT_SYSTEM_PROMPT, "🏗️", False),
-        ("reviewer", "Reviewer", "Code review and security audit", REVIEWER_SYSTEM_PROMPT, "🔍", False),
-        ("coder", "Coder", "Clean implementation", CODER_SYSTEM_PROMPT, "💻", True),  # Needs write access
-        ("tester", "Tester", "Test generation", TESTER_SYSTEM_PROMPT, "🧪", False),
-        ("docs", "Docs", "Documentation", DOCS_SYSTEM_PROMPT, "📝", True),  # May need write access
-        ("devops", "DevOps", "Infrastructure and CI/CD", DEVOPS_SYSTEM_PROMPT, "🚀", True),  # Needs write access
+        ("mo", "MO", "Your AI partner", MO_SYSTEM_PROMPT, "🤖"),
+        ("architect", "Architect", "System design and architecture", ARCHITECT_SYSTEM_PROMPT, "🏗️"),
+        ("reviewer", "Reviewer", "Code review and security audit", REVIEWER_SYSTEM_PROMPT, "🔍"),
+        ("coder", "Coder", "Clean implementation", CODER_SYSTEM_PROMPT, "💻"),
+        ("tester", "Tester", "Test generation", TESTER_SYSTEM_PROMPT, "🧪"),
+        ("docs", "Docs", "Documentation", DOCS_SYSTEM_PROMPT, "📝"),
+        ("devops", "DevOps", "Infrastructure and CI/CD", DEVOPS_SYSTEM_PROMPT, "🚀"),
     ]
 
-    for agent_id, name, desc, prompt, icon, trust_all in kiro_agents:
+    for agent_id, name, desc, prompt, icon in kiro_agents:
         kiro_agent = create_kiro_agent(
             agent_id=agent_id,
             name=name,
             description=desc,
             model=settings.default_model or "claude-sonnet-4.5",
             system_prompt=prompt,
-            trust_all_tools=trust_all,
+            trust_all_tools=True,  # Required for non-interactive mode
         )
         kiro_agent.config.icon = icon
         agent_registry._agents[agent_id] = kiro_agent
