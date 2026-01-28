@@ -31,6 +31,10 @@ from app.subagents.runner import subagent_runner
 from app.subagents.manager import subagent_manager, TaskStatus
 from app.audit import audit_logger
 from app.projects.mention_detector import get_project_context_for_session
+from app.autonomous.workflow_handler import (
+    run_autonomous_workflow,
+    should_trigger_autonomous_workflow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1207,6 +1211,39 @@ async def chat(
                                                     success=False,
                                                     error=nested_error,
                                                 )
+
+                            # Trigger autonomous workflow when coder completes without spawning more agents
+                            elif should_trigger_autonomous_workflow(
+                                agent_id_spawn,
+                                task_desc if task_desc else actual_message,
+                                chat_request.context
+                            ):
+                                logger.info(f"Triggering autonomous workflow after {agent_id_spawn} completion")
+
+                                # Create message saver function
+                                async def save_workflow_message(content: str) -> None:
+                                    try:
+                                        async with db.begin():
+                                            wf_msg = DBMessage(
+                                                id=str(uuid.uuid4()),
+                                                session_id=session.id,
+                                                role="assistant",
+                                                content=content,
+                                            )
+                                            db.add(wf_msg)
+                                    except Exception as e:
+                                        logger.error(f"Failed to save workflow message: {e}")
+
+                                # Run the autonomous test-driven workflow
+                                async for workflow_event in run_autonomous_workflow(
+                                    session_id=session.id,
+                                    original_task=task_desc if task_desc else actual_message,
+                                    coder_result=result_text,
+                                    context=chat_request.context,
+                                    db_session=db,
+                                    save_message_fn=save_workflow_message,
+                                ):
+                                    yield workflow_event
 
                         else:
                             error = current.error or "Unknown error"
