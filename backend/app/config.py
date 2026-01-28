@@ -60,10 +60,10 @@ class Settings(BaseSettings):
     max_context_tokens: int = 100000
     max_response_tokens: int = 8192
 
-    # Timeouts (seconds)
-    llm_timeout: int = 120  # 2 minutes for LLM calls
-    tool_timeout: int = 60  # 1 minute for tool execution
-    http_timeout: int = 30  # 30 seconds for HTTP requests
+    # Timeouts (seconds) - generous to allow complex tasks to complete
+    llm_timeout: int = 600  # 10 minutes for LLM calls (complex code generation)
+    tool_timeout: int = 300  # 5 minutes for tool execution (builds, tests)
+    http_timeout: int = 60  # 1 minute for HTTP requests
 
     # Message history settings
     max_history_messages: int = 50  # Max messages to load from history

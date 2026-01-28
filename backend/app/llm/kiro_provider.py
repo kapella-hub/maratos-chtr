@@ -20,7 +20,7 @@ class KiroConfig:
 
     model: str = "Auto"  # kiro-cli model name
     interactive: bool = False  # --no-interactive if False
-    timeout: int = 180  # Timeout in seconds (3 min default)
+    timeout: int = 600  # Timeout in seconds (10 min default for complex tasks)
     workdir: str | None = None  # Working directory for kiro
     fallback_model: str = "claude-haiku-4.5"  # Faster model to use on timeout
     retry_on_timeout: bool = True  # Whether to retry with fallback model on timeout
@@ -225,6 +225,12 @@ class KiroProvider:
             if line.strip().startswith('▸ Time:') or line.strip().startswith('Time:'):
                 continue
 
+            # Skip kiro-cli tool execution logs
+            if line.strip().startswith(('Reading ', 'Writing ', 'Executing ', '✓ ', '✗ ', '- Completed in')):
+                continue
+            if '(using tool:' in line:
+                continue
+
             # Detect response start (often prefixed with "> ")
             if line.startswith('> '):
                 in_response = True
@@ -383,9 +389,9 @@ class KiroProvider:
         if config.model and config.model != "Auto":
             cmd.extend(["--model", config.model])
 
-        # Disable kiro-cli tools - MaratOS handles tools via its own system
-        # MO outputs [SPAWN:agent] text which backend parses to spawn MaratOS agents
-        cmd.extend(["--trust-tools", ""])
+        # Enable kiro-cli's built-in tools so agents can read files, run commands, etc.
+        # The agent will handle tool execution internally
+        cmd.append("--trust-all-tools")
         if not config.interactive:
             cmd.append("--no-interactive")
 

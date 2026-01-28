@@ -1102,6 +1102,112 @@ async def chat(
                                 goals_completed=goals_completed,
                                 goals_failed=goals_failed,
                             )
+
+                            # Check for nested spawns in subagent result (e.g., architect spawning coders)
+                            nested_spawn_matches = SPAWN_PATTERN.findall(result_text)
+                            if nested_spawn_matches:
+                                logger.info(f"Nested spawn matches found in {agent_id_spawn} result: {len(nested_spawn_matches)}")
+                                valid_agents = ("architect", "reviewer", "coder", "tester", "docs", "devops", "mo")
+
+                                # Spawn all nested tasks
+                                nested_running_tasks: list[tuple[str, Any]] = []
+                                for nested_agent_id, nested_task_desc in nested_spawn_matches:
+                                    nested_agent_id = nested_agent_id.lower().strip()
+                                    nested_task_desc = nested_task_desc.strip()
+                                    if nested_agent_id not in valid_agents or not nested_task_desc:
+                                        continue
+
+                                    logger.info(f"Spawning nested agent: {nested_agent_id}")
+                                    escaped_nested_task = nested_task_desc[:100].replace("\n", " ").replace('"', '\\"')
+
+                                    try:
+                                        nested_task = await subagent_runner.run_task(
+                                            task_description=nested_task_desc,
+                                            agent_id=nested_agent_id,
+                                            context=chat_request.context,
+                                            callback_session=session.id,
+                                        )
+                                        nested_running_tasks.append((nested_agent_id, nested_task))
+                                        yield f'data: {{"subagent": "{nested_agent_id}", "task_id": "{nested_task.id}", "task": "{escaped_nested_task}", "status": "running"}}\n\n'
+                                        logger.info(f"Spawned nested {nested_agent_id} with task_id {nested_task.id}")
+
+                                        audit_logger.log_agent_spawn(
+                                            session_id=session.id,
+                                            task_id=nested_task.id,
+                                            agent_id=nested_agent_id,
+                                            parent_task_id=task.id,
+                                            spawn_reason=nested_task_desc[:200],
+                                        )
+                                    except Exception as nested_err:
+                                        logger.error(f"Failed to spawn nested agent {nested_agent_id}: {nested_err}")
+                                        escaped_err = str(nested_err).replace('"', '\\"').replace('\n', ' ')
+                                        yield f'data: {{"subagent": "{nested_agent_id}", "status": "error", "error": "{escaped_err}"}}\n\n'
+
+                                # Wait for all nested tasks to complete
+                                nested_completed: set[str] = set()
+                                while len(nested_completed) < len(nested_running_tasks):
+                                    await asyncio.sleep(1)
+
+                                    for nested_agent_id, nested_task in nested_running_tasks:
+                                        if nested_task.id in nested_completed:
+                                            continue
+
+                                        nested_current = subagent_manager.get(nested_task.id)
+                                        if not nested_current:
+                                            continue
+
+                                        if nested_current.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+                                            nested_completed.add(nested_task.id)
+
+                                            if nested_current.status == TaskStatus.COMPLETED:
+                                                nested_result = nested_current.result.get("response", "") if nested_current.result else ""
+                                                nested_result = clean_cli_output(nested_result)
+                                                nested_result = convert_numbered_lines_to_codeblock(nested_result)
+                                                logger.info(f"Nested subagent {nested_agent_id} response length: {len(nested_result)}")
+
+                                                yield f'data: {{"subagent": "{nested_agent_id}", "task_id": "{nested_task.id}", "status": "completed"}}\n\n'
+                                                nested_event = json.dumps({"subagent_result": nested_agent_id, "content": nested_result})
+                                                yield f'data: {nested_event}\n\n'
+
+                                                async with db.begin():
+                                                    nested_msg = DBMessage(
+                                                        id=str(uuid.uuid4()),
+                                                        session_id=session.id,
+                                                        role="assistant",
+                                                        content=f"**[{nested_agent_id.upper()}]**\n\n{nested_result}",
+                                                    )
+                                                    db.add(nested_msg)
+
+                                                # Calculate nested task duration
+                                                nested_duration_ms = 0.0
+                                                if nested_current.started_at and nested_current.completed_at:
+                                                    nested_duration_ms = (nested_current.completed_at - nested_current.started_at).total_seconds() * 1000
+
+                                                audit_logger.log_agent_complete(
+                                                    session_id=session.id,
+                                                    task_id=nested_task.id,
+                                                    agent_id=nested_agent_id,
+                                                    duration_ms=nested_duration_ms,
+                                                    success=True,
+                                                )
+                                            else:
+                                                nested_error = nested_current.error or "Unknown error"
+                                                yield f'data: {{"subagent": "{nested_agent_id}", "task_id": "{nested_task.id}", "status": "failed", "error": "{nested_error}"}}\n\n'
+
+                                                # Calculate nested task duration for failed task
+                                                nested_duration_ms = 0.0
+                                                if nested_current.started_at and nested_current.completed_at:
+                                                    nested_duration_ms = (nested_current.completed_at - nested_current.started_at).total_seconds() * 1000
+
+                                                audit_logger.log_agent_complete(
+                                                    session_id=session.id,
+                                                    task_id=nested_task.id,
+                                                    agent_id=nested_agent_id,
+                                                    duration_ms=nested_duration_ms,
+                                                    success=False,
+                                                    error=nested_error,
+                                                )
+
                         else:
                             error = current.error or "Unknown error"
                             yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "failed", "error": "{error}"}}\n\n'
