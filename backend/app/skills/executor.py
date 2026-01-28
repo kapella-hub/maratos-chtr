@@ -206,22 +206,232 @@ class SkillExecutor:
     ) -> tuple[bool, list[str]]:
         """Validate skill execution against quality checklist.
 
+        Checks step outputs against common quality criteria:
+        - Tests passed (pytest output patterns)
+        - Linting passed (ruff/eslint output patterns)
+        - Coverage thresholds
+        - File existence
+
         Returns (passed, list of errors).
         """
         errors = []
 
-        # For now, just log the checklist - actual validation would
-        # require parsing step outputs and checking against checklist
+        # Gather all step results from context
+        step_results = {
+            k: v for k, v in context.items()
+            if k.startswith("step_") and k.endswith("_result")
+        }
+
         for item in skill.quality_checklist:
+            item_lower = item.lower()
             logger.debug(f"Quality check: {item}")
 
-        # TODO: Implement actual validation logic based on step outputs
-        # For example:
-        # - Check if tests passed (look for test step result)
-        # - Check if linting passed (look for validate step result)
-        # - Check code coverage thresholds
+            # Check for test-related quality items
+            if any(kw in item_lower for kw in ["test", "pytest", "jest", "spec"]):
+                if not self._check_tests_passed(step_results):
+                    errors.append(f"Quality check failed: {item}")
+                continue
+
+            # Check for lint-related quality items
+            if any(kw in item_lower for kw in ["lint", "ruff", "eslint", "flake"]):
+                if not self._check_lint_passed(step_results):
+                    errors.append(f"Quality check failed: {item}")
+                continue
+
+            # Check for type-check related quality items
+            if any(kw in item_lower for kw in ["type", "mypy", "pyright", "typescript"]):
+                if not self._check_type_check_passed(step_results):
+                    errors.append(f"Quality check failed: {item}")
+                continue
+
+            # Check for build-related quality items
+            if any(kw in item_lower for kw in ["build", "compile", "bundle"]):
+                if not self._check_build_passed(step_results):
+                    errors.append(f"Quality check failed: {item}")
+                continue
+
+            # Check for coverage-related quality items
+            if "coverage" in item_lower:
+                threshold = self._extract_threshold(item)
+                if not self._check_coverage_threshold(step_results, threshold):
+                    errors.append(f"Quality check failed: {item}")
+                continue
+
+            # Check for file existence requirements
+            if any(kw in item_lower for kw in ["file exist", "exists", "created"]):
+                # Extract file path from the checklist item if possible
+                file_path = self._extract_file_path(item, context)
+                if file_path and not self._check_file_exists(file_path):
+                    errors.append(f"Quality check failed: {item}")
+                continue
+
+            # Generic success check - if the checklist item mentions a step by name,
+            # check if that step succeeded
+            matching_step = self._find_matching_step(item, step_results)
+            if matching_step:
+                result = step_results.get(matching_step, {})
+                if not result.get("success", False):
+                    errors.append(f"Quality check failed: {item}")
 
         return len(errors) == 0, errors
+
+    def _check_tests_passed(self, step_results: dict[str, Any]) -> bool:
+        """Check if any test step passed by examining outputs."""
+        test_keywords = ["test", "pytest", "jest", "spec", "mocha"]
+
+        for key, result in step_results.items():
+            # Check step name
+            if any(kw in key.lower() for kw in test_keywords):
+                if not result.get("success", False):
+                    return False
+                continue
+
+            # Check step action
+            action = result.get("action", "")
+            if any(kw in action.lower() for kw in test_keywords):
+                if not result.get("success", False):
+                    return False
+                continue
+
+            # Check output for test result patterns
+            output = result.get("output", "")
+            if self._output_indicates_test_failure(output):
+                return False
+
+        return True
+
+    def _output_indicates_test_failure(self, output: str) -> bool:
+        """Check if output indicates test failure."""
+        output_lower = output.lower()
+        # Pytest failure patterns
+        if "failed" in output_lower and ("test" in output_lower or "pytest" in output_lower):
+            return True
+        if "error" in output_lower and "pytest" in output_lower:
+            return True
+        # Jest failure patterns
+        if "tests failed" in output_lower:
+            return True
+        if "test suites failed" in output_lower:
+            return True
+        return False
+
+    def _check_lint_passed(self, step_results: dict[str, Any]) -> bool:
+        """Check if any lint step passed."""
+        lint_keywords = ["lint", "validate", "ruff", "eslint", "flake8", "pylint"]
+
+        for key, result in step_results.items():
+            if any(kw in key.lower() for kw in lint_keywords):
+                if not result.get("success", False):
+                    return False
+
+            # Check output for lint error patterns
+            output = result.get("output", "")
+            if self._output_indicates_lint_failure(output):
+                return False
+
+        return True
+
+    def _output_indicates_lint_failure(self, output: str) -> bool:
+        """Check if output indicates lint failure."""
+        output_lower = output.lower()
+        # Common lint error patterns
+        if "error:" in output_lower and any(kw in output_lower for kw in ["ruff", "eslint", "lint"]):
+            return True
+        # Count-based patterns
+        if " error" in output_lower and ("found" in output_lower or "detected" in output_lower):
+            return True
+        return False
+
+    def _check_type_check_passed(self, step_results: dict[str, Any]) -> bool:
+        """Check if type checking passed."""
+        type_keywords = ["type", "mypy", "pyright", "tsc", "typescript"]
+
+        for key, result in step_results.items():
+            if any(kw in key.lower() for kw in type_keywords):
+                if not result.get("success", False):
+                    return False
+
+            output = result.get("output", "")
+            if "error:" in output.lower() and any(kw in output.lower() for kw in type_keywords):
+                return False
+
+        return True
+
+    def _check_build_passed(self, step_results: dict[str, Any]) -> bool:
+        """Check if build step passed."""
+        build_keywords = ["build", "compile", "bundle", "vite", "webpack"]
+
+        for key, result in step_results.items():
+            if any(kw in key.lower() for kw in build_keywords):
+                if not result.get("success", False):
+                    return False
+
+        return True
+
+    def _check_coverage_threshold(self, step_results: dict[str, Any], threshold: float) -> bool:
+        """Check if code coverage meets threshold."""
+        import re
+
+        for _, result in step_results.items():
+            output = result.get("output", "")
+
+            # Look for coverage percentage patterns
+            # Common formats: "Coverage: 85%", "85% coverage", "TOTAL ... 85%"
+            patterns = [
+                r"coverage[:\s]+(\d+(?:\.\d+)?)\s*%",
+                r"(\d+(?:\.\d+)?)\s*%\s+(?:coverage|covered)",
+                r"TOTAL\s+\d+\s+\d+\s+(\d+(?:\.\d+)?)\s*%",
+            ]
+
+            for pattern in patterns:
+                match = re.search(pattern, output, re.IGNORECASE)
+                if match:
+                    coverage = float(match.group(1))
+                    if coverage < threshold:
+                        logger.warning(f"Coverage {coverage}% below threshold {threshold}%")
+                        return False
+
+        return True
+
+    def _extract_threshold(self, item: str) -> float:
+        """Extract numeric threshold from checklist item."""
+        import re
+        match = re.search(r"(\d+(?:\.\d+)?)\s*%?", item)
+        if match:
+            return float(match.group(1))
+        return 80.0  # Default threshold
+
+    def _extract_file_path(self, item: str, context: dict[str, Any]) -> str | None:
+        """Extract file path from checklist item, resolving templates."""
+        import re
+        # Look for path-like patterns
+        match = re.search(r"['\"]?([/\w.-]+(?:/[\w.-]+)+)['\"]?", item)
+        if match:
+            path = match.group(1)
+            # Resolve template variables
+            for key, value in context.items():
+                if isinstance(value, str):
+                    path = path.replace(f"{{{{{key}}}}}", value)
+            return path
+        return None
+
+    def _check_file_exists(self, file_path: str) -> bool:
+        """Check if a file exists."""
+        import os
+        # Resolve relative to workdir if set
+        if self.workdir and not os.path.isabs(file_path):
+            file_path = os.path.join(self.workdir, file_path)
+        return os.path.exists(file_path)
+
+    def _find_matching_step(self, item: str, step_results: dict[str, Any]) -> str | None:
+        """Find a step result that matches the checklist item."""
+        item_lower = item.lower()
+        for key in step_results:
+            # Extract step name from "step_<name>_result"
+            step_name = key.replace("step_", "").replace("_result", "")
+            if step_name.lower() in item_lower:
+                return key
+        return None
 
     def get_execution_history(self, limit: int = 10) -> list[dict[str, Any]]:
         """Get recent skill execution history."""

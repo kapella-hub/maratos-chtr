@@ -450,8 +450,14 @@ class TestMacroSkillLoading:
 
         assert skill is not None
         assert skill.id == "app-factory"
-        assert len(skill.requires_skills) >= 5
+        # v2.0 uses deterministic templates instead of composing skills
         assert len(skill.quality_gates) >= 3
+        # Verify it has the template_generate action
+        has_template_generate = any(
+            step.action.value == "template_generate"
+            for step in skill.workflow
+        )
+        assert has_template_generate, "app-factory should use template_generate action"
 
 
 class TestIntegration:

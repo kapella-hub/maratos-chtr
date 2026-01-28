@@ -27,6 +27,8 @@ class ArtifactType(str, Enum):
     DOCKER = "docker"
     CI_CONFIG = "ci_config"
     DATABASE = "database"
+    JSON = "json"
+    MARKDOWN = "markdown"
 
 
 class ToolType(str, Enum):
@@ -65,6 +67,7 @@ class StepAction(str, Enum):
     SKILL = "skill"  # Call another skill (composition)
     PARALLEL = "parallel"  # Run multiple steps in parallel
     CONDITIONAL = "conditional"  # Branching logic
+    TEMPLATE_GENERATE = "template_generate"  # Deterministic template generation
 
 
 class TaskType(str, Enum):
@@ -93,11 +96,12 @@ class TaskType(str, Enum):
 class InputField(BaseModel):
     """Schema for a skill input field."""
     name: str
-    type: Literal["string", "number", "boolean", "array", "object", "path", "file_pattern"] = "string"
+    type: Literal["string", "number", "boolean", "array", "object", "path", "file_pattern", "list", "enum"] = "string"
     description: str = ""
     required: bool = True
     default: Any = None
     validation: str | None = None  # Regex or JSONSchema for validation
+    enum_values: list[str] | None = None  # Valid values for enum type
     examples: list[Any] = Field(default_factory=list)
 
 

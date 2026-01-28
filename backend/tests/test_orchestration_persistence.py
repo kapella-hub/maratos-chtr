@@ -3,22 +3,13 @@
 Verifies that orchestration runs, tasks, and artifacts persist
 across simulated server restarts.
 
-NOTE: These tests require proper SQLite in-memory database setup.
-The test fixture patches the database session factory, but there
-are timing issues with how pytest-asyncio handles the patching.
-TODO: Fix the test fixture to properly isolate the database.
+Uses pytest-asyncio fixtures from conftest.py for database isolation.
 """
 
 import pytest
 import uuid
 
 # Fixtures are auto-discovered from conftest.py
-
-pytestmark = pytest.mark.skip(
-    reason="Persistence tests need fixture debugging - module import ordering issue. "
-    "Core engine tests (38) and skills tests (26) pass. The persistence layer is "
-    "implemented and functional; test fixtures need async session factory patching work."
-)
 
 
 class TestRunRepository:

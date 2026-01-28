@@ -1,35 +1,32 @@
-"""Fixtures for persistence tests."""
+"""Fixtures for persistence tests.
 
-import asyncio
+These fixtures provide isolated test databases for persistence tests.
+Uses pytest-asyncio with proper scoping to avoid event loop issues.
+"""
+
 import os
 import pytest
-from sqlalchemy import text
+import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-# Must set before any app imports
+# Set database URL before any app imports to avoid using production DB
 os.environ["MARATOS_DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 
 
-@pytest.fixture(scope="function")
-def event_loop():
-    """Create a new event loop for each test function."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    yield loop
-    loop.close()
-
-
-@pytest.fixture(scope="function")
+@pytest_asyncio.fixture(scope="function")
 async def test_db(tmp_path):
     """Create a fresh test database for each test.
 
     This fixture:
-    1. Creates a new file-based SQLite database
+    1. Creates a new file-based SQLite database (more reliable than :memory:)
     2. Creates all tables
     3. Patches the app's async_session_factory and engine
     4. Restores the original after the test
+
+    The fixture uses pytest_asyncio.fixture to ensure it runs in the
+    correct event loop managed by pytest-asyncio.
     """
-    # Import here to ensure env vars are set first
+    # Import here to ensure env vars are set first and to allow patching
     from app.database import Base
     import app.database as db_module
 
@@ -55,7 +52,7 @@ async def test_db(tmp_path):
     # Create and patch session factory
     test_factory = async_sessionmaker(test_engine, expire_on_commit=False)
 
-    # Patch the db_module - repositories import from db_module.async_session_factory
+    # Patch the db_module - repositories use get_session() which reads from db_module
     db_module.async_session_factory = test_factory
     db_module.engine = test_engine
 
