@@ -255,7 +255,7 @@ def delete_doc(project_name: str, doc_id: str) -> bool:
     return True
 
 
-def get_docs_for_context(project_name: str, max_chars_per_doc: int = 2000) -> str:
+def get_docs_for_context(project_name: str, max_chars_per_doc: int = 15000) -> str:
     """Get docs formatted for context injection.
 
     Returns markdown formatted section with doc titles and content.
