@@ -19,10 +19,11 @@ class KiroConfig:
     """Configuration for Kiro CLI provider."""
 
     model: str = "Auto"  # kiro-cli model name
-    trust_tools: bool = True  # --trust-all-tools flag
     interactive: bool = False  # --no-interactive if False
-    timeout: int = 300  # Timeout in seconds (5 min default)
+    timeout: int = 180  # Timeout in seconds (3 min default)
     workdir: str | None = None  # Working directory for kiro
+    fallback_model: str = "claude-haiku-4.5"  # Faster model to use on timeout
+    retry_on_timeout: bool = True  # Whether to retry with fallback model on timeout
 
 
 class KiroProvider:
@@ -42,22 +43,22 @@ class KiroProvider:
         if self._kiro_cmd:
             return self._kiro_cmd
 
-        for cmd in ["kiro-cli", "kiro"]:
-            try:
-                check = await asyncio.create_subprocess_shell(
-                    f"which {cmd}",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, _ = await check.communicate()
-                if check.returncode == 0:
-                    self._kiro_cmd = stdout.decode().strip()
-                    logger.info(f"Found kiro-cli at: {self._kiro_cmd}")
-                    return self._kiro_cmd
-            except Exception as e:
-                logger.debug(f"Error checking for {cmd}: {e}")
+        # Only use kiro-cli (not kiro, which is a different GUI tool)
+        try:
+            check = await asyncio.create_subprocess_shell(
+                "which kiro-cli",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await check.communicate()
+            if check.returncode == 0:
+                self._kiro_cmd = stdout.decode().strip()
+                logger.info(f"Found kiro-cli at: {self._kiro_cmd}")
+                return self._kiro_cmd
+        except Exception as e:
+            logger.debug(f"Error checking for kiro-cli: {e}")
 
-        logger.error("kiro-cli not found in PATH")
+        logger.error("kiro-cli not found in PATH. Install: curl -fsSL https://cli.kiro.dev/install | bash")
         return None
 
     async def is_available(self) -> bool:
@@ -91,6 +92,93 @@ class KiroProvider:
         """Remove ANSI escape codes from text."""
         ansi_pattern = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\[\?25[hl]')
         return ansi_pattern.sub('', text)
+
+    def _restore_code_blocks(self, text: str) -> str:
+        """Restore markdown code fences that kiro-cli strips.
+
+        kiro-cli removes triple backticks from model output. This method detects
+        code patterns and re-wraps them in proper markdown code blocks.
+
+        Detects patterns like:
+            python:path/to/file.py
+            def hello():
+                print("Hello")
+
+        And converts to:
+            ```python:path/to/file.py
+            def hello():
+                print("Hello")
+            ```
+        """
+        if not text:
+            return text
+
+        # Pattern to detect language:path header (e.g., python:hello.py, typescript:src/app.ts)
+        lang_path_pattern = re.compile(
+            r'^([a-zA-Z]+(?:script)?):([a-zA-Z0-9_/.\-]+\.[a-zA-Z0-9]+)$'
+        )
+
+        lines = text.split('\n')
+        result = []
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+            match = lang_path_pattern.match(line.strip())
+
+            if match:
+                lang = match.group(1).lower()
+                path = match.group(2)
+
+                # Collect code lines until we hit non-code content
+                code_lines = []
+                i += 1
+
+                while i < len(lines):
+                    code_line = lines[i]
+
+                    # Stop if we hit an empty line followed by non-code text
+                    if not code_line.strip():
+                        # Look ahead to see if there's more code or prose
+                        if i + 1 < len(lines):
+                            next_line = lines[i + 1]
+                            # If next line is indented or looks like code, continue
+                            if (next_line.startswith('    ') or
+                                next_line.startswith('\t') or
+                                lang_path_pattern.match(next_line.strip()) or
+                                next_line.strip().startswith(('def ', 'class ', 'import ', 'from ',
+                                    'function ', 'const ', 'let ', 'var ', 'export ', 'return ',
+                                    'if ', 'for ', 'while ', 'try:', 'except', '#', '//'))):
+                                code_lines.append(code_line)
+                                i += 1
+                                continue
+                        # Empty line at end of code block
+                        break
+
+                    # Stop if line looks like prose (starts with capital, no special code chars)
+                    if (code_line and
+                        code_line[0].isupper() and
+                        not code_line.strip().startswith(('If ', 'For ', 'While ', 'Try', 'Return', 'Import', 'From', 'Class', 'Def')) and
+                        not any(c in code_line for c in ['(', '{', '[', '=', ';', ':']) and
+                        len(code_line.split()) > 3):
+                        break
+
+                    code_lines.append(code_line)
+                    i += 1
+
+                # Wrap in code block
+                if code_lines:
+                    result.append(f'```{lang}:{path}')
+                    result.extend(code_lines)
+                    result.append('```')
+                else:
+                    # No code found, just output the header as-is
+                    result.append(line)
+            else:
+                result.append(line)
+                i += 1
+
+        return '\n'.join(result)
 
     def _clean_output(self, text: str) -> str:
         """Remove kiro-cli ASCII art, ANSI codes, and formatting artifacts."""
@@ -159,7 +247,12 @@ class KiroProvider:
         result = re.sub(r'<tool_call>.*?</tool_call>\s*', '', result, flags=re.DOTALL)
         result = re.sub(r'<tool_results?>.*?</tool_results?>\s*', '', result, flags=re.DOTALL)
 
-        return result.strip()
+        result = result.strip()
+
+        # Restore code block fences that kiro-cli strips
+        result = self._restore_code_blocks(result)
+
+        return result
 
     def _format_messages_as_prompt(
         self,
@@ -234,6 +327,8 @@ class KiroProvider:
         Note: kiro-cli doesn't truly stream - it outputs all at once.
         We collect the output and yield cleaned content.
 
+        On timeout, automatically retries with a faster model (haiku) if retry_on_timeout is enabled.
+
         Args:
             messages: List of message dicts with 'role' and 'content'
             config: Optional Kiro configuration
@@ -242,6 +337,39 @@ class KiroProvider:
             Response text chunks
         """
         config = config or KiroConfig()
+
+        # Try with the configured model first
+        timed_out = False
+        async for chunk in self._do_chat_completion(messages, config):
+            if chunk.startswith("Error: Request timed out"):
+                timed_out = True
+                break
+            yield chunk
+
+        # On timeout, retry with faster model if enabled
+        if timed_out and config.retry_on_timeout and config.model != config.fallback_model:
+            logger.warning(f"Timeout with {config.model}, retrying with faster model: {config.fallback_model}")
+            yield f"\n\n*[Retrying with faster model: {config.fallback_model}]*\n\n"
+
+            fallback_config = KiroConfig(
+                model=config.fallback_model,
+                interactive=config.interactive,
+                timeout=config.timeout,
+                workdir=config.workdir,
+                fallback_model=config.fallback_model,
+                retry_on_timeout=False,  # Don't retry again
+            )
+            async for chunk in self._do_chat_completion(messages, fallback_config):
+                yield chunk
+        elif timed_out:
+            yield f"Error: Request timed out after {config.timeout} seconds"
+
+    async def _do_chat_completion(
+        self,
+        messages: list[dict[str, Any]],
+        config: KiroConfig,
+    ) -> AsyncIterator[str]:
+        """Internal method that performs the actual kiro-cli call."""
         kiro_cmd = await self._get_kiro_cmd()
 
         if not kiro_cmd:
@@ -255,11 +383,14 @@ class KiroProvider:
         if config.model and config.model != "Auto":
             cmd.extend(["--model", config.model])
 
-        # Add trust and interactive flags
-        if config.trust_tools:
-            cmd.append("--trust-all-tools")
+        # Disable kiro-cli tools - MaratOS handles tools via its own system
+        # MO outputs [SPAWN:agent] text which backend parses to spawn MaratOS agents
+        cmd.extend(["--trust-tools", ""])
         if not config.interactive:
             cmd.append("--no-interactive")
+
+        # Disable line wrapping for clean output
+        cmd.extend(["--wrap", "never"])
 
         # Format messages as prompt
         prompt = self._format_messages_as_prompt(messages)
@@ -288,7 +419,7 @@ class KiroProvider:
                 async with asyncio.timeout(config.timeout):
                     stdout, stderr = await process.communicate()
             except asyncio.TimeoutError:
-                logger.error(f"Kiro CLI timed out after {config.timeout}s")
+                logger.error(f"Kiro CLI timed out after {config.timeout}s with model {config.model}")
                 process.kill()
                 yield f"Error: Request timed out after {config.timeout} seconds"
                 return

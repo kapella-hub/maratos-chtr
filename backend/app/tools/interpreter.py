@@ -100,7 +100,7 @@ class ToolPolicy:
 
     allowed_tools: list[str] | None = None  # None = all allowed
     max_iterations: int = 6
-    per_call_timeout_seconds: float = 120.0
+    per_call_timeout_seconds: float = 300.0
     workspace_path: str | None = None  # For filesystem jail
 
     def is_tool_allowed(self, tool_id: str) -> bool:

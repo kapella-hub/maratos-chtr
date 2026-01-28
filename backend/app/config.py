@@ -33,10 +33,8 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite+aiosqlite:///./data/maratos.db"
 
-    # LLM - use anthropic/ prefix for LiteLLM compatibility
-    default_model: str = "anthropic/claude-sonnet-4-20250514"
-    anthropic_api_key: str | None = None
-    openai_api_key: str | None = None
+    # LLM - kiro-cli model names (no prefix needed)
+    default_model: str = "claude-sonnet-4"
 
     # Thinking Level - controls depth of analysis before execution
     # off: Direct execution, no analysis
@@ -268,13 +266,6 @@ def get_allowed_write_dirs() -> list[Path]:
 
 def validate_critical_settings() -> None:
     """Validate critical settings and log warnings for potential issues."""
-    # Check for missing API key
-    if not settings.anthropic_api_key:
-        logger.warning(
-            "MARATOS_ANTHROPIC_API_KEY not set - LLM calls will fail. "
-            "Set this environment variable or add to .env file."
-        )
-
     # Warn about SSL skip
     if settings.gitlab_skip_ssl:
         logger.warning(

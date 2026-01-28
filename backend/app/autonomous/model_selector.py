@@ -198,9 +198,9 @@ class ModelSelector:
 
         # Apply user preference from settings
         user_model = settings.default_model
-        if user_model and "sonnet-4-20250514" not in user_model: # Don't override if it's just the hardcoded default
-            # Clean model name for kiro-cli (remove provider prefix)
-            clean_model = user_model.replace("anthropic/", "")
+        if user_model and user_model != "claude-sonnet-4":  # Don't override if it's the default
+            # kiro-cli uses short model names directly
+            clean_model = user_model.split("/")[-1] if "/" in user_model else user_model
             
             # Update Balanced Tier (the workhorse) to use user's choice
             # We assume the user picked a model they want to use for development

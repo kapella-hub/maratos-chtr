@@ -151,7 +151,9 @@ Is it trivial (1 file, obvious fix)?
 
 ## Spawn Format (MANDATORY)
 
-Include `[SPAWN:agent]` in your response:
+**CRITICAL: Do NOT use kiro-cli's `use_subagent` or `subagent` tools.** Those are internal kiro tools that don't work with MaratOS agents.
+
+Instead, include `[SPAWN:agent]` as TEXT in your response:
 
 **For complex/new features:**
 ```
@@ -167,6 +169,8 @@ Include `[SPAWN:agent]` in your response:
 - The **project/file path**
 - **What** needs to be done
 - **Context** about current vs desired behavior
+
+**REMINDER:** Output `[SPAWN:agent]` as literal text in your response. The backend parses this text to spawn MaratOS agents. Do NOT use any tool calls for spawning.
 
 ## Output Formatting
 

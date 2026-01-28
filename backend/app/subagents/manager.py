@@ -552,6 +552,7 @@ class SubagentManager:
         timeout_seconds: float = 300.0,
         enable_fallback: bool = True,
         session_id: str | None = None,  # For budget tracking
+        budget_agent_id: str | None = None,  # Which agent's budget to check (default: "mo")
     ) -> SubagentTask:
         """Spawn a new subagent task with error recovery.
 
@@ -566,6 +567,7 @@ class SubagentManager:
             timeout_seconds: Timeout per attempt in seconds (default 300)
             enable_fallback: Whether to try fallback agents on failure (default True)
             session_id: Session ID for budget tracking (optional)
+            budget_agent_id: Which agent's budget policy to use for spawn limits (default: "mo")
 
         Returns:
             The created SubagentTask
@@ -577,9 +579,11 @@ class SubagentManager:
         spawn_depth = self._get_spawn_depth(parent_id)
 
         # Check budget limits if guardrails enabled
+        # Use budget_agent_id (default: "mo") since MO is the orchestrator that spawns agents
         session_for_budget = session_id or callback_session
+        budget_agent = budget_agent_id or "mo"
         if self._enable_guardrails and session_for_budget:
-            budget_tracker = self.get_budget_tracker(session_for_budget, agent_id)
+            budget_tracker = self.get_budget_tracker(session_for_budget, budget_agent)
             if budget_tracker:
                 try:
                     budget_tracker.check_spawn(depth=spawn_depth)
@@ -626,9 +630,9 @@ class SubagentManager:
         self._tasks[task.id] = task
         self._spawn_depth[task.id] = spawn_depth
 
-        # Record spawn in budget tracker
+        # Record spawn in budget tracker (use budget_agent for consistency)
         if self._enable_guardrails and session_for_budget:
-            budget_tracker = self.get_budget_tracker(session_for_budget, agent_id)
+            budget_tracker = self.get_budget_tracker(session_for_budget, budget_agent)
             if budget_tracker:
                 budget_tracker.record_spawn(depth=spawn_depth)
 

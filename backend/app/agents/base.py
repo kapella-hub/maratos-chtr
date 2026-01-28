@@ -43,30 +43,14 @@ except ImportError:
     logger.warning("Kiro provider not available, LLM calls will fail")
 
 
-# Model name translation: kiro-cli friendly names -> LiteLLM format
-# kiro-cli uses short names, LiteLLM needs anthropic/ prefix and full model IDs
-MODEL_NAME_MAP = {
-    "claude-opus-4.5": "anthropic/claude-opus-4-5-20251101",
-    "claude-sonnet-4.5": "anthropic/claude-sonnet-4-5-20241022",
-    "claude-sonnet-4": "anthropic/claude-sonnet-4-20250514",
-    "claude-haiku-4.5": "anthropic/claude-haiku-4-5-20241022",
-    # Older models
-    "claude-3-opus": "anthropic/claude-3-opus-20240229",
-    "claude-3-sonnet": "anthropic/claude-3-sonnet-20240229",
-    "claude-3-haiku": "anthropic/claude-3-haiku-20240307",
-    "claude-3-5-sonnet": "anthropic/claude-3-5-sonnet-20241022",
-}
-
-
-def translate_model_name(model: str) -> str:
-    """Translate friendly model names to LiteLLM-compatible format."""
-    if model in MODEL_NAME_MAP:
-        return MODEL_NAME_MAP[model]
-    # If already has provider prefix or is a full model ID, use as-is
-    if "/" in model or model.startswith("anthropic"):
-        return model
-    # Default: add anthropic prefix
-    return f"anthropic/{model}"
+# kiro-cli model names (used directly, no translation needed)
+KIRO_MODELS = [
+    "Auto",
+    "claude-opus-4.5",
+    "claude-sonnet-4.5",
+    "claude-sonnet-4",
+    "claude-haiku-4.5",
+]
 
 
 # Regex to detect numbered line format: "1: code", "• 1: code", "1, 1: code" (diff), "  220: code" (indented)
@@ -423,16 +407,12 @@ class Agent:
 
         # Get model - use kiro-cli friendly names
         model = model_override or self.config.model
-        # Strip anthropic/ prefix if present (kiro uses short names)
-        if model.startswith("anthropic/"):
-            model = model.replace("anthropic/", "")
-        # Convert full model IDs to short names
+        # Convert to kiro-cli short model name
         model = _kiro_model_name(model)
 
-        # Configure kiro
+        # Configure kiro (tools disabled - MaratOS handles tools via text parsing)
         kiro_config = KiroConfig(
             model=model,
-            trust_tools=True,  # Let kiro handle tools
             interactive=False,
             timeout=settings.llm_timeout,
             workdir=context.get("workspace") if context else None,
@@ -639,7 +619,7 @@ class Agent:
         policy = ToolPolicy(
             allowed_tools=self.config.tools if self.config.tools else None,
             max_iterations=6,
-            per_call_timeout_seconds=120.0,
+            per_call_timeout_seconds=300.0,
             workspace_path=workspace,
         )
 
@@ -751,7 +731,15 @@ class Agent:
 
 
 def _kiro_model_name(model: str) -> str:
-    """Convert model ID to kiro-cli friendly name."""
+    """Convert model ID to kiro-cli friendly name.
+
+    Handles legacy anthropic/ prefixes and full model IDs.
+    """
+    # Strip any provider prefix (legacy support)
+    if "/" in model:
+        model = model.split("/")[-1]
+
+    # Map full model IDs to short names
     model_map = {
         "claude-opus-4-5-20251101": "claude-opus-4.5",
         "claude-sonnet-4-5-20241022": "claude-sonnet-4.5",

@@ -14,24 +14,28 @@ from typing import Any
 
 @dataclass
 class BudgetPolicy:
-    """Budget limits for an agent execution session."""
+    """Budget limits for an agent execution session.
 
-    # Tool loop limits
-    max_tool_loops_per_message: int = 6  # Max iterations in tool loop
-    max_tool_calls_per_message: int = 20  # Max total tool calls per message
-    max_tool_calls_per_session: int = 100  # Max total tool calls per session
+    Note: Limits are set very high to effectively disable budget constraints.
+    Adjust these values if you need to enforce resource limits.
+    """
 
-    # Spawned task limits
-    max_spawned_tasks_per_run: int = 10  # Max subagent spawns per orchestrator run
-    max_nested_spawn_depth: int = 3  # Max depth of nested agent spawns
+    # Tool loop limits (effectively unlimited)
+    max_tool_loops_per_message: int = 1000
+    max_tool_calls_per_message: int = 1000
+    max_tool_calls_per_session: int = 10000
 
-    # Shell execution limits
-    max_shell_time_seconds: float = 120.0  # Max time per shell command
-    max_shell_calls_per_message: int = 10  # Max shell invocations per message
-    max_total_shell_time_per_session: float = 600.0  # 10 min total shell time
+    # Spawned task limits (effectively unlimited)
+    max_spawned_tasks_per_run: int = 1000
+    max_nested_spawn_depth: int = 100
+
+    # Shell execution limits (effectively unlimited)
+    max_shell_time_seconds: float = 3600.0  # 1 hour per command
+    max_shell_calls_per_message: int = 1000
+    max_total_shell_time_per_session: float = 36000.0  # 10 hours total
 
     # Memory limits
-    max_output_size_bytes: int = 1_000_000  # 1MB max output per tool call
+    max_output_size_bytes: int = 100_000_000  # 100MB max output per tool call
 
 
 @dataclass
@@ -228,11 +232,7 @@ AGENT_POLICIES: dict[str, AgentPolicy] = {
             write_allowed=True,
             workspace_only=False,
         ),
-        budget=BudgetPolicy(
-            max_tool_loops_per_message=6,
-            max_spawned_tasks_per_run=15,
-            max_shell_time_seconds=120.0,
-        ),
+        budget=BudgetPolicy(),  # Use defaults (effectively unlimited)
         diff_approval=DiffApprovalPolicy(enabled=False),
         notes="Orchestrator - delegates heavy implementation to specialists",
     ),
@@ -247,11 +247,7 @@ AGENT_POLICIES: dict[str, AgentPolicy] = {
             write_allowed=True,
             workspace_only=True,
         ),
-        budget=BudgetPolicy(
-            max_tool_loops_per_message=6,
-            max_spawned_tasks_per_run=5,
-            max_shell_time_seconds=60.0,
-        ),
+        budget=BudgetPolicy(),  # Use defaults (effectively unlimited)
         diff_approval=DiffApprovalPolicy(enabled=False),
         notes="Plans and designs - spawns coders for implementation",
     ),
@@ -266,11 +262,7 @@ AGENT_POLICIES: dict[str, AgentPolicy] = {
             write_allowed=True,
             workspace_only=False,
         ),
-        budget=BudgetPolicy(
-            max_tool_loops_per_message=8,
-            max_spawned_tasks_per_run=0,  # Coder doesn't spawn
-            max_shell_time_seconds=180.0,  # Allow longer for builds
-        ),
+        budget=BudgetPolicy(),  # Use defaults (effectively unlimited)
         diff_approval=DiffApprovalPolicy(enabled=False),
         notes="Pure implementation - reads existing code, writes new code",
     ),
@@ -285,12 +277,7 @@ AGENT_POLICIES: dict[str, AgentPolicy] = {
             write_allowed=False,
             workspace_only=True,
         ),
-        budget=BudgetPolicy(
-            max_tool_loops_per_message=6,
-            max_spawned_tasks_per_run=0,
-            max_shell_time_seconds=60.0,
-            max_shell_calls_per_message=5,  # Limited shell for reviews
-        ),
+        budget=BudgetPolicy(),  # Use defaults (effectively unlimited)
         diff_approval=DiffApprovalPolicy(enabled=False),
         notes="Code review - reads and analyzes, does NOT modify files",
     ),
@@ -305,12 +292,7 @@ AGENT_POLICIES: dict[str, AgentPolicy] = {
             write_allowed=True,
             workspace_only=True,
         ),
-        budget=BudgetPolicy(
-            max_tool_loops_per_message=10,  # Tests may need more iterations
-            max_spawned_tasks_per_run=0,
-            max_shell_time_seconds=300.0,  # Tests can take longer
-            max_shell_calls_per_message=15,
-        ),
+        budget=BudgetPolicy(),  # Use defaults (effectively unlimited)
         diff_approval=DiffApprovalPolicy(enabled=False),
         notes="Must copy to workspace before writing tests",
     ),
@@ -325,11 +307,7 @@ AGENT_POLICIES: dict[str, AgentPolicy] = {
             write_allowed=True,
             workspace_only=False,
         ),
-        budget=BudgetPolicy(
-            max_tool_loops_per_message=6,
-            max_spawned_tasks_per_run=0,
-            max_shell_time_seconds=30.0,
-        ),
+        budget=BudgetPolicy(),  # Use defaults (effectively unlimited)
         diff_approval=DiffApprovalPolicy(enabled=False),
         notes="Documentation writer - can write docs directly",
     ),
@@ -344,12 +322,7 @@ AGENT_POLICIES: dict[str, AgentPolicy] = {
             write_allowed=True,
             workspace_only=False,
         ),
-        budget=BudgetPolicy(
-            max_tool_loops_per_message=8,
-            max_spawned_tasks_per_run=0,
-            max_shell_time_seconds=300.0,  # Docker builds can take time
-            max_shell_calls_per_message=20,
-        ),
+        budget=BudgetPolicy(),  # Use defaults (effectively unlimited)
         diff_approval=DiffApprovalPolicy(
             enabled=True,  # DevOps changes are sensitive
             require_approval_for_writes=True,
