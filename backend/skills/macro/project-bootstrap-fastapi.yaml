@@ -1,0 +1,200 @@
+# Project Bootstrap - FastAPI
+# Creates a production-ready FastAPI project with best practices
+
+id: project-bootstrap-fastapi
+name: Bootstrap FastAPI Project
+description: Creates a new FastAPI project with standard structure, testing, and configuration
+version: "1.0.0"
+author: MaratOS
+
+task_types:
+  - bootstrap_project
+
+tags:
+  - python
+  - fastapi
+  - api
+  - backend
+  - async
+
+triggers:
+  - create fastapi
+  - new fastapi project
+  - bootstrap fastapi
+  - start fastapi app
+
+inputs:
+  - name: project_name
+    type: string
+    description: Name of the project (lowercase, hyphens allowed)
+    required: true
+    validation: "^[a-z][a-z0-9-]*$"
+    examples:
+      - my-api
+      - todo-service
+
+  - name: workdir
+    type: path
+    description: Directory to create project in
+    required: true
+
+  - name: include_docker
+    type: boolean
+    description: Include Dockerfile and docker-compose
+    default: true
+
+  - name: include_tests
+    type: boolean
+    description: Include pytest setup and example tests
+    default: true
+
+  - name: database
+    type: string
+    description: "Database type (none, sqlite, postgres)"
+    default: sqlite
+
+outputs:
+  - name: project_path
+    type: path
+    description: Path to the created project
+
+  - name: created_files
+    type: array
+    description: List of files created
+
+produces:
+  - name: main_app
+    type: code
+    path_template: "{{workdir}}/{{project_name}}/app/main.py"
+    description: FastAPI application entry point
+
+  - name: pyproject
+    type: config
+    path_template: "{{workdir}}/{{project_name}}/pyproject.toml"
+    description: Python project configuration
+
+  - name: dockerfile
+    type: docker
+    path_template: "{{workdir}}/{{project_name}}/Dockerfile"
+    required: false
+
+requires_tools:
+  - kiro
+  - filesystem
+  - shell
+
+quality_gates:
+  - id: structure_valid
+    type: file_exists
+    file_path: "{{workdir}}/{{project_name}}/app/main.py"
+    description: Main app file exists
+
+  - id: config_valid
+    type: file_exists
+    file_path: "{{workdir}}/{{project_name}}/pyproject.toml"
+    description: pyproject.toml exists
+
+  - id: imports_valid
+    type: command_success
+    command: "cd {{workdir}}/{{project_name}} && python -c 'from app.main import app'"
+    description: Application can be imported
+
+system_context: |
+  You are creating a production-ready FastAPI project.
+
+  Follow these standards:
+  - Use pyproject.toml for dependencies (not requirements.txt)
+  - Structure: app/ for source, tests/ for tests
+  - Include proper type hints
+  - Use Pydantic for all models
+  - Include health check endpoint at /health
+  - Use async/await patterns
+  - Include proper logging setup
+  - Add .gitignore for Python projects
+
+  Project structure:
+  ```
+  {{project_name}}/
+    app/
+      __init__.py
+      main.py
+      config.py
+      api/
+        __init__.py
+        routes.py
+      models/
+        __init__.py
+      services/
+        __init__.py
+    tests/
+      __init__.py
+      conftest.py
+      test_health.py
+    pyproject.toml
+    README.md
+    .gitignore
+  ```
+
+quality_checklist:
+  - FastAPI app initializes without errors
+  - Health endpoint responds with 200
+  - All imports resolve correctly
+  - Type hints are complete
+  - Pydantic models are used for request/response
+
+test_requirements:
+  - Test health endpoint returns 200
+  - Test app startup lifecycle
+  - Test configuration loading
+
+workflow:
+  - name: create_structure
+    action: kiro_architect
+    description: Design and create the project structure
+    params:
+      task: |
+        Create a FastAPI project named '{{project_name}}'.
+
+        Requirements:
+        - Database: {{database}}
+        - Include Docker: {{include_docker}}
+        - Include Tests: {{include_tests}}
+
+        Create all files with proper content, not stubs.
+      workdir: "{{workdir}}"
+
+  - name: validate_structure
+    action: shell
+    description: Verify project structure
+    params:
+      command: "ls -la {{workdir}}/{{project_name}}/app/"
+      workdir: "{{workdir}}"
+
+  - name: install_deps
+    action: shell
+    description: Create virtual environment and install dependencies
+    params:
+      command: |
+        cd {{workdir}}/{{project_name}} && \
+        python -m venv .venv && \
+        . .venv/bin/activate && \
+        pip install -e ".[dev]"
+      workdir: "{{workdir}}/{{project_name}}"
+    retry:
+      max_attempts: 2
+      backoff_seconds: 5
+
+  - name: run_tests
+    action: shell
+    condition: "include_tests == true"
+    description: Run initial tests
+    params:
+      command: |
+        cd {{workdir}}/{{project_name}} && \
+        . .venv/bin/activate && \
+        pytest tests/ -v
+      workdir: "{{workdir}}/{{project_name}}"
+
+retry_policy:
+  max_attempts: 2
+  backoff_seconds: 5.0

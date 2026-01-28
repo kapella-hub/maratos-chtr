@@ -1,0 +1,185 @@
+# Add Database Migration
+# Sets up database schema and migration tooling
+
+id: add-db-migration
+name: Add Database Migration
+description: Adds database schema, models, and migration configuration
+version: "1.0.0"
+author: MaratOS
+
+task_types:
+  - add_database
+
+tags:
+  - database
+  - migration
+  - alembic
+  - prisma
+  - sqlalchemy
+
+triggers:
+  - add database
+  - add migration
+  - setup database
+  - add db schema
+  - add sqlalchemy
+  - add prisma
+
+inputs:
+  - name: workdir
+    type: path
+    description: Project directory
+    required: true
+
+  - name: project_type
+    type: string
+    description: "Project type (python, node)"
+    required: true
+
+  - name: db_type
+    type: string
+    description: "Database type (postgres, mysql, sqlite)"
+    default: postgres
+
+  - name: orm
+    type: string
+    description: "ORM to use (sqlalchemy, prisma, drizzle)"
+    default: sqlalchemy
+
+outputs:
+  - name: models_path
+    type: path
+    description: Path to database models
+
+  - name: migration_path
+    type: path
+    description: Path to migration files
+
+produces:
+  - name: models
+    type: code
+    path_template: "{{workdir}}/app/models/"
+    description: Database model definitions
+
+  - name: migrations
+    type: database
+    path_template: "{{workdir}}/migrations/"
+    description: Migration files
+
+  - name: db_config
+    type: config
+    path_template: "{{workdir}}/alembic.ini"
+    description: Migration configuration
+
+requires_tools:
+  - kiro
+  - filesystem
+  - shell
+
+quality_gates:
+  - id: models_valid
+    type: command_success
+    command: "cd {{workdir}} && python -c 'from app.models import *'"
+    description: Models can be imported
+
+  - id: migration_runs
+    type: command_success
+    command: "cd {{workdir}} && alembic upgrade head"
+    description: Migrations run successfully
+
+system_context: |
+  You are adding database support to a project.
+
+  SQLAlchemy best practices:
+  - Use declarative base with type hints
+  - Include created_at and updated_at timestamps
+  - Use UUIDs for primary keys
+  - Define proper relationships
+  - Include indexes for frequently queried fields
+
+  Alembic setup:
+  - Configure async support
+  - Use env.py with proper imports
+  - Include downgrade operations
+  - Version control migrations
+
+  Model structure:
+  - Base model with common fields
+  - Mixins for reusable functionality
+  - Proper cascade settings
+
+quality_checklist:
+  - Models import without errors
+  - Migrations generate correctly
+  - Foreign keys are properly defined
+  - Indexes are included
+  - Timestamps are automatic
+
+workflow:
+  - name: install_deps
+    action: shell
+    description: Install database dependencies
+    params:
+      command: |
+        cd {{workdir}} && \
+        pip install sqlalchemy[asyncio] asyncpg alembic
+      workdir: "{{workdir}}"
+
+  - name: create_models
+    action: kiro_architect
+    description: Create database models
+    params:
+      task: |
+        Create database models for the project.
+
+        Requirements:
+        - ORM: {{orm}}
+        - Database: {{db_type}}
+        - Use async patterns
+        - Include Base model with id, created_at, updated_at
+        - Add example User model
+        - Define proper relationships
+
+        Files to create:
+        - app/models/__init__.py
+        - app/models/base.py
+        - app/models/user.py
+        - app/database.py (connection setup)
+      workdir: "{{workdir}}"
+
+  - name: init_alembic
+    action: shell
+    condition: "orm == sqlalchemy"
+    description: Initialize Alembic
+    params:
+      command: |
+        cd {{workdir}} && \
+        alembic init migrations
+      workdir: "{{workdir}}"
+
+  - name: configure_alembic
+    action: kiro_architect
+    condition: "orm == sqlalchemy"
+    description: Configure Alembic for async
+    params:
+      task: |
+        Update Alembic configuration for async SQLAlchemy:
+        - Update migrations/env.py for async
+        - Configure alembic.ini with database URL
+        - Import models in env.py
+
+      workdir: "{{workdir}}"
+
+  - name: create_initial_migration
+    action: shell
+    condition: "orm == sqlalchemy"
+    description: Create initial migration
+    params:
+      command: |
+        cd {{workdir}} && \
+        alembic revision --autogenerate -m "initial"
+      workdir: "{{workdir}}"
+
+retry_policy:
+  max_attempts: 2
+  backoff_seconds: 5.0

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ThinkingBlock } from '@/lib/api'
+import type { ThinkingBlock, ProjectContextInfo } from '@/lib/api'
 
 export interface ChatMessage {
   id: string
@@ -109,12 +109,16 @@ interface ChatStore {
   abortController: AbortController | null
   currentThinkingBlock: Partial<ThinkingBlock> | null  // Current thinking block being processed
 
+  // Active project context (auto-detected or explicitly set)
+  activeProjectContext: ProjectContextInfo | null
+
   // Inline project state
   inlineProject: InlineProject
 
   setSessionId: (id: string | null) => void
   setAgentId: (id: string) => void
   setCurrentModel: (model: string | null) => void
+  setActiveProjectContext: (context: ProjectContextInfo | null) => void
   addMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void
   appendToLastMessage: (content: string) => void
   setLastMessageAgent: (agentId: string) => void
@@ -166,11 +170,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   activeSubagents: [],
   abortController: null,
   currentThinkingBlock: null,
+  activeProjectContext: null,
   inlineProject: { ...initialProject },
 
   setSessionId: (id) => set({ sessionId: id }),
   setAgentId: (id) => set({ agentId: id }),
   setCurrentModel: (model) => set({ currentModel: model }),
+  setActiveProjectContext: (context) => set({ activeProjectContext: context }),
   setAbortController: (controller) => set({ abortController: controller }),
   
   stopGeneration: () => {
@@ -272,6 +278,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     isModelThinking: false,
     isOrchestrating: false,
     activeSubagents: [],
+    activeProjectContext: null,
     inlineProject: { ...initialProject },
   }),
 

@@ -1,4 +1,10 @@
-"""Subagent manager for spawning and tracking background tasks."""
+"""Subagent manager for spawning and tracking background tasks.
+
+Enterprise guardrails integration:
+- Budget enforcement for spawned tasks
+- Audit logging for task lifecycle
+- Per-agent spawn limits
+"""
 
 import asyncio
 import traceback
@@ -10,6 +16,19 @@ from enum import Enum
 from typing import Any, Callable, Coroutine
 
 logger = logging.getLogger(__name__)
+
+# Guardrails integration (optional, graceful fallback)
+_guardrails_available = False
+try:
+    from app.guardrails import (
+        BudgetTracker,
+        BudgetExceededError,
+        AuditRepository,
+        get_agent_policy,
+    )
+    _guardrails_available = True
+except ImportError:
+    logger.info("Guardrails module not available, using basic mode")
 
 # Lazy imports to avoid circular imports
 _metrics_manager = None
@@ -313,7 +332,13 @@ class AgentRateLimiter:
 
 
 class SubagentManager:
-    """Manages subagent tasks."""
+    """Manages subagent tasks with database persistence.
+
+    Enterprise guardrails:
+    - Enforces spawn limits per session/run via BudgetTracker
+    - Logs task lifecycle events to AuditRepository
+    - Respects agent-specific policies
+    """
 
     def __init__(
         self,
@@ -324,6 +349,196 @@ class SubagentManager:
         self._running: dict[str, asyncio.Task] = {}
         self._fallback_tasks: dict[str, str] = {}  # original_task_id -> fallback_task_id
         self._rate_limiter = AgentRateLimiter(max_total_concurrent, max_per_agent)
+        self._persist_enabled = True  # Can be disabled for testing
+
+        # Budget tracking per session (for spawn limits)
+        self._budget_trackers: dict[str, "BudgetTracker"] = {}
+        self._spawn_depth: dict[str, int] = {}  # task_id -> depth
+        self._enable_guardrails = _guardrails_available
+
+    def get_budget_tracker(self, session_id: str, agent_id: str) -> "BudgetTracker | None":
+        """Get or create a budget tracker for a session."""
+        if not self._enable_guardrails:
+            return None
+
+        key = f"{session_id}:{agent_id}"
+        if key not in self._budget_trackers:
+            policy = get_agent_policy(agent_id)
+            self._budget_trackers[key] = BudgetTracker(
+                policy=policy.budget,
+                session_id=session_id,
+                agent_id=agent_id,
+            )
+        return self._budget_trackers[key]
+
+    def _get_spawn_depth(self, parent_id: str | None) -> int:
+        """Get the spawn depth for a task."""
+        if parent_id is None:
+            return 0
+        return self._spawn_depth.get(parent_id, 0) + 1
+
+    async def _persist_task(self, task: SubagentTask) -> None:
+        """Persist task state to database."""
+        if not self._persist_enabled:
+            return
+
+        try:
+            from app.database import SubagentTaskRecord, async_session_factory
+            from sqlalchemy import select
+
+            async with async_session_factory() as db:
+                # Check if exists
+                result = await db.execute(
+                    select(SubagentTaskRecord).where(SubagentTaskRecord.id == task.id)
+                )
+                record = result.scalar_one_or_none()
+
+                if record:
+                    # Update existing
+                    record.status = task.status.value
+                    record.progress = task.progress
+                    record.started_at = task.started_at
+                    record.completed_at = task.completed_at
+                    record.result = task.result
+                    record.error = task.error
+                    record.logs = task.logs[-50:]  # Keep last 50 logs
+                    record.goals = [g.to_dict() for g in task.goals]
+                    record.checkpoints = [c.to_dict() for c in task.checkpoints]
+                    record.response_so_far = task.response_so_far[:10000] if task.response_so_far else None
+                    record.attempt = task.attempt
+                else:
+                    # Create new
+                    record = SubagentTaskRecord(
+                        id=task.id,
+                        name=task.name,
+                        description=task.description,
+                        agent_id=task.agent_id,
+                        status=task.status.value,
+                        progress=task.progress,
+                        callback_session=task.callback_session,
+                        parent_id=task.parent_id,
+                        created_at=task.created_at,
+                        started_at=task.started_at,
+                        completed_at=task.completed_at,
+                        result=task.result,
+                        error=task.error,
+                        logs=task.logs[-50:],
+                        goals=[g.to_dict() for g in task.goals],
+                        checkpoints=[c.to_dict() for c in task.checkpoints],
+                        response_so_far=task.response_so_far[:10000] if task.response_so_far else None,
+                        attempt=task.attempt,
+                        max_attempts=task.max_attempts,
+                        fallback_agent_id=task.fallback_agent_id,
+                        original_task_id=task.original_task_id,
+                    )
+                    db.add(record)
+
+                await db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to persist task {task.id}: {e}")
+
+    async def load_interrupted_tasks(self) -> list[SubagentTask]:
+        """Load tasks that were running when the server stopped.
+
+        Returns tasks in RUNNING, PENDING, or RETRYING status that can be recovered.
+        """
+        try:
+            from app.database import SubagentTaskRecord, async_session_factory
+            from sqlalchemy import select
+
+            interrupted = []
+            async with async_session_factory() as db:
+                result = await db.execute(
+                    select(SubagentTaskRecord).where(
+                        SubagentTaskRecord.status.in_(["running", "pending", "retrying", "spawning"])
+                    )
+                )
+                records = result.scalars().all()
+
+                for record in records:
+                    # Convert to SubagentTask
+                    task = SubagentTask(
+                        id=record.id,
+                        name=record.name,
+                        description=record.description,
+                        agent_id=record.agent_id,
+                        status=TaskStatus(record.status),
+                        progress=record.progress,
+                        created_at=record.created_at,
+                        started_at=record.started_at,
+                        completed_at=record.completed_at,
+                        result=record.result,
+                        error=record.error,
+                        logs=record.logs or [],
+                        callback_session=record.callback_session,
+                        parent_id=record.parent_id,
+                        attempt=record.attempt,
+                        max_attempts=record.max_attempts,
+                        fallback_agent_id=record.fallback_agent_id,
+                        original_task_id=record.original_task_id,
+                        response_so_far=record.response_so_far or "",
+                    )
+
+                    # Restore goals
+                    if record.goals:
+                        for g in record.goals:
+                            task.goals.append(TaskGoal(
+                                id=g["id"],
+                                description=g["description"],
+                                status=GoalStatus(g["status"]),
+                                started_at=datetime.fromisoformat(g["started_at"]) if g.get("started_at") else None,
+                                completed_at=datetime.fromisoformat(g["completed_at"]) if g.get("completed_at") else None,
+                                error=g.get("error"),
+                            ))
+
+                    # Restore checkpoints
+                    if record.checkpoints:
+                        for c in record.checkpoints:
+                            task.checkpoints.append(TaskCheckpoint(
+                                name=c["name"],
+                                description=c["description"],
+                                created_at=datetime.fromisoformat(c["created_at"]) if c.get("created_at") else datetime.now(),
+                                goal_id=c.get("goal_id"),
+                            ))
+
+                    interrupted.append(task)
+                    self._tasks[task.id] = task
+
+                    # Mark as needing recovery
+                    task.log("Task restored after server restart - needs recovery")
+
+            logger.info(f"Loaded {len(interrupted)} interrupted tasks from database")
+            return interrupted
+
+        except Exception as e:
+            logger.error(f"Failed to load interrupted tasks: {e}", exc_info=True)
+            return []
+
+    async def mark_interrupted_as_failed(self) -> int:
+        """Mark all interrupted tasks as failed (for cases where recovery isn't possible).
+
+        Returns the number of tasks marked as failed.
+        """
+        try:
+            from app.database import SubagentTaskRecord, async_session_factory
+            from sqlalchemy import update
+
+            async with async_session_factory() as db:
+                result = await db.execute(
+                    update(SubagentTaskRecord)
+                    .where(SubagentTaskRecord.status.in_(["running", "pending", "retrying", "spawning"]))
+                    .values(
+                        status="failed",
+                        error="Server restart - task interrupted",
+                        completed_at=datetime.now(),
+                    )
+                )
+                await db.commit()
+                return result.rowcount
+
+        except Exception as e:
+            logger.error(f"Failed to mark interrupted tasks: {e}", exc_info=True)
+            return 0
 
     async def spawn(
         self,
@@ -336,6 +551,7 @@ class SubagentManager:
         max_attempts: int = 3,
         timeout_seconds: float = 300.0,
         enable_fallback: bool = True,
+        session_id: str | None = None,  # For budget tracking
     ) -> SubagentTask:
         """Spawn a new subagent task with error recovery.
 
@@ -349,10 +565,53 @@ class SubagentManager:
             max_attempts: Maximum retry attempts (default 3)
             timeout_seconds: Timeout per attempt in seconds (default 300)
             enable_fallback: Whether to try fallback agents on failure (default True)
+            session_id: Session ID for budget tracking (optional)
 
         Returns:
             The created SubagentTask
+
+        Raises:
+            BudgetExceededError: If spawn limits are exceeded
         """
+        # Calculate spawn depth
+        spawn_depth = self._get_spawn_depth(parent_id)
+
+        # Check budget limits if guardrails enabled
+        session_for_budget = session_id or callback_session
+        if self._enable_guardrails and session_for_budget:
+            budget_tracker = self.get_budget_tracker(session_for_budget, agent_id)
+            if budget_tracker:
+                try:
+                    budget_tracker.check_spawn(depth=spawn_depth)
+                except BudgetExceededError as e:
+                    # Log the budget violation
+                    try:
+                        await AuditRepository.log_budget_check(
+                            budget_type=e.budget_type.value,
+                            current_value=float(e.current),
+                            limit_value=float(e.limit),
+                            exceeded=True,
+                            session_id=session_for_budget,
+                            agent_id=agent_id,
+                        )
+                        await AuditRepository.log_event(
+                            category="subagent",
+                            action="spawn_blocked",
+                            session_id=session_for_budget,
+                            agent_id=agent_id,
+                            success=False,
+                            error=e.message,
+                            severity="warning",
+                            metadata={
+                                "task_name": name,
+                                "spawn_depth": spawn_depth,
+                                "budget_type": e.budget_type.value,
+                            },
+                        )
+                    except Exception as log_err:
+                        logger.error(f"Failed to log budget violation: {log_err}")
+                    raise  # Re-raise the BudgetExceededError
+
         task = SubagentTask(
             id=str(uuid.uuid4())[:8],
             name=name,
@@ -365,6 +624,33 @@ class SubagentManager:
         )
 
         self._tasks[task.id] = task
+        self._spawn_depth[task.id] = spawn_depth
+
+        # Record spawn in budget tracker
+        if self._enable_guardrails and session_for_budget:
+            budget_tracker = self.get_budget_tracker(session_for_budget, agent_id)
+            if budget_tracker:
+                budget_tracker.record_spawn(depth=spawn_depth)
+
+        # Log task spawn to audit
+        if self._enable_guardrails:
+            try:
+                await AuditRepository.log_event(
+                    category="subagent",
+                    action="spawn",
+                    session_id=session_for_budget,
+                    task_id=task.id,
+                    agent_id=agent_id,
+                    success=True,
+                    metadata={
+                        "task_name": name,
+                        "description": description[:200],
+                        "parent_id": parent_id,
+                        "spawn_depth": spawn_depth,
+                    },
+                )
+            except Exception as log_err:
+                logger.warning(f"Failed to log task spawn: {log_err}")
 
         # Check rate limit before starting
         can_run = await self._rate_limiter.acquire(agent_id)
@@ -372,13 +658,16 @@ class SubagentManager:
             task.status = TaskStatus.PENDING
             task.log("Queued - waiting for available slot")
 
+        # Persist initial task state
+        await self._persist_task(task)
+
         # Start the task in background with retry/timeout handling
         async_task = asyncio.create_task(
             self._run_task_with_rate_limit(task, work_fn, enable_fallback, not can_run)
         )
         self._running[task.id] = async_task
 
-        logger.info(f"Spawned subagent task: {task.id} - {name} (queued={not can_run})")
+        logger.info(f"Spawned subagent task: {task.id} - {name} (queued={not can_run}, depth={spawn_depth})")
         return task
 
     async def spawn_fallback(
@@ -500,6 +789,7 @@ class SubagentManager:
                 task.log("Cancelled")
                 task.completed_at = datetime.now()
                 self._running.pop(task.id, None)
+                await self._persist_task(task)
                 return
 
             except Exception as e:
@@ -579,6 +869,9 @@ class SubagentManager:
         task.completed_at = datetime.now()
         self._running.pop(task.id, None)
 
+        # Persist final task state
+        await self._persist_task(task)
+
         # Record task metrics
         try:
             metrics = get_metrics_manager()
@@ -603,6 +896,30 @@ class SubagentManager:
             f"Task {task.id} finished: status={task.status.value}, "
             f"attempts={task.attempt}, duration={duration:.1f}s"
         )
+
+        # Log task completion to audit
+        if self._enable_guardrails:
+            try:
+                await AuditRepository.log_event(
+                    category="subagent",
+                    action="complete" if task.status == TaskStatus.COMPLETED else "failed",
+                    session_id=task.callback_session,
+                    task_id=task.id,
+                    agent_id=task.agent_id,
+                    success=task.status == TaskStatus.COMPLETED,
+                    error=task.error,
+                    duration_ms=duration * 1000,
+                    severity="info" if task.status == TaskStatus.COMPLETED else "warning",
+                    metadata={
+                        "task_name": task.name,
+                        "attempts": task.attempt,
+                        "goals_completed": sum(1 for g in task.goals if g.status == GoalStatus.COMPLETED),
+                        "goals_total": len(task.goals),
+                        "is_fallback": task.fallback_agent_id is not None,
+                    },
+                )
+            except Exception as log_err:
+                logger.warning(f"Failed to log task completion: {log_err}")
 
         if task.callback_session:
             logger.info(f"Task {task.id} complete, should notify session {task.callback_session}")

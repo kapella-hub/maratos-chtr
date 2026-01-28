@@ -1,0 +1,90 @@
+.PHONY: help dev test lint build clean docker up down
+
+help:
+	@echo "Available commands:"
+	@echo "  make dev       - Start development servers"
+	@echo "  make test      - Run all tests"
+	@echo "  make lint      - Run linting"
+	@echo "  make build     - Build for production"
+	@echo "  make clean     - Clean build artifacts"
+{% if dockerize %}
+	@echo "  make docker    - Build Docker images"
+	@echo "  make up        - Start Docker containers"
+	@echo "  make down      - Stop Docker containers"
+{% endif %}
+
+{% if has_backend %}
+# Backend commands
+dev-backend:
+	cd {% if is_fullstack %}backend{% else %}.{% endif %} && uvicorn app.main:app --reload --port {{ backend_port }}
+
+test-backend:
+	cd {% if is_fullstack %}backend{% else %}.{% endif %} && pytest tests/ -v
+
+lint-backend:
+	cd {% if is_fullstack %}backend{% else %}.{% endif %} && ruff check . && mypy app/
+{% endif %}
+
+{% if has_frontend %}
+# Frontend commands
+dev-frontend:
+	cd frontend && npm run dev
+
+test-frontend:
+	cd frontend && npm test
+
+lint-frontend:
+	cd frontend && npm run lint
+
+build-frontend:
+	cd frontend && npm run build
+{% endif %}
+
+# Combined commands
+{% if is_fullstack %}
+dev:
+	@echo "Starting backend and frontend..."
+	$(MAKE) -j2 dev-backend dev-frontend
+
+test: test-backend test-frontend
+
+lint: lint-backend lint-frontend
+{% elif has_backend %}
+dev: dev-backend
+test: test-backend
+lint: lint-backend
+{% else %}
+dev: dev-frontend
+test: test-frontend
+lint: lint-frontend
+{% endif %}
+
+{% if has_frontend %}
+build: build-frontend
+{% endif %}
+
+clean:
+{% if has_backend %}
+	find {% if is_fullstack %}backend{% else %}.{% endif %} -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find {% if is_fullstack %}backend{% else %}.{% endif %} -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+	find {% if is_fullstack %}backend{% else %}.{% endif %} -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
+	find {% if is_fullstack %}backend{% else %}.{% endif %} -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
+{% endif %}
+{% if has_frontend %}
+	rm -rf frontend/dist frontend/node_modules/.cache
+{% endif %}
+
+{% if dockerize %}
+# Docker commands
+docker:
+	docker compose build
+
+up:
+	docker compose up -d
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f
+{% endif %}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import mermaid from 'mermaid'
+import DOMPurify from 'dompurify'
 import { cn } from '@/lib/utils'
 import { AlertCircle, Maximize2, X } from 'lucide-react'
 
@@ -8,11 +9,60 @@ interface MermaidDiagramProps {
   className?: string
 }
 
-// Initialize mermaid with dark theme
+/**
+ * Supported Mermaid diagram types.
+ *
+ * Agents should output diagrams in these formats for org charts, flowcharts, etc.
+ * See docs/DIAGRAMS.md for usage examples.
+ */
+export const SUPPORTED_DIAGRAM_TYPES = [
+  'flowchart',    // Flowcharts and org charts (TB, LR, etc.)
+  'graph',        // Same as flowchart (legacy syntax)
+  'sequenceDiagram',
+  'classDiagram',
+  'stateDiagram',
+  'stateDiagram-v2',
+  'erDiagram',    // Entity-relationship
+  'gantt',
+  'pie',
+  'journey',      // User journey
+  'mindmap',      // Mind maps (great for org structures)
+  'timeline',
+  'quadrantChart',
+  'gitGraph',
+  'C4Context',    // C4 architecture diagrams
+  'C4Container',
+  'C4Component',
+  'C4Deployment',
+  'sankey',       // Sankey diagrams
+  'xychart',      // XY charts (beta)
+] as const
+
+export type DiagramType = typeof SUPPORTED_DIAGRAM_TYPES[number]
+
+/**
+ * Sanitize SVG output from Mermaid.
+ * Strips any scripting elements that might have been injected.
+ */
+function sanitizeSvg(svg: string): string {
+  return DOMPurify.sanitize(svg, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    // Block scripting in SVG
+    FORBID_TAGS: ['script', 'foreignObject', 'animate', 'animateMotion', 'animateTransform', 'set'],
+    FORBID_ATTR: [
+      'onload', 'onerror', 'onclick', 'onmouseover', 'onmouseout',
+      'onfocus', 'onblur', 'onkeydown', 'onkeyup', 'onkeypress',
+    ],
+  })
+}
+
+// Initialize mermaid with dark theme and strict security
 mermaid.initialize({
   startOnLoad: false,
   theme: 'dark',
-  securityLevel: 'loose',
+  // Use strict security level to prevent XSS
+  // Note: This disables click events in diagrams, which is the safe default
+  securityLevel: 'strict',
   themeVariables: {
     primaryColor: '#8b5cf6',
     primaryTextColor: '#e2e8f0',
@@ -30,7 +80,7 @@ mermaid.initialize({
     nodeTextColor: '#e2e8f0',
   },
   flowchart: {
-    htmlLabels: true,
+    htmlLabels: false, // Disabled for security with strict mode
     curve: 'basis',
     rankSpacing: 50,
     nodeSpacing: 30,
@@ -43,6 +93,13 @@ mermaid.initialize({
     noteMargin: 10,
     messageMargin: 35,
   },
+  mindmap: {
+    padding: 16,
+    maxNodeWidth: 200,
+  },
+  // Disable potentially dangerous features
+  fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+  logLevel: 'error', // Reduce console noise
 })
 
 export default function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
@@ -56,8 +113,10 @@ export default function MermaidDiagram({ chart, className }: MermaidDiagramProps
     const renderDiagram = async () => {
       try {
         setError(null)
-        const { svg } = await mermaid.render(idRef.current, chart)
-        setSvg(svg)
+        const { svg: rawSvg } = await mermaid.render(idRef.current, chart)
+        // Sanitize SVG output to ensure no malicious content
+        const sanitizedSvg = sanitizeSvg(rawSvg)
+        setSvg(sanitizedSvg)
       } catch (err) {
         console.error('Mermaid render error:', err)
         setError(err instanceof Error ? err.message : 'Failed to render diagram')
@@ -151,7 +210,25 @@ export default function MermaidDiagram({ chart, className }: MermaidDiagramProps
   )
 }
 
-// Helper to detect mermaid code blocks
+/**
+ * Check if a language identifier indicates Mermaid code.
+ */
 export function isMermaidCode(language: string): boolean {
   return language.toLowerCase() === 'mermaid'
+}
+
+/**
+ * Pattern to detect Mermaid diagram content without explicit language tag.
+ * Matches the start of supported diagram types.
+ */
+export const MERMAID_CONTENT_PATTERN = new RegExp(
+  `^\\s*(${SUPPORTED_DIAGRAM_TYPES.join('|')})\\b`,
+  'i'
+)
+
+/**
+ * Check if content looks like a Mermaid diagram (for auto-detection).
+ */
+export function isMermaidContent(content: string): boolean {
+  return MERMAID_CONTENT_PATTERN.test(content.trim())
 }

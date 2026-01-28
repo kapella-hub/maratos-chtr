@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Sparkles, ChevronDown, Menu, Settings, History, Command, Plus, Cpu, Brain, Check } from 'lucide-react'
+import { Sparkles, ChevronDown, Menu, Settings, History, Command, Plus, Cpu, Brain, Check, ShieldCheck } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { fetchConfig, updateConfig } from '@/lib/api'
 import { useChatStore } from '@/stores/chat'
+import { useApprovalsStore } from '@/stores/approvals'
 
 interface MinimalHeaderProps {
   onToggleHistory: () => void
@@ -39,7 +40,8 @@ export default function MinimalHeader({ onToggleHistory, onToggleCommand }: Mini
   const [showThinkingDropdown, setShowThinkingDropdown] = useState(false)
   const modelRef = useRef<HTMLDivElement>(null)
   const thinkingRef = useRef<HTMLDivElement>(null)
-  const { currentModel, clearMessages, setSessionId, isStreaming } = useChatStore()
+  const { clearMessages, setSessionId, isStreaming } = useChatStore()
+  const { pendingCount, togglePanel: toggleApprovalsPanel } = useApprovalsStore()
 
   const { data: config } = useQuery({
     queryKey: ['config'],
@@ -48,8 +50,12 @@ export default function MinimalHeader({ onToggleHistory, onToggleCommand }: Mini
 
   const configMutation = useMutation({
     mutationFn: updateConfig,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['config'] })
+    onSuccess: (data) => {
+      // Directly update the cache with the response
+      queryClient.setQueryData(['config'], data)
+    },
+    onError: (error) => {
+      console.error('Config update failed:', error)
     },
   })
 
@@ -67,7 +73,7 @@ export default function MinimalHeader({ onToggleHistory, onToggleCommand }: Mini
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const selectedModel = currentModel || config?.default_model || 'Auto'
+  const selectedModel = config?.default_model || 'Auto'
   const selectedThinking = config?.thinking_level || 'medium'
   const currentModelInfo = kiroModels.find(m => m.id === selectedModel) || kiroModels[0]
   const currentThinkingInfo = thinkingLevels.find(t => t.id === selectedThinking) || thinkingLevels[3]
@@ -128,13 +134,15 @@ export default function MinimalHeader({ onToggleHistory, onToggleCommand }: Mini
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -8, scale: 0.95 }}
                 transition={{ duration: 0.15 }}
-                className="absolute top-full left-0 mt-2 w-48 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden"
+                className="absolute top-full left-0 mt-2 w-48 bg-card border border-border rounded-xl shadow-xl z-[100] overflow-hidden"
+                style={{ pointerEvents: 'auto' }}
               >
                 <div className="p-1">
                   {kiroModels.map((model) => (
                     <button
                       key={model.id}
                       onClick={() => {
+                        console.log('Selecting model:', model.id)
                         configMutation.mutate({ default_model: model.id })
                         setShowModelDropdown(false)
                       }}
@@ -221,6 +229,24 @@ export default function MinimalHeader({ onToggleHistory, onToggleCommand }: Mini
 
       {/* Right: Actions */}
       <div className="flex items-center gap-1">
+        {/* Approvals toggle */}
+        <button
+          onClick={toggleApprovalsPanel}
+          className={cn(
+            'relative p-2 rounded-lg',
+            pendingCount > 0 ? 'text-amber-400 hover:bg-amber-500/10' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+            'transition-colors'
+          )}
+          title="Approvals (Cmd+Shift+A)"
+        >
+          <ShieldCheck className="w-4 h-4" />
+          {pendingCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-amber-500 text-[10px] font-bold text-white rounded-full flex items-center justify-center">
+              {pendingCount > 9 ? '9+' : pendingCount}
+            </span>
+          )}
+        </button>
+
         {/* Command palette trigger */}
         <button
           onClick={onToggleCommand}

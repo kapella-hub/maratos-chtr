@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Layers } from 'lucide-react'
+import { Layers, FolderCode, Sparkles } from 'lucide-react'
 import ChatInput, { SessionCommand } from '@/components/ChatInput'
 import { ChatStream, ProjectCard } from '@/components/chat'
 import ToastContainer from '@/components/ToastContainer'
@@ -25,9 +25,11 @@ export default function ChatPage() {
     isOrchestrating,
     activeSubagents,
     inlineProject,
+    activeProjectContext,
     setSessionId,
     setAgentId,
     setCurrentModel,
+    setActiveProjectContext,
     addMessage,
     appendToLastMessage,
     setLastMessageAgent,
@@ -117,6 +119,8 @@ export default function ChatPage() {
           setLastMessageAgent(event.data as string)
         } else if (event.type === 'model' && event.data) {
           setCurrentModel(event.data as string)
+        } else if (event.type === 'project_context_active' && event.projectContext) {
+          setActiveProjectContext(event.projectContext)
         } else if (event.type === 'thinking') {
           setThinking(event.data as boolean)
         } else if (event.type === 'model_thinking') {
@@ -234,7 +238,7 @@ export default function ChatPage() {
       setAbortController(null)
       clearSubagents()
     }
-  }, [agentId, sessionId, addMessage, appendToLastMessage, setSessionId, setLastMessageAgent, setCurrentModel, setStreaming, setThinking, setModelThinking, setCurrentThinkingBlock, setLastMessageThinking, setOrchestrating, updateSubagent, clearSubagents, setAbortController, setProjectStatus, setProjectPlan, updateProjectTask, addProjectEvent, setProjectError, addCanvasArtifact, addToast])
+  }, [agentId, sessionId, addMessage, appendToLastMessage, setSessionId, setLastMessageAgent, setCurrentModel, setActiveProjectContext, setStreaming, setThinking, setModelThinking, setCurrentThinkingBlock, setLastMessageThinking, setOrchestrating, updateSubagent, clearSubagents, setAbortController, setProjectStatus, setProjectPlan, updateProjectTask, addProjectEvent, setProjectError, addCanvasArtifact, addToast])
 
   // Project action handlers
   const handleProjectApprove = useCallback(async () => {
@@ -381,6 +385,23 @@ export default function ChatPage() {
             className="h-full bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500"
             style={{ animation: 'progress 1.5s ease-in-out infinite', width: '100%' }}
           />
+        </div>
+      )}
+
+      {/* Active Project Context Indicator */}
+      {activeProjectContext && (
+        <div className="max-w-3xl mx-auto w-full px-4 pt-2">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-sm">
+            <FolderCode className="w-4 h-4 text-primary" />
+            <span className="text-muted-foreground">Project:</span>
+            <span className="font-medium text-foreground">{activeProjectContext.name}</span>
+            {activeProjectContext.auto_detected && (
+              <span className="flex items-center gap-1 text-xs text-primary ml-auto">
+                <Sparkles className="w-3 h-3" />
+                auto-detected
+              </span>
+            )}
+          </div>
         </div>
       )}
 

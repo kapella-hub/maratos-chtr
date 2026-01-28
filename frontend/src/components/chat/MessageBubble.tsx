@@ -2,6 +2,7 @@ import { useState, useMemo, Suspense, lazy } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import { User, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Brain } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
@@ -9,9 +10,86 @@ import CodeBlock, { InlineCode } from '@/components/CodeBlock'
 import type { ChatMessage } from '@/stores/chat'
 import type { ThinkingBlock, ThinkingStep } from '@/lib/api'
 
+/**
+ * Sanitization schema for HTML rendering.
+ *
+ * Security Policy:
+ * - Whitelist approach: only explicitly allowed tags/attributes pass through
+ * - Scripts, iframes, style tags, and event handlers are ALWAYS blocked
+ * - Links are forced to open in new tabs with noopener/noreferrer
+ *
+ * Allowed tags:
+ * - Text: p, b, i, strong, em, u, s, mark, small, sub, sup, br, hr
+ * - Lists: ul, ol, li, dl, dt, dd
+ * - Tables: table, thead, tbody, tfoot, tr, th, td, caption
+ * - Code: code, pre, kbd, samp, var
+ * - Links: a (with safe href protocols only)
+ * - Block: div, span, blockquote, details, summary, figure, figcaption
+ * - Headings: h1-h6
+ *
+ * Explicitly BLOCKED (security):
+ * - script, iframe, object, embed, style, link, meta, base, form, input
+ * - All on* event handler attributes
+ * - javascript:, vbscript:, data: URLs (except safe image data URIs)
+ */
+const sanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [
+    // Text structure
+    'p', 'br', 'hr',
+    // Text formatting
+    'b', 'i', 'strong', 'em', 'u', 's', 'mark', 'small', 'sub', 'sup',
+    // Lists
+    'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+    // Tables
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption',
+    // Code
+    'code', 'pre', 'kbd', 'samp', 'var',
+    // Links
+    'a',
+    // Block elements
+    'div', 'span', 'blockquote',
+    // Headings
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    // Details/summary
+    'details', 'summary',
+    // Figure
+    'figure', 'figcaption',
+    // Images (for inline base64 only, URLs validated)
+    'img',
+  ],
+  attributes: {
+    ...defaultSchema.attributes,
+    '*': ['className', 'id', 'title', 'lang', 'dir'],
+    a: ['href', 'target', 'rel'],
+    img: ['src', 'alt', 'width', 'height'],
+    td: ['colSpan', 'rowSpan'],
+    th: ['colSpan', 'rowSpan', 'scope'],
+    ol: ['start', 'type', 'reversed'],
+    li: ['value'],
+    details: ['open'],
+    code: ['className'],
+    pre: ['className'],
+    span: ['className', 'style'],
+    div: ['className', 'style'],
+  },
+  protocols: {
+    href: ['http', 'https', 'mailto'],
+    src: ['http', 'https', 'data'],
+  },
+  // Explicitly strip dangerous tags (belt and suspenders)
+  strip: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'textarea', 'button'],
+  // Prefix user-provided IDs to prevent DOM clobbering
+  clobberPrefix: 'user-content-',
+  clobber: ['name', 'id'],
+}
+
 // Lazy load heavy components
 const MermaidDiagram = lazy(() => import('@/components/MermaidDiagram'))
 const Chart = lazy(() => import('@/components/Chart'))
+
+// Import Mermaid helpers
+import { isMermaidContent } from '@/components/MermaidDiagram'
 
 interface MessageBubbleProps {
   message: ChatMessage
@@ -376,10 +454,13 @@ export default function MessageBubble({ message, isThinking, showTimestamp = tru
               </div>
             )}
 
-            {/* Markdown Content */}
+            {/* Markdown Content - with HTML sanitization */}
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeRaw]}
+              rehypePlugins={[
+                rehypeRaw,
+                [rehypeSanitize, sanitizeSchema],
+              ]}
               components={{
                 p: ({ children }) => <p className="my-2 leading-relaxed text-foreground">{children}</p>,
                 pre: ({ children }) => {
@@ -397,9 +478,9 @@ export default function MessageBubble({ message, isThinking, showTimestamp = tru
                     filePath = path.trim()
                   }
 
-                  // Handle mermaid diagrams
+                  // Handle mermaid diagrams (explicit language or auto-detected)
                   const isMermaid = language === 'mermaid' ||
-                    (!language && /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|journey)\b/i.test(codeContent.trim()))
+                    (!language && isMermaidContent(codeContent))
 
                   if (isMermaid) {
                     return (

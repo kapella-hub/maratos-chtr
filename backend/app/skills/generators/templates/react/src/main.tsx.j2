@@ -1,0 +1,21 @@
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+{% if use_react_router %}
+import { BrowserRouter } from 'react-router-dom'
+import { AppRoutes } from './routes'
+{% else %}
+import App from './App'
+{% endif %}
+import './index.css'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+{% if use_react_router %}
+    <BrowserRouter>
+      <AppRoutes />
+    </BrowserRouter>
+{% else %}
+    <App />
+{% endif %}
+  </StrictMode>,
+)

@@ -3,6 +3,7 @@
 from typing import Any
 
 from app.agents.base import Agent, AgentConfig
+from app.agents.tool_contract import get_full_tool_section
 
 
 DEVOPS_SYSTEM_PROMPT = """You are the DevOps agent, specialized in infrastructure, CI/CD, and deployment.
@@ -46,12 +47,7 @@ You handle infrastructure as code, containerization, CI/CD pipelines, and deploy
 - Use markdown headers (##, ###) for sections
 - Use bullet lists for multiple items
 
-## Filesystem Access
-
-**READ anywhere** — You can read files from any directory.
-**WRITE to allowed directories** — Writes allowed in `/Projects` and `~/maratos-workspace` by default.
-
-You can write infrastructure files directly to the project.
+{tool_section}
 
 ## Workflow
 
@@ -63,11 +59,9 @@ Read the application and understand:
 
 ### 2. IMPLEMENT
 Write infrastructure files directly to the project:
-```
-filesystem action=write path=/path/to/project/Dockerfile content="..."
-filesystem action=write path=/path/to/project/docker-compose.yml content="..."
-filesystem action=write path=/path/to/project/.github/workflows/deploy.yml content="..."
-```
+<tool_call>{{"tool": "filesystem", "args": {{"action": "write", "path": "/path/to/project/Dockerfile", "content": "..."}}}}</tool_call>
+<tool_call>{{"tool": "filesystem", "args": {{"action": "write", "path": "/path/to/project/docker-compose.yml", "content": "..."}}}}</tool_call>
+<tool_call>{{"tool": "filesystem", "args": {{"action": "write", "path": "/path/to/project/.github/workflows/deploy.yml", "content": "..."}}}}</tool_call>
 
 ### 3. VALIDATE
 1. Lint Dockerfiles and Terraform
@@ -132,37 +126,37 @@ jobs:
       - name: Deploy
         run: ./deploy.sh
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{{{ secrets.AWS_ACCESS_KEY_ID }}}}
+          AWS_SECRET_ACCESS_KEY: ${{{{ secrets.AWS_SECRET_ACCESS_KEY }}}}
 ```
 
 ### Terraform Module
 ```hcl
-module "app" {
+module "app" {{
   source = "./modules/ecs-service"
 
   name        = "my-app"
   environment = var.environment
-  
+
   container_image = var.container_image
   container_port  = 8000
-  
+
   cpu    = 256
   memory = 512
-  
+
   desired_count = var.environment == "prod" ? 3 : 1
-  
+
   health_check_path = "/health"
-  
-  environment_variables = {
+
+  environment_variables = {{
     DATABASE_URL = var.database_url
     REDIS_URL    = var.redis_url
-  }
-  
-  secrets = {
+  }}
+
+  secrets = {{
     API_KEY = aws_secretsmanager_secret.api_key.arn
-  }
-}
+  }}
+}}
 ```
 
 ## Security Checklist
@@ -219,6 +213,10 @@ class DevOpsAgent(Agent):
     """DevOps agent for infrastructure and deployment."""
 
     def __init__(self) -> None:
+        # Inject tool section into prompt
+        tool_section = get_full_tool_section("devops")
+        prompt = DEVOPS_SYSTEM_PROMPT.format(tool_section=tool_section)
+
         super().__init__(
             AgentConfig(
                 id="devops",
@@ -227,7 +225,7 @@ class DevOpsAgent(Agent):
                 icon="🚀",
                 model="",  # Inherit from settings
                 temperature=0.3,
-                system_prompt=DEVOPS_SYSTEM_PROMPT,
+                system_prompt=prompt,
                 tools=["filesystem", "shell", "kiro"],
             )
         )

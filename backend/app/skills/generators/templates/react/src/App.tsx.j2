@@ -1,0 +1,49 @@
+import { useState, useEffect } from 'react'
+
+interface HealthStatus {
+  status: string
+  service: string
+  version: string
+  timestamp: string
+}
+
+function App() {
+  const [health, setHealth] = useState<HealthStatus | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch('/api/health')
+      .then(res => res.json())
+      .then(data => setHealth(data))
+      .catch(err => setError(err.message))
+  }, [])
+
+  return (
+    <div className="{% if use_tailwind %}min-h-screen bg-gray-100 flex items-center justify-center{% else %}app{% endif %}">
+      <div className="{% if use_tailwind %}bg-white rounded-lg shadow-lg p-8 max-w-md w-full{% else %}container{% endif %}">
+        <h1 className="{% if use_tailwind %}text-3xl font-bold text-gray-800 mb-4{% else %}title{% endif %}">
+          {{ name }}
+        </h1>
+        <p className="{% if use_tailwind %}text-gray-600 mb-6{% else %}description{% endif %}">
+          {{ description }}
+        </p>
+
+        {error ? (
+          <div className="{% if use_tailwind %}bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded{% else %}error{% endif %}">
+            Error: {error}
+          </div>
+        ) : health ? (
+          <div className="{% if use_tailwind %}bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded{% else %}status{% endif %}">
+            <p><strong>Status:</strong> {health.status}</p>
+            <p><strong>Service:</strong> {health.service}</p>
+            <p><strong>Version:</strong> {health.version}</p>
+          </div>
+        ) : (
+          <p className="{% if use_tailwind %}text-gray-500{% else %}loading{% endif %}">Loading...</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export default App

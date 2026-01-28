@@ -1,0 +1,214 @@
+# Project Bootstrap - React
+# Creates a modern React application with TypeScript and Vite
+
+id: project-bootstrap-react
+name: Bootstrap React Project
+description: Creates a new React application with TypeScript, Vite, and modern tooling
+version: "1.0.0"
+author: MaratOS
+
+task_types:
+  - bootstrap_project
+
+tags:
+  - javascript
+  - typescript
+  - react
+  - frontend
+  - vite
+
+triggers:
+  - create react
+  - new react project
+  - bootstrap react
+  - start react app
+  - create frontend
+
+inputs:
+  - name: project_name
+    type: string
+    description: Name of the project
+    required: true
+    validation: "^[a-z][a-z0-9-]*$"
+
+  - name: workdir
+    type: path
+    description: Directory to create project in
+    required: true
+
+  - name: styling
+    type: string
+    description: "Styling solution (tailwind, css-modules, styled-components)"
+    default: tailwind
+
+  - name: include_router
+    type: boolean
+    description: Include React Router
+    default: true
+
+  - name: include_state
+    type: boolean
+    description: Include state management (Zustand)
+    default: true
+
+outputs:
+  - name: project_path
+    type: path
+    description: Path to the created project
+
+  - name: dev_url
+    type: string
+    description: URL for dev server
+
+produces:
+  - name: app_entry
+    type: code
+    path_template: "{{workdir}}/{{project_name}}/src/App.tsx"
+    description: Main React component
+
+  - name: package_json
+    type: config
+    path_template: "{{workdir}}/{{project_name}}/package.json"
+    description: Node.js package configuration
+
+  - name: vite_config
+    type: config
+    path_template: "{{workdir}}/{{project_name}}/vite.config.ts"
+    description: Vite build configuration
+
+requires_tools:
+  - kiro
+  - filesystem
+  - shell
+  - npm
+
+quality_gates:
+  - id: builds
+    type: command_success
+    command: "cd {{workdir}}/{{project_name}} && npm run build"
+    description: Project builds successfully
+
+  - id: lint_passes
+    type: command_success
+    command: "cd {{workdir}}/{{project_name}} && npm run lint"
+    description: ESLint passes
+
+  - id: types_check
+    type: command_success
+    command: "cd {{workdir}}/{{project_name}} && npm run typecheck"
+    description: TypeScript type checking passes
+
+system_context: |
+  You are creating a modern React application.
+
+  Standards:
+  - Use Vite as build tool
+  - TypeScript required (strict mode)
+  - Component structure: src/components/, src/pages/, src/hooks/
+  - Use named exports
+  - Functional components only
+  - Include ESLint + Prettier config
+  - Include Vitest for testing
+
+  Project structure:
+  ```
+  {{project_name}}/
+    src/
+      App.tsx
+      main.tsx
+      components/
+      pages/
+      hooks/
+      lib/
+      styles/
+    public/
+    tests/
+    package.json
+    vite.config.ts
+    tsconfig.json
+    .eslintrc.cjs
+    .prettierrc
+    README.md
+  ```
+
+quality_checklist:
+  - TypeScript strict mode enabled
+  - ESLint configured correctly
+  - Vite dev server starts
+  - Production build succeeds
+  - No TypeScript errors
+
+workflow:
+  - name: scaffold_project
+    action: shell
+    description: Create Vite project scaffold
+    params:
+      command: |
+        cd {{workdir}} && \
+        npm create vite@latest {{project_name}} -- --template react-ts
+      workdir: "{{workdir}}"
+
+  - name: install_deps
+    action: shell
+    description: Install dependencies
+    params:
+      command: |
+        cd {{workdir}}/{{project_name}} && \
+        npm install
+      workdir: "{{workdir}}/{{project_name}}"
+
+  - name: add_tailwind
+    action: shell
+    condition: "styling == tailwind"
+    description: Add Tailwind CSS
+    params:
+      command: |
+        cd {{workdir}}/{{project_name}} && \
+        npm install -D tailwindcss postcss autoprefixer && \
+        npx tailwindcss init -p
+      workdir: "{{workdir}}/{{project_name}}"
+
+  - name: add_router
+    action: shell
+    condition: "include_router == true"
+    description: Add React Router
+    params:
+      command: |
+        cd {{workdir}}/{{project_name}} && \
+        npm install react-router-dom
+      workdir: "{{workdir}}/{{project_name}}"
+
+  - name: add_state
+    action: shell
+    condition: "include_state == true"
+    description: Add Zustand for state management
+    params:
+      command: |
+        cd {{workdir}}/{{project_name}} && \
+        npm install zustand
+      workdir: "{{workdir}}/{{project_name}}"
+
+  - name: customize_structure
+    action: kiro_architect
+    description: Create proper component structure and example pages
+    params:
+      task: |
+        Customize the React project '{{project_name}}' with:
+        - Component structure in src/components/
+        - Example pages if router is included
+        - Custom hooks in src/hooks/
+        - Configure Tailwind if selected
+        - Add proper TypeScript paths
+        - Update App.tsx with router setup if included
+      workdir: "{{workdir}}/{{project_name}}"
+
+  - name: verify_build
+    action: shell
+    description: Verify project builds
+    params:
+      command: "cd {{workdir}}/{{project_name}} && npm run build"
+      workdir: "{{workdir}}/{{project_name}}"
+
+retry_policy:
+  max_attempts: 2
+  backoff_seconds: 5.0

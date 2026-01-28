@@ -1,0 +1,228 @@
+# Dockerize and Compose
+# Adds Docker and docker-compose configuration to an existing project
+
+id: dockerize-and-compose
+name: Dockerize and Compose
+description: Adds Dockerfile and docker-compose.yaml to containerize an existing project
+version: "1.0.0"
+author: MaratOS
+
+task_types:
+  - dockerize
+
+tags:
+  - docker
+  - containers
+  - devops
+  - compose
+
+triggers:
+  - dockerize
+  - add docker
+  - containerize
+  - docker compose
+  - add dockerfile
+
+inputs:
+  - name: workdir
+    type: path
+    description: Project directory to dockerize
+    required: true
+
+  - name: project_type
+    type: string
+    description: "Type of project (python, node, go, static)"
+    required: true
+
+  - name: port
+    type: number
+    description: Port the application listens on
+    default: 8000
+
+  - name: include_db
+    type: boolean
+    description: Include database service in compose
+    default: false
+
+  - name: db_type
+    type: string
+    description: "Database type (postgres, mysql, redis)"
+    default: postgres
+
+outputs:
+  - name: dockerfile_path
+    type: path
+    description: Path to created Dockerfile
+
+  - name: compose_path
+    type: path
+    description: Path to docker-compose.yaml
+
+produces:
+  - name: dockerfile
+    type: docker
+    path_template: "{{workdir}}/Dockerfile"
+    description: Multi-stage Dockerfile
+
+  - name: compose
+    type: docker
+    path_template: "{{workdir}}/docker-compose.yaml"
+    description: Docker Compose configuration
+
+  - name: dockerignore
+    type: config
+    path_template: "{{workdir}}/.dockerignore"
+    description: Docker ignore file
+
+requires_tools:
+  - kiro
+  - filesystem
+  - shell
+  - docker
+
+quality_gates:
+  - id: dockerfile_valid
+    type: command_success
+    command: "docker build -t test-build {{workdir}}"
+    description: Dockerfile builds successfully
+    timeout_seconds: 600
+
+  - id: compose_valid
+    type: command_success
+    command: "cd {{workdir}} && docker compose config"
+    description: docker-compose.yaml is valid
+
+system_context: |
+  You are adding Docker configuration to a project.
+
+  Best practices:
+  - Use multi-stage builds for smaller images
+  - Don't run as root in containers
+  - Use specific version tags, not :latest
+  - Include health checks
+  - Use .dockerignore to exclude unnecessary files
+  - Set proper environment variables
+  - Use build cache effectively
+
+  For Python projects:
+  - Base on python:3.11-slim
+  - Install dependencies first (cache layer)
+  - Use gunicorn/uvicorn for production
+
+  For Node projects:
+  - Base on node:20-slim
+  - Use npm ci for reproducible builds
+  - Run as node user
+
+  Compose structure:
+  - Use version 3.8+
+  - Define networks
+  - Use volumes for data persistence
+  - Include healthchecks
+  - Use environment files
+
+quality_checklist:
+  - Dockerfile builds without errors
+  - Image size is optimized
+  - No secrets in image
+  - Proper user permissions
+  - Health checks configured
+
+workflow:
+  - name: analyze_project
+    action: kiro_prompt
+    description: Analyze project structure for Docker configuration
+    params:
+      task: |
+        Analyze the project at {{workdir}} to determine:
+        1. Entry point file
+        2. Dependencies file (requirements.txt, package.json, etc.)
+        3. Build commands needed
+        4. Environment variables required
+        5. Ports to expose
+
+        Project type: {{project_type}}
+
+  - name: create_dockerfile
+    action: kiro_architect
+    description: Create optimized Dockerfile
+    params:
+      task: |
+        Create a production-ready Dockerfile for this {{project_type}} project.
+
+        Requirements:
+        - Multi-stage build
+        - Port: {{port}}
+        - Include health check
+        - Optimize for cache
+        - Run as non-root user
+      workdir: "{{workdir}}"
+
+  - name: create_dockerignore
+    action: filesystem
+    description: Create .dockerignore
+    params:
+      action: write
+      path: "{{workdir}}/.dockerignore"
+      content: |
+        # Git
+        .git
+        .gitignore
+
+        # IDE
+        .idea/
+        .vscode/
+        *.swp
+
+        # Python
+        __pycache__/
+        *.py[cod]
+        .venv/
+        venv/
+        .pytest_cache/
+
+        # Node
+        node_modules/
+        npm-debug.log
+
+        # Build artifacts
+        dist/
+        build/
+        *.egg-info/
+
+        # Tests
+        tests/
+        coverage/
+
+        # Docker
+        Dockerfile
+        docker-compose*.yaml
+
+  - name: create_compose
+    action: kiro_architect
+    description: Create docker-compose.yaml
+    params:
+      task: |
+        Create docker-compose.yaml for development and production.
+
+        Services:
+        - app: The main application (port {{port}})
+        {{#if include_db}}- db: {{db_type}} database{{/if}}
+
+        Include:
+        - Health checks
+        - Volume mounts for dev
+        - Environment variables
+        - Proper networking
+      workdir: "{{workdir}}"
+
+  - name: validate_docker
+    action: shell
+    description: Validate Docker configuration
+    params:
+      command: "cd {{workdir}} && docker compose config"
+      workdir: "{{workdir}}"
+
+retry_policy:
+  max_attempts: 2
+  backoff_seconds: 10.0

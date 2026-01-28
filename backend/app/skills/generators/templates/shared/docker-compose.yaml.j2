@@ -1,0 +1,88 @@
+version: "3.8"
+
+services:
+{% if has_backend %}
+  backend:
+    build:
+      context: {% if is_fullstack %}./backend{% else %}.{% endif %}
+
+      dockerfile: Dockerfile
+    ports:
+      - "{{ backend_port }}:{{ backend_port }}"
+    environment:
+      - DEBUG=false
+{% if has_database %}
+{% if database == "postgres" %}
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/{{ name }}
+{% elif database == "mysql" %}
+      - DATABASE_URL=mysql+aiomysql://root:root@db:3306/{{ name }}
+{% else %}
+      - DATABASE_URL=sqlite+aiosqlite:///./data.db
+{% endif %}
+{% endif %}
+{% if has_auth and auth_mode == "jwt" %}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+{% endif %}
+{% if has_database and database != "sqlite" %}
+    depends_on:
+      db:
+        condition: service_healthy
+{% endif %}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:{{ backend_port }}/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+{% endif %}
+
+{% if has_frontend %}
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+{% if has_backend %}
+    depends_on:
+      - backend
+{% endif %}
+{% endif %}
+
+{% if has_database and database == "postgres" %}
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB={{ name }}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+{% elif has_database and database == "mysql" %}
+  db:
+    image: mysql:8
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE={{ name }}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+{% endif %}
+
+{% if has_database and database != "sqlite" %}
+volumes:
+{% if database == "postgres" %}
+  postgres_data:
+{% elif database == "mysql" %}
+  mysql_data:
+{% endif %}
+{% endif %}

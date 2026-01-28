@@ -571,9 +571,183 @@ class Agent:
                 self._current_thinking_session = None
 
 
-    async def run_tool(self, tool_id: str, **kwargs: Any) -> ToolResult:
-        """Run a specific tool."""
-        return await tool_registry.execute(tool_id, **kwargs)
+    async def run_tool(
+        self,
+        tool_id: str,
+        session_id: str | None = None,
+        task_id: str | None = None,
+        **kwargs: Any,
+    ) -> ToolResult:
+        """Run a specific tool with guardrails enforcement.
+
+        Args:
+            tool_id: The tool to execute
+            session_id: Optional session ID for tracking
+            task_id: Optional task ID for tracking
+            **kwargs: Tool parameters
+
+        Returns:
+            ToolResult from the tool execution
+        """
+        from app.tools.executor import tool_executor
+
+        # Use tool_executor which enforces guardrails
+        return await tool_executor.execute(
+            tool_id=tool_id,
+            session_id=session_id,
+            task_id=task_id,
+            agent_id=self.id,
+            **kwargs,
+        )
+
+    async def chat_with_tools(
+        self,
+        messages: list[Message],
+        context: dict[str, Any] | None = None,
+        session_id: str | None = None,
+        task_id: str | None = None,
+    ) -> AsyncIterator[str]:
+        """Chat with agent, executing tool calls in a loop.
+
+        This method handles the multi-step tool execution loop:
+        1. LLM emits response (may contain tool calls)
+        2. System parses and executes tool calls
+        3. System feeds results back to LLM
+        4. Repeat until LLM emits final answer (no tool calls)
+
+        Yields chunks including special events:
+        - __TOOL_CALL__:{json} - Tool call detected
+        - __TOOL_RESULT__:{json} - Tool execution result
+        - __TOOL_ERROR__:{json} - Tool execution error
+        - Regular content chunks
+
+        Args:
+            messages: Conversation messages
+            context: Optional context (workspace, memory, etc.)
+            session_id: Session ID for audit logging
+            task_id: Task ID for audit logging
+        """
+        from app.tools.interpreter import (
+            ToolInterpreter,
+            InterpreterContext,
+            ToolPolicy,
+            has_tool_calls,
+        )
+
+        # Create interpreter with policy based on agent's allowed tools
+        workspace = context.get("workspace") if context else None
+        policy = ToolPolicy(
+            allowed_tools=self.config.tools if self.config.tools else None,
+            max_iterations=6,
+            per_call_timeout_seconds=120.0,
+            workspace_path=workspace,
+        )
+
+        interpreter_context = InterpreterContext(
+            session_id=session_id,
+            task_id=task_id,
+            agent_id=self.id,
+            policy=policy,
+        )
+        interpreter = ToolInterpreter(context=interpreter_context)
+
+        # Working copy of messages for the loop
+        working_messages = list(messages)
+        accumulated_response = ""
+
+        while True:
+            # Check iteration limit
+            can_continue, error = interpreter.check_iteration_limit()
+            if not can_continue:
+                yield f"__TOOL_ERROR__:{json.dumps({'error': error})}"
+                yield f"\n\n⚠️ {error}. Returning partial response.\n\n"
+                # Yield accumulated content without tool blocks
+                clean_content = interpreter.strip_tool_blocks(accumulated_response)
+                if clean_content:
+                    yield clean_content
+                return
+
+            interpreter.increment_iteration()
+
+            # Collect full response from this iteration
+            iteration_response = ""
+            async for chunk in self.chat(working_messages, context):
+                # Pass through thinking events
+                if chunk.startswith("__THINKING"):
+                    yield chunk
+                    continue
+                iteration_response += chunk
+                # Stream non-tool content immediately
+                if not has_tool_calls(chunk):
+                    yield chunk
+
+            accumulated_response = iteration_response
+
+            # Check for tool calls
+            if not interpreter.has_tool_calls(iteration_response):
+                # No tool calls - we're done
+                logger.info(f"Agent {self.id} completed after {interpreter_context.iteration} iterations")
+                return
+
+            # Parse tool calls
+            invocations = interpreter.parse(iteration_response)
+
+            if not invocations:
+                # No valid invocations found
+                return
+
+            # Check if repair is needed
+            needs_repair, broken = interpreter.needs_repair(invocations)
+            if needs_repair and broken:
+                interpreter.mark_repair_attempted()
+                repair_prompt = interpreter.get_repair_prompt(broken)
+                working_messages.append(Message(role="assistant", content=iteration_response))
+                working_messages.append(Message(role="user", content=repair_prompt))
+                yield f"__TOOL_ERROR__:{json.dumps({'error': 'Invalid JSON, requesting repair', 'raw': broken.raw_json[:200]})}"
+                continue
+
+            # Emit tool call events
+            for inv in invocations:
+                if not inv.parse_error:
+                    # Redact sensitive args for the event
+                    safe_args = {k: v if k not in ("content", "password", "token") else "[REDACTED]"
+                                for k, v in inv.args.items()}
+                    yield f"__TOOL_CALL__:{json.dumps({'tool': inv.tool_id, 'args': safe_args})}"
+
+            # Execute tools
+            results = await interpreter.execute(invocations)
+
+            # Emit result events
+            for result in results:
+                event_data = {
+                    "tool": result.invocation.tool_id,
+                    "success": result.result.success,
+                    "duration_ms": round(result.duration_ms, 2),
+                }
+                if result.result.error:
+                    event_data["error"] = result.result.error
+                else:
+                    # Include truncated output summary
+                    output = result.result.output
+                    event_data["output_length"] = len(output)
+                    if len(output) <= 200:
+                        event_data["output_preview"] = output
+                    else:
+                        event_data["output_preview"] = output[:200] + "..."
+
+                yield f"__TOOL_RESULT__:{json.dumps(event_data)}"
+
+            # Format results for next LLM turn
+            results_message = interpreter.format_results(results)
+
+            # Add assistant response and tool results to messages
+            working_messages.append(Message(role="assistant", content=iteration_response))
+            working_messages.append(Message(role="user", content=results_message))
+
+            logger.info(
+                f"Agent {self.id} iteration {interpreter_context.iteration}: "
+                f"{len(invocations)} tool calls executed"
+            )
 
 
 def _kiro_model_name(model: str) -> str:

@@ -1,0 +1,59 @@
+"""Application configuration using pydantic-settings."""
+
+from functools import lru_cache
+from typing import List
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # Application
+    app_name: str = "{{ name }}"
+    debug: bool = False
+    environment: str = "development"
+
+    # Server
+    host: str = "0.0.0.0"
+    port: int = {{ backend_port }}
+
+    # CORS
+    cors_origins: List[str] = ["http://localhost:{{ frontend_port }}", "http://localhost:3000"]
+
+{% if has_database %}
+    # Database
+{% if use_async_db %}
+    database_url: str = "{{ db_async_url }}"
+{% else %}
+    database_url: str = "{{ db_url }}"
+{% endif %}
+{% endif %}
+
+{% if has_auth %}
+{% if auth_mode == "jwt" %}
+    # JWT Authentication
+    jwt_secret_key: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 30
+{% elif auth_mode == "session" %}
+    # Session Authentication
+    session_secret_key: str = "change-me-in-production"
+    session_expire_hours: int = 24
+{% endif %}
+{% endif %}
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Get cached settings instance."""
+    return Settings()
+
+
+settings = get_settings()

@@ -1,0 +1,31 @@
+"""Pytest configuration and fixtures."""
+
+from typing import AsyncIterator
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
+{% if has_database %}
+from app.database import Base, engine, async_session_factory
+{% endif %}
+
+
+@pytest.fixture
+async def client() -> AsyncIterator[AsyncClient]:
+    """Async HTTP client for testing."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+{% if has_database %}
+@pytest.fixture(autouse=True)
+async def setup_database() -> AsyncIterator[None]:
+    """Set up and tear down test database."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+{% endif %}

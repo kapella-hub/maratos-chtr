@@ -1,0 +1,206 @@
+# Documentation and Release Notes
+# Generates project documentation and changelog
+
+id: docs-release-notes
+name: Documentation and Release Notes
+description: Generates API documentation, README, and release notes
+version: "1.0.0"
+author: MaratOS
+
+task_types:
+  - documentation
+
+tags:
+  - documentation
+  - readme
+  - changelog
+  - api-docs
+  - release
+
+triggers:
+  - add documentation
+  - generate docs
+  - add readme
+  - create changelog
+  - release notes
+  - document api
+
+inputs:
+  - name: workdir
+    type: path
+    description: Project directory
+    required: true
+
+  - name: project_type
+    type: string
+    description: "Project type (python, node)"
+    required: true
+
+  - name: version
+    type: string
+    description: Version for release notes
+    default: "1.0.0"
+
+  - name: include_api_docs
+    type: boolean
+    description: Generate API documentation
+    default: true
+
+  - name: include_changelog
+    type: boolean
+    description: Generate CHANGELOG.md
+    default: true
+
+outputs:
+  - name: readme_path
+    type: path
+    description: Path to README.md
+
+  - name: changelog_path
+    type: path
+    description: Path to CHANGELOG.md
+
+produces:
+  - name: readme
+    type: documentation
+    path_template: "{{workdir}}/README.md"
+    description: Project README
+
+  - name: changelog
+    type: documentation
+    path_template: "{{workdir}}/CHANGELOG.md"
+    required: false
+
+  - name: api_docs
+    type: documentation
+    path_template: "{{workdir}}/docs/"
+    required: false
+
+requires_tools:
+  - kiro
+  - filesystem
+
+quality_gates:
+  - id: readme_exists
+    type: file_exists
+    file_path: "{{workdir}}/README.md"
+    description: README.md exists
+
+  - id: readme_complete
+    type: command_success
+    command: "grep -q '## Installation' {{workdir}}/README.md && grep -q '## Usage' {{workdir}}/README.md"
+    description: README has required sections
+
+system_context: |
+  You are generating project documentation.
+
+  README structure:
+  1. Project title and badges
+  2. Description
+  3. Features
+  4. Requirements
+  5. Installation
+  6. Quick Start
+  7. Usage Examples
+  8. API Reference (if applicable)
+  9. Configuration
+  10. Testing
+  11. Deployment
+  12. Contributing
+  13. License
+
+  CHANGELOG format (Keep a Changelog):
+  - All notable changes
+  - Group by: Added, Changed, Deprecated, Removed, Fixed, Security
+  - Date format: YYYY-MM-DD
+  - Link to diffs between versions
+
+  API documentation:
+  - Use OpenAPI/Swagger for REST APIs
+  - Include request/response examples
+  - Document error codes
+  - Show authentication requirements
+
+quality_checklist:
+  - README has all required sections
+  - Installation steps are complete
+  - Usage examples work
+  - API documentation is accurate
+  - Links are valid
+
+workflow:
+  - name: analyze_project
+    action: kiro_prompt
+    description: Analyze project for documentation
+    params:
+      task: |
+        Analyze the project at {{workdir}} to gather:
+        1. Project name and purpose
+        2. Main features
+        3. Installation requirements
+        4. Configuration options
+        5. API endpoints (if any)
+        6. Test commands
+        7. Build commands
+
+  - name: generate_readme
+    action: kiro_architect
+    description: Generate README.md
+    params:
+      task: |
+        Generate a comprehensive README.md for this {{project_type}} project.
+
+        Include:
+        - Clear project description
+        - Feature list
+        - Installation instructions
+        - Quick start guide
+        - Usage examples
+        - Configuration reference
+        - Testing instructions
+        - Contributing guidelines
+
+        Make it professional and welcoming.
+      workdir: "{{workdir}}"
+
+  - name: generate_changelog
+    action: kiro_architect
+    condition: "include_changelog == true"
+    description: Generate CHANGELOG.md
+    params:
+      task: |
+        Create a CHANGELOG.md following Keep a Changelog format.
+
+        Version: {{version}}
+
+        Analyze git history if available, or create initial release entry.
+
+        Include:
+        - [{{version}}] - current date
+        - Added: New features
+        - Changed: Changes in existing functionality
+        - Fixed: Bug fixes
+      workdir: "{{workdir}}"
+
+  - name: generate_api_docs
+    action: kiro_architect
+    condition: "include_api_docs == true"
+    description: Generate API documentation
+    params:
+      task: |
+        Generate API documentation for the project.
+
+        For Python/FastAPI:
+        - Ensure OpenAPI schema is exposed
+        - Create docs/api.md with endpoint summaries
+
+        For Node/Express:
+        - Create OpenAPI spec if not present
+        - Document all routes
+
+        Include examples for each endpoint.
+      workdir: "{{workdir}}"
+
+retry_policy:
+  max_attempts: 2
+  backoff_seconds: 5.0

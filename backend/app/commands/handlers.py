@@ -133,7 +133,14 @@ Check for:
 
 
 def handle_project(args: str, context: dict[str, Any]) -> dict[str, Any]:
-    """Handle /project <name> command."""
+    """Handle /project <name> command.
+
+    Subcommands:
+    - /project - list all projects
+    - /project <name> - load project context
+    - /project ingest <name> - generate context pack
+    - /project search <name> <query> - search project code
+    """
     if not args:
         # List available projects
         projects = project_registry.list_all()
@@ -145,12 +152,35 @@ def handle_project(args: str, context: dict[str, Any]) -> dict[str, Any]:
 
         lines = ["**Available Projects:**\n"]
         for p in projects:
-            lines.append(f"- **{p.name}** - {p.description}")
+            has_pack = p.has_context_pack()
+            pack_status = " ✓" if has_pack else ""
+            stale = " (stale)" if has_pack and p.is_context_pack_stale() else ""
+            lines.append(f"- **{p.name}**{pack_status}{stale} - {p.description}")
             lines.append(f"  Path: `{p.path}`")
+
+        lines.append("\n**Commands:**")
+        lines.append("- `/project <name>` - Load project context")
+        lines.append("- `/project ingest <name>` - Generate/refresh context pack")
+        lines.append("- `/project search <name> <query>` - Search project code")
 
         return {"message": "\n".join(lines)}
 
-    project_name = args.strip().lower()
+    parts = args.strip().split(None, 2)
+    subcommand = parts[0].lower()
+
+    # Handle subcommands
+    if subcommand == "ingest":
+        if len(parts) < 2:
+            return {"error": "Usage: /project ingest <name>", "example": "/project ingest myapp"}
+        return _handle_project_ingest(parts[1])
+
+    if subcommand == "search":
+        if len(parts) < 3:
+            return {"error": "Usage: /project search <name> <query>", "example": "/project search myapp authenticate"}
+        return _handle_project_search(parts[1], parts[2])
+
+    # Load project
+    project_name = subcommand
     project = project_registry.get(project_name)
 
     if not project:
@@ -161,14 +191,166 @@ def handle_project(args: str, context: dict[str, Any]) -> dict[str, Any]:
             "hint": f"Create ~/.maratos/projects/{project_name}.yaml",
         }
 
-    # Load project context
+    # Load project context (uses context pack if available)
     context_text = project.get_context()
+
+    # Build status message
+    has_pack = project.has_context_pack()
+    if has_pack:
+        stale = project.is_context_pack_stale()
+        pack_status = "Context pack: ✓ loaded" + (" (stale - run `/project ingest` to refresh)" if stale else "")
+    else:
+        pack_status = "Context pack: not generated (run `/project ingest` for better understanding)"
 
     return {
         "project_loaded": project.name,
         "project_context": context_text,
-        "message": f"**Loaded project: {project.name}**\n\n{project.description}\n\nPath: `{project.path}`\n\nContext loaded with {len(project.conventions)} conventions and {len(project.patterns)} patterns.",
+        "message": f"**Loaded project: {project.name}**\n\n{project.description}\n\nPath: `{project.path}`\n\n{pack_status}\n\nContext loaded with {len(project.conventions)} conventions and {len(project.patterns)} patterns.",
     }
+
+
+def _handle_project_ingest(project_name: str) -> dict[str, Any]:
+    """Handle /project ingest <name> - generate context pack."""
+    from app.projects import (
+        generate_context_pack,
+        save_context_pack,
+        load_context_pack,
+        context_pack_is_stale,
+    )
+
+    project = project_registry.get(project_name.lower())
+    if not project:
+        available = [p.name for p in project_registry.list_all()]
+        return {
+            "error": f"Project '{project_name}' not found.",
+            "available": available,
+        }
+
+    project_path = Path(project.path).expanduser().resolve()
+    if not project_path.exists():
+        return {"error": f"Project path does not exist: {project.path}"}
+
+    try:
+        # Generate context pack
+        pack = generate_context_pack(str(project_path), project_name=project.name)
+        pack_path = save_context_pack(pack, project.name)
+
+        # Update registry metadata
+        project_registry.update_context_pack_metadata(
+            project.name,
+            pack.version,
+            pack.content_hash,
+            pack.generated_at,
+        )
+
+        # Build summary
+        lines = [
+            f"**Context pack generated for: {project.name}**\n",
+            f"**Language:** {pack.manifest.language}" + (f" ({pack.manifest.framework})" if pack.manifest.framework else ""),
+            "",
+        ]
+
+        if pack.manifest.run_command or pack.manifest.test_command:
+            lines.append("**Commands:**")
+            if pack.manifest.run_command:
+                lines.append(f"- Run: `{pack.manifest.run_command}`")
+            if pack.manifest.test_command:
+                lines.append(f"- Test: `{pack.manifest.test_command}`")
+            lines.append("")
+
+        lines.append(f"**Modules detected:** {len(pack.module_map)}")
+        lines.append(f"**Entry points:** {len(pack.entrypoints)}")
+        lines.append(f"**Dependencies:** {len(pack.manifest.dependencies)}")
+        lines.append("")
+        lines.append(f"Pack saved to: `{pack_path}`")
+        lines.append("\nUse `/project search {project.name} <query>` to search code.")
+
+        return {"message": "\n".join(lines)}
+
+    except Exception as e:
+        return {"error": f"Failed to generate context pack: {str(e)}"}
+
+
+def _handle_project_search(project_name: str, query: str) -> dict[str, Any]:
+    """Handle /project search <name> <query> - search project code."""
+    import asyncio
+    import subprocess
+    import json
+
+    project = project_registry.get(project_name.lower())
+    if not project:
+        available = [p.name for p in project_registry.list_all()]
+        return {
+            "error": f"Project '{project_name}' not found.",
+            "available": available,
+        }
+
+    project_path = Path(project.path).expanduser().resolve()
+    if not project_path.exists():
+        return {"error": f"Project path does not exist: {project.path}"}
+
+    # Run ripgrep search
+    cmd = [
+        "rg", "-n", "-i", "-C", "2",
+        "--glob", "!node_modules/**",
+        "--glob", "!.git/**",
+        "--glob", "!__pycache__/**",
+        "--glob", "!.venv/**",
+        "--glob", "!dist/**",
+        "--glob", "!build/**",
+        "--max-count", "5",  # Limit per file
+        query,
+        str(project_path),
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        output = result.stdout.strip()
+
+        if not output:
+            return {"message": f"**No matches found** for `{query}` in {project.name}"}
+
+        # Parse and format results
+        lines = [f"**Search results for `{query}` in {project.name}:**\n"]
+        lines.append("```")
+
+        # Make paths relative
+        for line in output.split("\n")[:50]:  # Limit output
+            if line.startswith(str(project_path)):
+                line = line[len(str(project_path)):].lstrip("/")
+            lines.append(line)
+
+        lines.append("```")
+
+        if len(output.split("\n")) > 50:
+            lines.append("\n*Results truncated. Use the API for full search.*")
+
+        return {"message": "\n".join(lines)}
+
+    except subprocess.TimeoutExpired:
+        return {"error": "Search timed out"}
+    except FileNotFoundError:
+        # ripgrep not installed, try grep
+        try:
+            result = subprocess.run(
+                ["grep", "-rn", "-i", "-C", "2", query, str(project_path)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            output = result.stdout.strip()
+            if not output:
+                return {"message": f"**No matches found** for `{query}` in {project.name}"}
+            return {"message": f"**Search results for `{query}` in {project.name}:**\n```\n{output[:3000]}\n```"}
+        except Exception as e:
+            return {"error": f"Search failed: {str(e)}"}
+    except Exception as e:
+        return {"error": f"Search failed: {str(e)}"}
 
 
 def handle_help(args: str, context: dict[str, Any]) -> dict[str, Any]:
@@ -251,10 +433,15 @@ def register_default_commands():
 
     command_registry.register(Command(
         name="project",
-        description="Load a project profile or list available",
-        usage="/project [name]",
+        description="Manage projects: load context, generate context pack, search code",
+        usage="/project [name|ingest|search] [args]",
         handler=handle_project,
-        examples=["/project", "/project sacs", "/project frontend"],
+        examples=[
+            "/project",
+            "/project myapp",
+            "/project ingest myapp",
+            "/project search myapp authenticate",
+        ],
     ))
 
     command_registry.register(Command(

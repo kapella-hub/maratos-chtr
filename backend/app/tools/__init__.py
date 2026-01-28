@@ -1,6 +1,18 @@
 """Tool system for MaratOS."""
 
 from app.tools.base import Tool, ToolResult, registry
+from app.tools.executor import tool_executor, ToolExecutor, ToolMetrics, ToolRateLimit
+from app.tools.interpreter import (
+    ToolInterpreter,
+    ToolInvocation,
+    ToolExecutionResult,
+    ToolPolicy,
+    InterpreterContext,
+    parse_tool_blocks,
+    has_tool_calls,
+    strip_tool_blocks,
+    format_tool_results_for_llm,
+)
 from app.tools.filesystem import FilesystemTool
 from app.tools.shell import ShellTool
 from app.tools.web import WebSearchTool, WebFetchTool
@@ -14,6 +26,19 @@ __all__ = [
     "Tool",
     "ToolResult",
     "registry",
+    "tool_executor",
+    "ToolExecutor",
+    "ToolMetrics",
+    "ToolRateLimit",
+    "ToolInterpreter",
+    "ToolInvocation",
+    "ToolExecutionResult",
+    "ToolPolicy",
+    "InterpreterContext",
+    "parse_tool_blocks",
+    "has_tool_calls",
+    "strip_tool_blocks",
+    "format_tool_results_for_llm",
     "FilesystemTool",
     "ShellTool",
     "WebSearchTool",

@@ -1,0 +1,46 @@
+{% if use_react_router %}
+import { Outlet, Link } from 'react-router-dom'
+{% endif %}
+
+export function Layout() {
+  return (
+    <div className="{% if use_tailwind %}min-h-screen flex flex-col{% else %}layout{% endif %}">
+      <header className="{% if use_tailwind %}bg-white shadow-sm{% else %}header{% endif %}">
+        <nav className="{% if use_tailwind %}max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between{% else %}nav{% endif %}">
+          <div className="{% if use_tailwind %}flex items-center{% else %}brand{% endif %}">
+{% if use_react_router %}
+            <Link to="/" className="{% if use_tailwind %}text-xl font-semibold text-gray-800{% else %}brand-link{% endif %}">
+              {{ name }}
+            </Link>
+{% else %}
+            <span className="{% if use_tailwind %}text-xl font-semibold text-gray-800{% else %}brand-text{% endif %}">
+              {{ name }}
+            </span>
+{% endif %}
+          </div>
+{% if use_react_router %}
+          <div className="{% if use_tailwind %}flex gap-4{% else %}nav-links{% endif %}">
+            <Link to="/" className="{% if use_tailwind %}text-gray-600 hover:text-gray-800{% else %}nav-link{% endif %}">
+              Home
+            </Link>
+          </div>
+{% endif %}
+        </nav>
+      </header>
+
+      <main className="{% if use_tailwind %}flex-1{% else %}main{% endif %}">
+{% if use_react_router %}
+        <Outlet />
+{% else %}
+        {/* Content goes here */}
+{% endif %}
+      </main>
+
+      <footer className="{% if use_tailwind %}bg-gray-50 border-t{% else %}footer{% endif %}">
+        <div className="{% if use_tailwind %}max-w-7xl mx-auto px-4 py-4 text-center text-gray-500 text-sm{% else %}footer-content{% endif %}">
+          {{ name }} &copy; {new Date().getFullYear()}
+        </div>
+      </footer>
+    </div>
+  )
+}

@@ -29,6 +29,8 @@ from app.database import Session as DBSession
 from app.database import get_db
 from app.subagents.runner import subagent_runner
 from app.subagents.manager import subagent_manager, TaskStatus
+from app.audit import audit_logger
+from app.projects.mention_detector import get_project_context_for_session
 
 logger = logging.getLogger(__name__)
 
@@ -428,6 +430,9 @@ async def chat(
     # Check for slash commands
     actual_message = chat_request.message
     project_context = None
+    project_name_for_context = None
+    project_auto_detected = False
+    explicit_project_from_command = None
     command_response = None
 
     command, args = command_registry.parse(chat_request.message)
@@ -460,6 +465,39 @@ async def chat(
         if "project_context" in result:
             project_context = result["project_context"]
 
+        # Track explicit project load from /project command
+        if "project_loaded" in result:
+            explicit_project_from_command = result["project_loaded"]
+            project_name_for_context = explicit_project_from_command
+
+    # Auto-detect project context if not explicitly set via command
+    if not project_context and not explicit_project_from_command:
+        (
+            project_name_for_context,
+            project_context,
+            project_auto_detected,
+        ) = get_project_context_for_session(
+            session_active_project=session.active_project_name,
+            message=chat_request.message,
+            explicit_project=explicit_project_from_command,
+        )
+
+        if project_context and project_auto_detected:
+            logger.info(f"Auto-detected project mention: {project_name_for_context}")
+
+    # Update session's active project if changed via command or auto-detection
+    new_active_project = explicit_project_from_command or (
+        project_name_for_context if project_auto_detected else None
+    )
+    if new_active_project and new_active_project != session.active_project_name:
+        try:
+            session.active_project_name = new_active_project
+            await db.commit()
+            logger.info(f"Set session active project to: {new_active_project}")
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to update session active project: {e}")
+            await db.rollback()
+
     # Add user message (original or expanded)
     user_message = Message(role="user", content=actual_message)
     messages.append(user_message)
@@ -481,12 +519,32 @@ async def chat(
 
     async def generate():
         """Generate streaming response."""
+        import time
+        start_time = time.time()
         full_response = ""
 
+        # Audit: log chat request
+        audit_logger.log_chat_request(
+            session_id=session.id,
+            message=actual_message,
+            agent_id=agent_id,
+            model=settings.default_model,
+        )
+
         # Yield session ID, agent info, and current model first
-        from app.config import settings
         current_model = settings.default_model or "claude-sonnet-4.5"
         yield f"data: {{\"session_id\": \"{session.id}\", \"agent\": \"{agent_id}\", \"model\": \"{current_model}\"}}\n\n"
+
+        # Emit project context metadata if project was loaded or auto-detected
+        if project_context and project_name_for_context:
+            project_event = {
+                "project_context": {
+                    "name": project_name_for_context,
+                    "auto_detected": project_auto_detected,
+                }
+            }
+            yield f"data: {json.dumps(project_event)}\n\n"
+            logger.debug(f"Emitted project context event: {project_name_for_context} (auto={project_auto_detected})")
 
         # Handle inline project actions (approve, pause, cancel, etc.)
         if chat_request.project_action:
@@ -691,8 +749,53 @@ async def chat(
         first_chunk = True
         in_model_thinking = False
         thinking_data = None  # Store thinking data for persistence
+        in_tool_execution = False  # Track tool execution state
+
+        # Determine if we should use tool execution loop
+        # Use chat_with_tools for agents with tools defined (except when using kiro internal tools)
+        use_tool_loop = bool(agent.config.tools) and context.get("enable_tool_loop", False)
+
         try:
-            async for chunk in agent.chat(messages, context):
+            # Choose chat method based on tool loop setting
+            if use_tool_loop:
+                chat_iterator = agent.chat_with_tools(
+                    messages, context,
+                    session_id=session.id,
+                    task_id=None,
+                )
+            else:
+                chat_iterator = agent.chat(messages, context)
+
+            async for chunk in chat_iterator:
+                # Handle tool execution events (from chat_with_tools)
+                if chunk.startswith("__TOOL_CALL__:"):
+                    if not in_tool_execution:
+                        in_tool_execution = True
+                        yield 'data: {"tool_executing": true}\n\n'
+                    try:
+                        tool_data = json.loads(chunk.split(":", 1)[1])
+                        yield f'data: {{"tool_call": {json.dumps(tool_data)}}}\n\n'
+                    except json.JSONDecodeError:
+                        pass
+                    continue
+                elif chunk.startswith("__TOOL_RESULT__:"):
+                    try:
+                        result_data = json.loads(chunk.split(":", 1)[1])
+                        yield f'data: {{"tool_result": {json.dumps(result_data)}}}\n\n'
+                    except json.JSONDecodeError:
+                        pass
+                    continue
+                elif chunk.startswith("__TOOL_ERROR__:"):
+                    try:
+                        error_data = json.loads(chunk.split(":", 1)[1])
+                        yield f'data: {{"tool_error": {json.dumps(error_data)}}}\n\n'
+                    except json.JSONDecodeError:
+                        pass
+                    if in_tool_execution:
+                        in_tool_execution = False
+                        yield 'data: {"tool_executing": false}\n\n'
+                    continue
+
                 # Handle structured thinking events (new format)
                 if chunk.startswith("__THINKING_START__:"):
                     in_model_thinking = True
@@ -745,6 +848,18 @@ async def chat(
             logger.error(f"Agent chat error: {e}", exc_info=True)
             escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
             yield f'data: {{"error": "{escaped_err}"}}\n\n'
+
+            # Audit: log chat error
+            duration_ms = (time.time() - start_time) * 1000
+            audit_logger.log_chat_response(
+                session_id=session.id,
+                agent_id=agent_id,
+                response_length=len(full_response),
+                duration_ms=duration_ms,
+                success=False,
+                error=str(e),
+                model=settings.default_model,
+            )
 
         # Auto-execute skill workflows if applicable
         try:
@@ -872,6 +987,14 @@ async def chat(
                     running_tasks.append((agent_id_spawn, task))
                     yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "task": "{escaped_task}", "status": "running"}}\n\n'
                     logger.info(f"Spawned {agent_id_spawn} with task_id {task.id}")
+
+                    # Audit: log agent spawn
+                    audit_logger.log_agent_spawn(
+                        session_id=session.id,
+                        task_id=task.id,
+                        agent_id=agent_id_spawn,
+                        spawn_reason=task_desc[:200],
+                    )
                 except Exception as e:
                     logger.error(f"Failed to spawn {agent_id_spawn}: {e}")
                     escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
@@ -933,23 +1056,28 @@ async def chat(
                     if current.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
                         completed_tasks.add(task.id)
                         logger.info(f"Subagent {agent_id_spawn} finished with status: {current.status}")
-                        
+
+                        # Calculate task duration
+                        task_duration_ms = 0.0
+                        if current.started_at and current.completed_at:
+                            task_duration_ms = (current.completed_at - current.started_at).total_seconds() * 1000
+
                         if current.status == TaskStatus.COMPLETED:
                             result_text = current.result.get("response", "") if current.result else ""
                             # Clean CLI artifacts and convert numbered lines to code blocks
                             result_text = clean_cli_output(result_text)
                             result_text = convert_numbered_lines_to_codeblock(result_text)
                             logger.info(f"Subagent {agent_id_spawn} response length: {len(result_text)}")
-                            
+
                             yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "completed"}}\n\n'
-                            
+
                             # Stream result
                             result_event = json.dumps({
                                 "subagent_result": agent_id_spawn,
                                 "content": result_text
                             })
                             yield f'data: {result_event}\n\n'
-                            
+
                             # Save to DB
                             async with db.begin():
                                 subagent_msg = DBMessage(
@@ -959,11 +1087,47 @@ async def chat(
                                     content=f"**[{agent_id_spawn.upper()}]**\n\n{result_text}",
                                 )
                                 db.add(subagent_msg)
+
+                            # Audit: log agent completion (success)
+                            goals_total = len(current.goals) if current.goals else 0
+                            goals_completed = sum(1 for g in current.goals if g.status.value == "completed") if current.goals else 0
+                            goals_failed = sum(1 for g in current.goals if g.status.value == "failed") if current.goals else 0
+                            audit_logger.log_agent_complete(
+                                session_id=session.id,
+                                task_id=task.id,
+                                agent_id=agent_id_spawn,
+                                duration_ms=task_duration_ms,
+                                success=True,
+                                goals_total=goals_total,
+                                goals_completed=goals_completed,
+                                goals_failed=goals_failed,
+                            )
                         else:
                             error = current.error or "Unknown error"
                             yield f'data: {{"subagent": "{agent_id_spawn}", "task_id": "{task.id}", "status": "failed", "error": "{error}"}}\n\n'
+
+                            # Audit: log agent completion (failure)
+                            audit_logger.log_agent_complete(
+                                session_id=session.id,
+                                task_id=task.id,
+                                agent_id=agent_id_spawn,
+                                duration_ms=task_duration_ms,
+                                success=False,
+                                error=error,
+                            )
             
             yield 'data: {"orchestrating": false}\n\n'
+
+        # Audit: log chat response
+        duration_ms = (time.time() - start_time) * 1000
+        audit_logger.log_chat_response(
+            session_id=session.id,
+            agent_id=agent_id,
+            response_length=len(full_response),
+            duration_ms=duration_ms,
+            success=True,
+            model=settings.default_model,
+        )
 
         yield "data: [DONE]\n\n"
 

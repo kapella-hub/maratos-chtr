@@ -24,8 +24,28 @@ class Project:
     dependencies: list[str] = field(default_factory=list)
     notes: str = ""
 
+    # Context pack metadata
+    context_pack_version: str = ""
+    context_pack_hash: str = ""
+    context_pack_generated_at: str = ""
+
     def get_context(self) -> str:
-        """Get formatted context for injection into prompts."""
+        """Get formatted context for injection into prompts.
+
+        If a context pack exists, uses the compact context from it.
+        Otherwise, falls back to basic project info.
+        """
+        # Try to use context pack if available
+        if self.context_pack_hash:
+            try:
+                from app.projects.context_pack import load_context_pack
+                pack = load_context_pack(self.name)
+                if pack:
+                    return pack.get_compact_context()
+            except ImportError:
+                pass
+
+        # Fall back to basic context
         lines = [
             f"## Project: {self.name}",
             f"**Path:** `{self.path}`",
@@ -63,6 +83,22 @@ class Project:
             lines.append("")
 
         return "\n".join(lines)
+
+    def has_context_pack(self) -> bool:
+        """Check if this project has a generated context pack."""
+        try:
+            from app.projects.context_pack import context_pack_exists
+            return context_pack_exists(self.name)
+        except ImportError:
+            return False
+
+    def is_context_pack_stale(self) -> bool:
+        """Check if the context pack needs regeneration."""
+        try:
+            from app.projects.context_pack import context_pack_is_stale
+            return context_pack_is_stale(self.name, self.path)
+        except ImportError:
+            return True
 
 
 class ProjectRegistry:
@@ -116,6 +152,9 @@ class ProjectRegistry:
             patterns=data.get("patterns", []),
             dependencies=data.get("dependencies", []),
             notes=data.get("notes", ""),
+            context_pack_version=data.get("context_pack_version", ""),
+            context_pack_hash=data.get("context_pack_hash", ""),
+            context_pack_generated_at=data.get("context_pack_generated_at", ""),
         )
 
         self._projects[project.name.lower()] = project
@@ -136,6 +175,52 @@ class ProjectRegistry:
         self._projects.clear()
         self._loaded = False
         self._ensure_loaded()
+
+    def update_context_pack_metadata(
+        self,
+        name: str,
+        version: str,
+        content_hash: str,
+        generated_at: str,
+    ) -> bool:
+        """Update context pack metadata for a project.
+
+        This updates the YAML file with context pack info for persistence.
+        Returns True if updated successfully.
+        """
+        project = self.get(name)
+        if not project:
+            return False
+
+        # Update in-memory
+        project.context_pack_version = version
+        project.context_pack_hash = content_hash
+        project.context_pack_generated_at = generated_at
+
+        # Update YAML file
+        config_file = self._config_dir / f"{name.lower()}.yaml"
+        if not config_file.exists():
+            config_file = self._config_dir / f"{name.lower()}.yml"
+
+        if not config_file.exists():
+            return False
+
+        try:
+            with open(config_file) as f:
+                data = yaml.safe_load(f) or {}
+
+            data["context_pack_version"] = version
+            data["context_pack_hash"] = content_hash
+            data["context_pack_generated_at"] = generated_at
+
+            with open(config_file, "w") as f:
+                yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+
+            logger.info(f"Updated context pack metadata for {name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update context pack metadata for {name}: {e}")
+            return False
 
     def create_example(self):
         """Create an example project file."""

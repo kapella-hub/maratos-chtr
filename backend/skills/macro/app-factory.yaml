@@ -1,0 +1,320 @@
+# App Factory v2.0 - Deterministic Template-Based Generator
+# Generates projects using Jinja2 templates instead of LLM freehand
+
+id: app-factory
+name: App Factory
+description: |
+  Template-based project generator that creates complete applications
+  with deterministic, reproducible output. Same input always produces
+  identical files (except timestamps).
+version: "2.0.0"
+author: MaratOS
+
+task_types:
+  - bootstrap_project
+
+tags:
+  - meta-skill
+  - full-stack
+  - application
+  - factory
+  - template
+  - deterministic
+
+triggers:
+  - build me
+  - create application
+  - build application
+  - full stack
+  - create a complete
+  - build complete
+  - generate project
+
+inputs:
+  # === REQUIRED ===
+  - name: name
+    type: string
+    description: Project name (lowercase, hyphenated)
+    required: true
+    validation: "^[a-z][a-z0-9-]*$"
+    examples:
+      - "my-project"
+      - "todo-app"
+
+  - name: workspace_path
+    type: path
+    description: Destination directory for the project
+    required: true
+
+  # === STRUCTURED INPUTS (recommended) ===
+
+  # Stack selection (can also use 'stacks' list)
+  - name: stacks
+    type: list
+    description: |
+      List of stacks to use. Alternative to backend_stack/frontend_stack.
+      Example: ["fastapi", "react"]
+    required: false
+    examples:
+      - ["fastapi", "react"]
+      - ["fastapi"]
+      - ["express", "vue"]
+
+  - name: features
+    type: list
+    description: |
+      List of features to enable. Alternative to individual toggles.
+      Available: auth-jwt, auth-session, auth-oauth, database-sqlite,
+      database-postgres, database-mysql, tests, docs, docker, ci-github,
+      ci-gitlab, makefile, pre-commit, tailwind, react-router, zustand
+    required: false
+    examples:
+      - ["auth-jwt", "database-postgres", "docker", "tests", "ci-github"]
+      - ["database-sqlite", "tests", "docs"]
+
+  # === INDIVIDUAL INPUTS (legacy, still supported) ===
+
+  - name: backend_stack
+    type: enum
+    description: Backend framework (or use 'stacks' list)
+    default: fastapi
+    options:
+      - fastapi
+      - express
+      - none
+
+  - name: frontend_stack
+    type: enum
+    description: Frontend framework (or use 'stacks' list)
+    default: react
+    options:
+      - react
+      - vue
+      - none
+
+  - name: auth_mode
+    type: enum
+    description: Authentication method (or use 'features' list)
+    default: none
+    options:
+      - none
+      - jwt
+      - session
+      - oauth
+
+  - name: database
+    type: enum
+    description: Database type (or use 'features' list)
+    default: sqlite
+    options:
+      - none
+      - sqlite
+      - postgres
+      - mysql
+
+  - name: ci_provider
+    type: enum
+    description: CI/CD provider (or use 'features' list)
+    default: github
+    options:
+      - none
+      - github
+      - gitlab
+
+  - name: dockerize
+    type: boolean
+    description: Include Docker configuration
+    default: true
+
+  - name: include_tests
+    type: boolean
+    description: Include test suite
+    default: true
+
+  - name: include_docs
+    type: boolean
+    description: Include documentation
+    default: true
+
+  - name: include_makefile
+    type: boolean
+    description: Include Makefile
+    default: true
+
+  - name: include_pre_commit
+    type: boolean
+    description: Include pre-commit hooks
+    default: true
+
+  # === METADATA ===
+
+  - name: description
+    type: string
+    description: Project description
+    default: ""
+
+  - name: author
+    type: string
+    description: Project author
+    default: ""
+
+  - name: version
+    type: string
+    description: Initial version
+    default: "0.1.0"
+
+  # === GENERATION OPTIONS ===
+
+  - name: run_verification
+    type: boolean
+    description: Run verification gates after generation
+    default: true
+
+  - name: install_deps
+    type: boolean
+    description: Install dependencies after generation
+    default: true
+
+outputs:
+  - name: project_path
+    type: path
+    description: Path to the created project
+
+  - name: artifacts
+    type: artifact
+    artifact_type: json
+    description: Complete artifact manifest (ARTIFACTS.json)
+
+  - name: validation
+    type: artifact
+    artifact_type: markdown
+    description: Validation report (VALIDATION.md)
+
+produces:
+  - name: project
+    type: directory
+    path_template: "{{workspace_path}}/{{name}}"
+    description: Complete project directory
+
+  - name: artifacts_file
+    type: file
+    path_template: "{{workspace_path}}/{{name}}/ARTIFACTS.json"
+    description: Artifact manifest with content hashes for reproducibility verification
+
+  - name: validation_report
+    type: report
+    path_template: "{{workspace_path}}/{{name}}/VALIDATION.md"
+    description: Validation report with gate results and file listing
+
+requires_tools:
+  - filesystem
+  - shell
+
+quality_gates:
+  - id: readme_exists
+    type: file_exists
+    file_path: "{{workspace_path}}/{{name}}/README.md"
+    description: README.md exists
+    required: true
+
+  - id: backend_lint
+    type: command_success
+    command: "cd {{workspace_path}}/{{name}}/backend && ruff check . --select=E,F,W 2>/dev/null || cd {{workspace_path}}/{{name}} && ruff check . --select=E,F,W"
+    description: Backend passes linting
+    required: true
+    condition: "backend_stack != none"
+
+  - id: backend_imports
+    type: command_success
+    command: "cd {{workspace_path}}/{{name}}/backend && python -c 'from app.main import app' 2>/dev/null || cd {{workspace_path}}/{{name}} && python -c 'from app.main import app'"
+    description: Backend imports correctly
+    required: true
+    condition: "backend_stack != none"
+
+  - id: frontend_build
+    type: command_success
+    command: "cd {{workspace_path}}/{{name}}/frontend && npm run build"
+    description: Frontend builds successfully
+    required: true
+    condition: "frontend_stack != none"
+
+  - id: tests_pass
+    type: command_success
+    command: "cd {{workspace_path}}/{{name}}/backend && pytest tests/ -v 2>/dev/null || cd {{workspace_path}}/{{name}} && pytest tests/ -v"
+    description: Tests pass
+    required: false
+    condition: "include_tests == true"
+
+  - id: docker_builds
+    type: command_success
+    command: "cd {{workspace_path}}/{{name}} && docker compose build"
+    description: Docker images build
+    required: false
+    condition: "dockerize == true"
+
+system_context: |
+  App Factory v2.0 - Deterministic Template-Based Generator
+
+  This skill generates complete projects using Jinja2 templates.
+  No LLM freehand file generation - all boilerplate is templated.
+
+  Key guarantees:
+  1. DETERMINISTIC: Same config always produces identical files
+  2. REPRODUCIBLE: Config hash tracks exact input state
+  3. VERIFIABLE: Manifest tracks all files with content hashes
+  4. TESTABLE: All output can be validated programmatically
+
+  The workflow is a single step that runs the template generator
+  with all configuration passed through params.
+
+quality_checklist:
+  - All requested components created
+  - File content hashes match for same config
+  - All files within workspace boundary
+  - Verification gates pass
+  - Manifest accurately tracks all artifacts
+
+workflow:
+  # Single step using the deterministic template generator
+  - name: generate_project
+    action: template_generate
+    description: Generate project using Jinja2 templates
+    params:
+      # Required
+      name: "{{name}}"
+      workspace_path: "{{workspace_path}}"
+      # Structured inputs (preferred)
+      stacks: "{{stacks}}"
+      features: "{{features}}"
+      # Individual inputs (fallback)
+      backend_stack: "{{backend_stack}}"
+      frontend_stack: "{{frontend_stack}}"
+      auth_mode: "{{auth_mode}}"
+      database: "{{database}}"
+      ci_provider: "{{ci_provider}}"
+      dockerize: "{{dockerize}}"
+      include_tests: "{{include_tests}}"
+      include_docs: "{{include_docs}}"
+      include_makefile: "{{include_makefile}}"
+      include_pre_commit: "{{include_pre_commit}}"
+      # Metadata
+      description: "{{description}}"
+      author: "{{author}}"
+      version: "{{version}}"
+      # Options
+      run_verification: "{{run_verification}}"
+      install_deps: "{{install_deps}}"
+
+  # Optional: Initialize git after generation
+  - name: init_git
+    action: shell
+    description: Initialize git repository
+    params:
+      command: |
+        cd {{workspace_path}}/{{name}} && \
+        git init && \
+        git add . && \
+        git commit -m "Initial commit - generated by App Factory v2.0"
+      workdir: "{{workspace_path}}/{{name}}"
+
+timeout_seconds: 1800  # 30 minutes

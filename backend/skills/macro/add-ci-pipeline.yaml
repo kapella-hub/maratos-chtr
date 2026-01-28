@@ -1,0 +1,183 @@
+# Add CI Pipeline
+# Adds CI/CD configuration (GitHub Actions, GitLab CI)
+
+id: add-ci-pipeline
+name: Add CI/CD Pipeline
+description: Adds continuous integration and deployment configuration
+version: "1.0.0"
+author: MaratOS
+
+task_types:
+  - add_ci
+
+tags:
+  - ci
+  - cd
+  - github-actions
+  - gitlab-ci
+  - devops
+
+triggers:
+  - add ci
+  - add ci/cd
+  - setup github actions
+  - add pipeline
+  - setup gitlab ci
+  - continuous integration
+
+inputs:
+  - name: workdir
+    type: path
+    description: Project directory
+    required: true
+
+  - name: platform
+    type: string
+    description: "CI platform (github, gitlab)"
+    default: github
+
+  - name: project_type
+    type: string
+    description: "Project type (python, node, go)"
+    required: true
+
+  - name: include_deploy
+    type: boolean
+    description: Include deployment stage
+    default: false
+
+  - name: deploy_target
+    type: string
+    description: "Deploy target (docker, kubernetes, vercel)"
+    default: docker
+
+outputs:
+  - name: workflow_path
+    type: path
+    description: Path to CI workflow file
+
+produces:
+  - name: ci_workflow
+    type: ci_config
+    path_template: "{{workdir}}/.github/workflows/ci.yaml"
+    description: Main CI workflow
+
+  - name: deploy_workflow
+    type: ci_config
+    path_template: "{{workdir}}/.github/workflows/deploy.yaml"
+    required: false
+
+requires_tools:
+  - kiro
+  - filesystem
+
+quality_gates:
+  - id: workflow_valid
+    type: file_exists
+    file_path: "{{workdir}}/.github/workflows/ci.yaml"
+    description: CI workflow file exists
+
+  - id: yaml_valid
+    type: command_success
+    command: "python -c \"import yaml; yaml.safe_load(open('{{workdir}}/.github/workflows/ci.yaml'))\""
+    description: Workflow YAML is valid
+
+system_context: |
+  You are adding CI/CD configuration to a project.
+
+  GitHub Actions best practices:
+  - Use specific action versions (@v4, not @latest)
+  - Cache dependencies for faster builds
+  - Run tests in parallel when possible
+  - Use matrix strategy for multiple versions
+  - Include proper permissions
+  - Use secrets for sensitive data
+
+  Standard CI stages:
+  1. Checkout
+  2. Setup runtime (Python/Node)
+  3. Install dependencies (with cache)
+  4. Lint
+  5. Type check
+  6. Test (with coverage)
+  7. Build
+  8. (Optional) Deploy
+
+  Python CI:
+  - Use actions/setup-python
+  - Cache pip dependencies
+  - Run ruff for linting
+  - Run mypy for type checking
+  - Run pytest with coverage
+
+  Node CI:
+  - Use actions/setup-node
+  - Cache npm dependencies
+  - Run eslint
+  - Run tsc for type checking
+  - Run vitest/jest
+
+quality_checklist:
+  - Workflow triggers on push and PR
+  - Dependencies are cached
+  - Tests run with coverage
+  - Linting is enforced
+  - No hardcoded secrets
+
+workflow:
+  - name: analyze_project
+    action: kiro_prompt
+    description: Analyze project for CI requirements
+    params:
+      task: |
+        Analyze the project at {{workdir}} to determine:
+        1. Test command
+        2. Lint command
+        3. Build command
+        4. Runtime versions needed
+        5. Environment variables required
+
+  - name: create_ci_workflow
+    action: kiro_architect
+    description: Create CI workflow
+    params:
+      task: |
+        Create a {{platform}} CI workflow for this {{project_type}} project.
+
+        Requirements:
+        - Run on push to main and pull requests
+        - Cache dependencies
+        - Run lint, type check, and tests
+        - Generate coverage report
+        - Include build step
+        {{#if include_deploy}}
+        - Include deployment to {{deploy_target}}
+        {{/if}}
+      workdir: "{{workdir}}"
+
+  - name: create_deploy_workflow
+    action: kiro_architect
+    condition: "include_deploy == true"
+    description: Create deployment workflow
+    params:
+      task: |
+        Create a deployment workflow for {{deploy_target}}.
+
+        Requirements:
+        - Trigger on release or manual dispatch
+        - Build and push Docker image
+        - Deploy to {{deploy_target}}
+        - Include rollback capability
+      workdir: "{{workdir}}"
+
+  - name: validate_workflow
+    action: shell
+    description: Validate workflow YAML
+    params:
+      command: |
+        python -c "import yaml; yaml.safe_load(open('{{workdir}}/.github/workflows/ci.yaml'))"
+      workdir: "{{workdir}}"
+
+retry_policy:
+  max_attempts: 2
+  backoff_seconds: 5.0

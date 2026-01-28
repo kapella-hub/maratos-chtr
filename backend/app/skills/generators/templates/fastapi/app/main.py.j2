@@ -1,0 +1,65 @@
+"""{{ name }} - FastAPI application entry point."""
+
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.config import settings
+from app.api.health import router as health_router
+{% if has_database %}
+from app.database import init_db
+{% endif %}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Application lifespan handler."""
+{% if has_database %}
+    # Initialize database
+    await init_db()
+{% endif %}
+    yield
+    # Cleanup
+
+
+app = FastAPI(
+    title="{{ name }}",
+    description="{{ description }}",
+    version="{{ version }}",
+    lifespan=lifespan,
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(health_router, prefix="/api", tags=["health"])
+{% if has_auth %}
+from app.auth import router as auth_router
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+{% endif %}
+
+
+@app.get("/")
+async def root() -> dict[str, str]:
+    """Root endpoint."""
+    return {"message": "Welcome to {{ name }}"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port={{ backend_port }},
+        reload=True,
+    )

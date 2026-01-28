@@ -3,6 +3,8 @@
 from typing import Any
 
 from app.agents.base import Agent, AgentConfig
+from app.agents.tool_contract import get_full_tool_section
+from app.agents.diagram_instructions import get_rich_content_instructions
 
 
 DOCS_SYSTEM_PROMPT = """You are the Docs agent, specialized in technical documentation.
@@ -10,12 +12,7 @@ DOCS_SYSTEM_PROMPT = """You are the Docs agent, specialized in technical documen
 ## Your Role
 You create clear, comprehensive documentation that helps developers understand and use code effectively.
 
-## Filesystem Access
-
-**READ anywhere** — You can read files from any directory.
-**WRITE to allowed directories** — Writes allowed in `/Projects` and `~/maratos-workspace` by default.
-
-You can write documentation directly to the project. No need to copy first.
+{tool_section}
 
 ## Output Formatting (MANDATORY)
 - **Code snippets**: Always wrap in triple backticks with language (```python, ```sql, ```bash, etc.)
@@ -130,9 +127,7 @@ Read the code and understand:
 
 ### 2. WRITE
 Create documentation directly in the project:
-```
-filesystem action=write path=/path/to/project/docs/README.md content="..."
-```
+<tool_call>{{"tool": "filesystem", "args": {{"action": "write", "path": "/path/to/project/docs/README.md", "content": "..."}}}}</tool_call>
 
 Include:
 - Overview and purpose
@@ -226,18 +221,20 @@ Typical usage:
 ```python
 class MyClass:
     \"\"\"Brief description.
-    
+
     Longer description of purpose and usage.
-    
+
     Attributes:
         attr1: Description.
         attr2: Description.
-        
+
     Example:
         >>> obj = MyClass(value)
         >>> obj.method()
     \"\"\"
 ```
+
+{diagram_instructions}
 """
 
 
@@ -245,6 +242,14 @@ class DocsAgent(Agent):
     """Docs agent for documentation generation."""
 
     def __init__(self) -> None:
+        # Inject tool section and diagram instructions into prompt
+        tool_section = get_full_tool_section("docs")
+        diagram_instructions = get_rich_content_instructions()
+        prompt = DOCS_SYSTEM_PROMPT.format(
+            tool_section=tool_section,
+            diagram_instructions=diagram_instructions,
+        )
+
         super().__init__(
             AgentConfig(
                 id="docs",
@@ -253,7 +258,7 @@ class DocsAgent(Agent):
                 icon="📝",
                 model="",  # Inherit from settings
                 temperature=0.4,
-                system_prompt=DOCS_SYSTEM_PROMPT,
+                system_prompt=prompt,
                 tools=["filesystem", "shell", "kiro"],
             )
         )

@@ -76,6 +76,16 @@ else
     USE_UV=false
 fi
 
+# kiro-cli (required for LLM access)
+if check_cmd kiro-cli || check_cmd kiro; then
+    KIRO_CMD=$(which kiro-cli 2>/dev/null || which kiro)
+    success "kiro-cli found: $KIRO_CMD"
+else
+    warn "kiro-cli not found (required for LLM access)"
+    info "Install with: curl -fsSL https://cli.kiro.dev/install | bash"
+    info "Then authenticate: kiro-cli login"
+fi
+
 echo ""
 
 # === Download/Clone MaratOS ===
@@ -152,24 +162,15 @@ if [ -f .env ]; then
     export $(cat .env | grep -v '^#' | xargs 2>/dev/null)
 fi
 
-# Export API key if set
-export MARATOS_ANTHROPIC_API_KEY="${MARATOS_ANTHROPIC_API_KEY:-$ANTHROPIC_API_KEY}"
-
-# Check for Kiro CLI as fallback
-KIRO_PATH="${HOME}/.local/bin/kiro-cli"
-if [ -z "$MARATOS_ANTHROPIC_API_KEY" ]; then
-    if [ -x "$KIRO_PATH" ]; then
-        echo "ℹ️  No Anthropic API key - using Kiro CLI for Claude models"
-    else
-        echo "⚠️  No API key and Kiro CLI not found."
-        echo "Either:"
-        echo "  1. Set MARATOS_ANTHROPIC_API_KEY in .env"
-        echo "  2. Install Kiro CLI: curl -fsSL https://cli.kiro.dev/install | bash"
-        echo ""
-    fi
+# Check for kiro-cli (required for LLM access)
+if ! command -v kiro-cli &> /dev/null && ! command -v kiro &> /dev/null; then
+    echo "Error: kiro-cli not found!"
+    echo "  Install with: curl -fsSL https://cli.kiro.dev/install | bash"
+    echo "  Then authenticate: kiro-cli login"
+    exit 1
 fi
 
-echo "🖥️  Starting MaratOS..."
+echo "Starting MaratOS..."
 
 # Start backend
 cd backend
@@ -178,8 +179,14 @@ python run.py &
 BACKEND_PID=$!
 cd ..
 
-# Wait for backend
-sleep 3
+# Wait for backend to be ready
+echo "Waiting for backend..."
+for i in {1..30}; do
+    if curl -s http://localhost:8000/api/health > /dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
 
 # Start frontend
 cd frontend
@@ -188,7 +195,7 @@ FRONTEND_PID=$!
 cd ..
 
 echo ""
-echo "✨ MaratOS is running!"
+echo "MaratOS is running!"
 echo "   Frontend: http://localhost:5173"
 echo "   Backend:  http://localhost:8000"
 echo ""
@@ -213,31 +220,31 @@ fi
 if [ ! -f "$INSTALL_DIR/.env" ]; then
     cat > "$INSTALL_DIR/.env" << EOF
 # MaratOS Configuration
-# Get your API key from: https://console.anthropic.com/
+# All LLM calls route through kiro-cli (no API keys needed)
 
-MARATOS_ANTHROPIC_API_KEY=
-# MARATOS_OPENAI_API_KEY=
-# MARATOS_DEFAULT_MODEL=claude-sonnet-4-20250514
+# MARATOS_DEFAULT_MODEL=claude-sonnet-4
+# Available: Auto, claude-sonnet-4, claude-sonnet-4.5, claude-haiku-4.5, claude-opus-4.5
 EOF
 fi
 
 # === Done! ===
 echo ""
 echo -e "${GREEN}════════════════════════════════════════${NC}"
-echo -e "${GREEN}  MaratOS installed successfully! 🎉${NC}"
+echo -e "${GREEN}  MaratOS installed successfully!${NC}"
 echo -e "${GREEN}════════════════════════════════════════${NC}"
 echo ""
-echo -e "${YELLOW}To start MaratOS:${NC}"
+echo -e "${YELLOW}Next steps:${NC}"
 echo ""
+echo "1. Ensure kiro-cli is authenticated:"
+echo -e "   ${BLUE}kiro-cli login${NC}"
+echo ""
+echo "2. Start MaratOS:"
 if [ -w /usr/local/bin ]; then
-echo -e "  ${BLUE}maratos${NC}"
+echo -e "   ${BLUE}maratos${NC}"
 else
-echo -e "  ${BLUE}$INSTALL_DIR/start.sh${NC}"
+echo -e "   ${BLUE}$INSTALL_DIR/start.sh${NC}"
 fi
 echo ""
-echo "You'll be prompted for your Anthropic API key on first run."
-echo "(Get one at https://console.anthropic.com)"
+echo "3. Open: http://localhost:5173"
 echo ""
-echo "Then open: http://localhost:5173"
-echo ""
-echo "MO is ready to help! 🤖"
+echo "MO is ready to help!"

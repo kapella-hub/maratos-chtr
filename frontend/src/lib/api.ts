@@ -118,6 +118,8 @@ export type ChatEventType =
   | 'canvas_create'
   | 'canvas_update'
   | 'canvas_delete'
+  // Project context auto-detection
+  | 'project_context_active'
   // Inline project events
   | 'project_detected'
   | 'planning_started'
@@ -182,6 +184,12 @@ export interface InlineProjectPlan {
   pr_url?: string
 }
 
+// Project context info (for auto-detection)
+export interface ProjectContextInfo {
+  name: string
+  auto_detected: boolean
+}
+
 export interface ChatEvent {
   type: ChatEventType
   data?: string | boolean | number
@@ -197,6 +205,8 @@ export interface ChatEvent {
   max_attempts?: number
   is_fallback?: boolean
   original_task_id?: string
+  // Project context (auto-detected or explicit)
+  projectContext?: ProjectContextInfo
   // Inline project data
   project?: InlineProjectPlan
   projectId?: string
@@ -255,6 +265,13 @@ export async function* streamChat(
             }
             if (parsed.model) {
               yield { type: 'model', data: parsed.model }
+            }
+            // Project context auto-detection
+            if (parsed.project_context) {
+              yield {
+                type: 'project_context_active',
+                projectContext: parsed.project_context as ProjectContextInfo,
+              }
             }
             if (parsed.thinking !== undefined) {
               yield { type: 'thinking', data: parsed.thinking }
@@ -581,6 +598,77 @@ export async function deleteProject(name: string): Promise<void> {
     method: 'DELETE',
   })
   if (!res.ok) throw new Error('Failed to delete project')
+}
+
+// Project Documentation
+export interface ProjectDoc {
+  id: string
+  title: string
+  content: string
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectDocListItem {
+  id: string
+  title: string
+  tags: string[]
+  created_at: string
+  updated_at: string
+  content_length: number
+}
+
+export async function fetchProjectDocs(projectName: string): Promise<ProjectDocListItem[]> {
+  const res = await fetch(`${API_BASE}/projects/${encodeURIComponent(projectName)}/docs`)
+  if (!res.ok) throw new Error('Failed to fetch project docs')
+  return res.json()
+}
+
+export async function fetchProjectDoc(projectName: string, docId: string): Promise<ProjectDoc> {
+  const res = await fetch(`${API_BASE}/projects/${encodeURIComponent(projectName)}/docs/${docId}`)
+  if (!res.ok) throw new Error('Failed to fetch doc')
+  return res.json()
+}
+
+export async function createProjectDoc(
+  projectName: string,
+  data: { title: string; content: string; tags?: string[] }
+): Promise<ProjectDoc> {
+  const res = await fetch(`${API_BASE}/projects/${encodeURIComponent(projectName)}/docs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Failed to create doc' }))
+    throw new Error(error.detail || 'Failed to create doc')
+  }
+  return res.json()
+}
+
+export async function updateProjectDoc(
+  projectName: string,
+  docId: string,
+  data: { title?: string; content?: string; tags?: string[] }
+): Promise<ProjectDoc> {
+  const res = await fetch(`${API_BASE}/projects/${encodeURIComponent(projectName)}/docs/${docId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Failed to update doc' }))
+    throw new Error(error.detail || 'Failed to update doc')
+  }
+  return res.json()
+}
+
+export async function deleteProjectDoc(projectName: string, docId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/projects/${encodeURIComponent(projectName)}/docs/${docId}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error('Failed to delete doc')
 }
 
 export async function updateConfig(data: Partial<Config>): Promise<Config> {
@@ -1348,4 +1436,156 @@ export async function fetchWorkspaceProjects(): Promise<WorkspaceProject[]> {
   const res = await fetch(`${API_BASE}/workspace/projects`)
   if (!res.ok) throw new Error('Failed to fetch workspace projects')
   return res.json()
+}
+
+// =============================================================================
+// Approvals API - Diff-First Approval Workflow
+// =============================================================================
+
+export interface Approval {
+  id: string
+  action_type: 'write' | 'delete' | 'shell'
+  session_id: string
+  agent_id: string
+  task_id: string | null
+  file_path: string | null
+  diff: string | null
+  content_hash: string | null
+  command: string | null
+  workdir: string | null
+  status: 'pending' | 'approved' | 'denied' | 'expired'
+  created_at: string
+  expires_at: string | null
+  approved_by: string | null
+  approval_note: string | null
+  is_file_operation: boolean
+  is_shell_operation: boolean
+  affected_paths: string[]
+}
+
+export interface ApprovalListResponse {
+  approvals: Approval[]
+  total: number
+  pending_count: number
+}
+
+export interface ApprovalActionResponse {
+  success: boolean
+  approval_id: string
+  new_status: string
+  message: string
+}
+
+export async function fetchApprovals(options?: {
+  status?: string
+  session_id?: string
+  limit?: number
+}): Promise<ApprovalListResponse> {
+  const params = new URLSearchParams()
+  if (options?.status) params.set('status', options.status)
+  if (options?.session_id) params.set('session_id', options.session_id)
+  if (options?.limit) params.set('limit', String(options.limit))
+
+  const res = await fetch(`${API_BASE}/approvals?${params}`)
+  if (!res.ok) throw new Error('Failed to fetch approvals')
+  return res.json()
+}
+
+export async function fetchPendingApprovals(sessionId?: string): Promise<ApprovalListResponse> {
+  const params = new URLSearchParams()
+  if (sessionId) params.set('session_id', sessionId)
+
+  const res = await fetch(`${API_BASE}/approvals/pending?${params}`)
+  if (!res.ok) throw new Error('Failed to fetch pending approvals')
+  return res.json()
+}
+
+export async function fetchApproval(id: string): Promise<Approval> {
+  const res = await fetch(`${API_BASE}/approvals/${id}`)
+  if (!res.ok) throw new Error('Failed to fetch approval')
+  return res.json()
+}
+
+export async function approveAction(
+  id: string,
+  options?: { approved_by?: string; note?: string }
+): Promise<ApprovalActionResponse> {
+  const res = await fetch(`${API_BASE}/approvals/${id}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      approved_by: options?.approved_by || 'user',
+      note: options?.note,
+    }),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Failed to approve action' }))
+    throw new Error(error.detail || 'Failed to approve action')
+  }
+  return res.json()
+}
+
+export async function denyAction(
+  id: string,
+  options?: { denied_by?: string; reason?: string }
+): Promise<ApprovalActionResponse> {
+  const res = await fetch(`${API_BASE}/approvals/${id}/deny`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      denied_by: options?.denied_by || 'user',
+      reason: options?.reason,
+    }),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Failed to deny action' }))
+    throw new Error(error.detail || 'Failed to deny action')
+  }
+  return res.json()
+}
+
+export async function cancelApproval(id: string): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`${API_BASE}/approvals/${id}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error('Failed to cancel approval')
+  return res.json()
+}
+
+// SSE stream for real-time approval updates
+export function subscribeToApprovals(
+  sessionId?: string,
+  onApprovalRequested?: (approval: Approval) => void,
+  onApprovalResolved?: (approval: Approval) => void
+): () => void {
+  const params = new URLSearchParams()
+  if (sessionId) params.set('session_id', sessionId)
+
+  const eventSource = new EventSource(`${API_BASE}/approvals/stream/events?${params}`)
+
+  eventSource.addEventListener('approval_requested', (event) => {
+    try {
+      const approval = JSON.parse(event.data) as Approval
+      onApprovalRequested?.(approval)
+    } catch (e) {
+      console.error('Failed to parse approval_requested event:', e)
+    }
+  })
+
+  eventSource.addEventListener('approval_resolved', (event) => {
+    try {
+      const approval = JSON.parse(event.data) as Approval
+      onApprovalResolved?.(approval)
+    } catch (e) {
+      console.error('Failed to parse approval_resolved event:', e)
+    }
+  })
+
+  eventSource.onerror = () => {
+    // Will auto-reconnect
+    console.warn('Approval event stream error, reconnecting...')
+  }
+
+  // Return cleanup function
+  return () => eventSource.close()
 }

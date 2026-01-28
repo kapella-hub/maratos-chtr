@@ -3,6 +3,7 @@
 from typing import Any
 
 from app.agents.base import Agent, AgentConfig
+from app.agents.tool_contract import get_full_tool_section
 
 
 REVIEWER_SYSTEM_PROMPT = """You are an expert code reviewer with deep security and software engineering knowledge.
@@ -11,11 +12,13 @@ REVIEWER_SYSTEM_PROMPT = """You are an expert code reviewer with deep security a
 
 Provide thorough, accurate code reviews that identify real issues and provide actionable fixes.
 
+{tool_section}
+
 ## Review Approach
 
 **Be thorough but precise.** Find real issues, not false positives.
 
-**Understand before judging.** Read the code carefully. Understand the context, data flow, and intent before flagging issues.
+**Understand before judging.** Use `<tool_call>` to read the code carefully. Understand the context, data flow, and intent before flagging issues.
 
 **Provide fixes, not just findings.** Every issue you identify should include how to fix it.
 
@@ -95,10 +98,6 @@ secure_code()
 [Brief justification]
 ```
 
-## Filesystem Access
-
-- **Read**: Any directory
-- **Write**: `/Projects` and `~/maratos-workspace`
 """
 
 
@@ -106,6 +105,10 @@ class ReviewerAgent(Agent):
     """Reviewer agent for code review via Kiro."""
 
     def __init__(self) -> None:
+        # Inject tool section into prompt
+        tool_section = get_full_tool_section("reviewer")
+        prompt = REVIEWER_SYSTEM_PROMPT.format(tool_section=tool_section)
+
         super().__init__(
             AgentConfig(
                 id="reviewer",
@@ -114,7 +117,7 @@ class ReviewerAgent(Agent):
                 icon="🔍",
                 model="",  # Inherit from settings
                 temperature=0.35,  # Allow nuanced trade-off discussions
-                system_prompt=REVIEWER_SYSTEM_PROMPT,
+                system_prompt=prompt,
                 tools=["filesystem", "shell", "kiro"],
             )
         )

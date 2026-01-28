@@ -1,0 +1,188 @@
+# {{ name }}
+
+{{ description }}
+
+## Quick Start
+
+{% if dockerize %}
+### Using Docker (Recommended)
+
+```bash
+docker compose up -d
+```
+
+The application will be available at:
+{% if has_frontend %}
+- Frontend: http://localhost:80
+{% endif %}
+{% if has_backend %}
+- Backend API: http://localhost:{{ backend_port }}
+- API Docs: http://localhost:{{ backend_port }}/docs
+{% endif %}
+
+{% endif %}
+### Local Development
+
+{% if has_backend %}
+#### Backend
+
+```bash
+cd {% if is_fullstack %}backend{% else %}.{% endif %}
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -e ".[dev]"
+
+# Run the server
+python -m app.main
+# or
+uvicorn app.main:app --reload --port {{ backend_port }}
+```
+
+Backend will be available at http://localhost:{{ backend_port }}
+{% endif %}
+
+{% if has_frontend %}
+#### Frontend
+
+```bash
+cd frontend
+
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
+```
+
+Frontend will be available at http://localhost:{{ frontend_port }}
+{% endif %}
+
+## Project Structure
+
+```
+{{ name }}/
+{% if is_fullstack %}
+├── backend/
+│   ├── app/
+│   │   ├── api/          # API routes
+│   │   ├── main.py       # Application entry point
+│   │   ├── config.py     # Configuration
+{% if has_database %}
+│   │   ├── database.py   # Database setup
+│   │   └── models.py     # SQLAlchemy models
+{% endif %}
+│   ├── tests/            # Backend tests
+│   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   │   ├── components/   # React components
+{% if use_zustand %}
+│   │   ├── stores/       # Zustand stores
+{% endif %}
+│   │   ├── App.tsx
+│   │   └── main.tsx
+│   └── Dockerfile
+{% else %}
+├── app/
+│   ├── api/              # API routes
+│   ├── main.py           # Application entry point
+│   ├── config.py         # Configuration
+{% if has_database %}
+│   ├── database.py       # Database setup
+│   └── models.py         # SQLAlchemy models
+{% endif %}
+├── tests/                # Tests
+{% endif %}
+{% if dockerize %}
+├── docker-compose.yaml
+{% endif %}
+{% if has_ci %}
+{% if ci_provider == "github" %}
+├── .github/
+│   └── workflows/
+│       └── ci.yaml
+{% elif ci_provider == "gitlab" %}
+├── .gitlab-ci.yml
+{% endif %}
+{% endif %}
+{% if include_makefile %}
+├── Makefile
+{% endif %}
+└── README.md
+```
+
+{% if include_makefile %}
+## Available Commands
+
+```bash
+make help       # Show all available commands
+make dev        # Start development servers
+make test       # Run all tests
+make lint       # Run linting
+make build      # Build for production
+{% if dockerize %}
+make docker     # Build Docker images
+make up         # Start Docker containers
+make down       # Stop Docker containers
+{% endif %}
+```
+{% endif %}
+
+## API Documentation
+
+{% if has_backend %}
+Once the backend is running, visit:
+- Swagger UI: http://localhost:{{ backend_port }}/docs
+- ReDoc: http://localhost:{{ backend_port }}/redoc
+{% endif %}
+
+## Configuration
+
+{% if has_backend %}
+Configuration is managed through environment variables. Create a `.env` file:
+
+```env
+# Application
+DEBUG=false
+ENVIRONMENT=development
+
+{% if has_database %}
+# Database
+DATABASE_URL={{ db_async_url }}
+{% endif %}
+
+{% if has_auth %}
+{% if auth_mode == "jwt" %}
+# JWT
+JWT_SECRET_KEY=your-secret-key-change-in-production
+JWT_EXPIRE_MINUTES=30
+{% endif %}
+{% endif %}
+```
+{% endif %}
+
+## Testing
+
+{% if has_backend %}
+```bash
+# Backend tests
+cd {% if is_fullstack %}backend{% else %}.{% endif %}
+pytest tests/ -v
+```
+{% endif %}
+
+{% if has_frontend %}
+```bash
+# Frontend tests
+cd frontend
+npm test
+```
+{% endif %}
+
+## License
+
+MIT

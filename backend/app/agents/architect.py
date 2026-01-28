@@ -3,6 +3,8 @@
 from typing import Any
 
 from app.agents.base import Agent, AgentConfig
+from app.agents.tool_contract import get_full_tool_section
+from app.agents.diagram_instructions import get_diagram_instructions
 
 
 # Thinking level instructions - appended based on settings.thinking_level
@@ -165,10 +167,9 @@ Always output:
 1. Brief analysis of what you found
 2. List of [SPAWN:coder] commands with detailed task descriptions
 
-## Filesystem Access
+{tool_section}
 
-- **Read**: Any directory (use to analyze existing code)
-- **Write**: Only to `~/maratos-workspace` if you need to save plans
+{diagram_instructions}
 """
 
 
@@ -176,6 +177,14 @@ class ArchitectAgent(Agent):
     """Architect agent for complex design work via Kiro."""
 
     def __init__(self) -> None:
+        # Inject tool section and diagram instructions into prompt
+        tool_section = get_full_tool_section("architect")
+        diagram_instructions = get_diagram_instructions()
+        prompt = ARCHITECT_SYSTEM_PROMPT.format(
+            tool_section=tool_section,
+            diagram_instructions=diagram_instructions,
+        )
+
         super().__init__(
             AgentConfig(
                 id="architect",
@@ -184,7 +193,7 @@ class ArchitectAgent(Agent):
                 icon="🏗️",
                 model="",  # Inherit from settings
                 temperature=0.5,  # Higher for exploring multiple design alternatives
-                system_prompt=ARCHITECT_SYSTEM_PROMPT,
+                system_prompt=prompt,
                 tools=["filesystem", "shell", "kiro"],
             )
         )

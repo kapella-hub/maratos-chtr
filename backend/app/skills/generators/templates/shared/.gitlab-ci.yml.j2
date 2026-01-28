@@ -1,0 +1,63 @@
+stages:
+  - test
+  - build
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.cache/npm"
+
+{% if has_backend %}
+backend-test:
+  stage: test
+  image: python:3.11
+{% if has_database and database == "postgres" %}
+  services:
+    - postgres:15
+  variables:
+    POSTGRES_DB: test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/test
+{% endif %}
+  before_script:
+    - cd {% if is_fullstack %}backend{% else %}.{% endif %}
+
+    - pip install -e ".[dev]"
+  script:
+    - ruff check .
+    - mypy app/ --ignore-missing-imports
+    - pytest tests/ -v --tb=short
+  cache:
+    paths:
+      - .cache/pip
+{% endif %}
+
+{% if has_frontend %}
+frontend-test:
+  stage: test
+  image: node:20
+  before_script:
+    - cd frontend
+    - npm ci
+  script:
+    - npm run lint
+    - npm run build
+    - npm test -- --run --passWithNoTests
+  cache:
+    paths:
+      - .cache/npm
+      - frontend/node_modules
+{% endif %}
+
+{% if dockerize %}
+docker-build:
+  stage: build
+  image: docker:24
+  services:
+    - docker:dind
+  script:
+    - docker compose build
+  only:
+    - main
+    - develop
+{% endif %}

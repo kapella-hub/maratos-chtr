@@ -548,3 +548,407 @@ def _calculate_progress(project_id: str) -> float:
     if project:
         return project.progress
     return 0.0
+
+
+# =============================================================================
+# Orchestration Run Endpoints (unified engine persistence)
+# =============================================================================
+
+
+class RunResponse(BaseModel):
+    """Orchestration run response."""
+    run_id: str
+    state: str
+    mode: str
+    original_prompt: str
+    workspace_path: str | None
+    session_id: str | None
+    error: str | None
+    created_at: str
+    started_at: str | None
+    completed_at: str | None
+    paused_at: str | None
+
+
+class RunDetailResponse(BaseModel):
+    """Detailed run response with tasks and artifacts."""
+    run: RunResponse
+    tasks: list[dict]
+    task_summary: dict
+    artifacts: list[dict]
+
+
+class TaskLogResponse(BaseModel):
+    """Task log entry."""
+    id: str
+    task_id: str
+    level: str
+    message: str
+    tool_name: str | None
+    tool_input: dict | None
+    tool_output: str | None
+    tool_duration_ms: float | None
+    created_at: str
+
+
+@router.get("/runs")
+async def list_runs(
+    status: str | None = None,
+    mode: str | None = None,
+    limit: int = Query(default=50, ge=1, le=500),
+) -> list[RunResponse]:
+    """List orchestration runs with optional filters.
+
+    This endpoint queries the unified orchestration engine's persistence layer,
+    which stores runs from both inline (chat project mode) and autonomous API.
+    """
+    from app.autonomous.repositories import RunRepository
+
+    if status:
+        runs = await RunRepository.list_by_status(status, limit=limit)
+    else:
+        runs = await RunRepository.list_active()
+
+    if mode:
+        runs = [r for r in runs if r.mode == mode]
+
+    return [
+        RunResponse(
+            run_id=r.id,
+            state=r.state,
+            mode=r.mode,
+            original_prompt=r.original_prompt[:200] if r.original_prompt else "",
+            workspace_path=r.workspace_path,
+            session_id=r.session_id,
+            error=r.error,
+            created_at=r.created_at.isoformat() if r.created_at else "",
+            started_at=r.started_at.isoformat() if r.started_at else None,
+            completed_at=r.completed_at.isoformat() if r.completed_at else None,
+            paused_at=r.paused_at.isoformat() if r.paused_at else None,
+        )
+        for r in runs[:limit]
+    ]
+
+
+@router.get("/runs/{run_id}")
+async def get_run(run_id: str) -> RunDetailResponse:
+    """Get detailed run status with tasks and artifacts.
+
+    This endpoint returns the full state of an orchestration run,
+    useful for debugging and auditing.
+    """
+    from app.autonomous.repositories import RunRepository, TaskRepository, ArtifactRepository
+
+    run = await RunRepository.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    tasks = await TaskRepository.get_by_run(run_id)
+    task_summary = await TaskRepository.get_task_summary(run_id)
+    artifacts = await ArtifactRepository.get_by_run(run_id)
+
+    return RunDetailResponse(
+        run=RunResponse(
+            run_id=run.id,
+            state=run.state,
+            mode=run.mode,
+            original_prompt=run.original_prompt,
+            workspace_path=run.workspace_path,
+            session_id=run.session_id,
+            error=run.error,
+            created_at=run.created_at.isoformat() if run.created_at else "",
+            started_at=run.started_at.isoformat() if run.started_at else None,
+            completed_at=run.completed_at.isoformat() if run.completed_at else None,
+            paused_at=run.paused_at.isoformat() if run.paused_at else None,
+        ),
+        tasks=[
+            {
+                "id": t.id,
+                "title": t.title,
+                "description": t.description[:500] if t.description else "",
+                "agent_id": t.agent_id,
+                "status": t.status,
+                "attempt": t.attempt,
+                "max_attempts": t.max_attempts,
+                "depends_on": t.depends_on or [],
+                "error": t.error,
+                "started_at": t.started_at.isoformat() if t.started_at else None,
+                "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+            }
+            for t in tasks
+        ],
+        task_summary=task_summary,
+        artifacts=[
+            {
+                "id": a.id,
+                "task_id": a.task_id,
+                "name": a.name,
+                "artifact_type": a.artifact_type,
+                "path": a.path,
+                "producer_agent": a.producer_agent,
+                "created_at": a.created_at.isoformat() if a.created_at else "",
+            }
+            for a in artifacts
+        ],
+    )
+
+
+@router.get("/runs/{run_id}/tasks")
+async def get_run_tasks(run_id: str) -> list[dict]:
+    """Get all tasks for a run."""
+    from app.autonomous.repositories import RunRepository, TaskRepository
+
+    run = await RunRepository.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    tasks = await TaskRepository.get_by_run(run_id)
+    return [
+        {
+            "id": t.id,
+            "title": t.title,
+            "description": t.description,
+            "agent_id": t.agent_id,
+            "skill_id": t.skill_id,
+            "status": t.status,
+            "attempt": t.attempt,
+            "max_attempts": t.max_attempts,
+            "priority": t.priority,
+            "depends_on": t.depends_on or [],
+            "target_files": t.target_files or [],
+            "acceptance_criteria": t.acceptance_criteria or [],
+            "result": t.result,
+            "verification_results": t.verification_results,
+            "error": t.error,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "started_at": t.started_at.isoformat() if t.started_at else None,
+            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+        }
+        for t in tasks
+    ]
+
+
+@router.get("/runs/{run_id}/logs")
+async def get_run_logs(
+    run_id: str,
+    level: str | None = None,
+    task_id: str | None = None,
+    limit: int = Query(default=1000, ge=1, le=10000),
+) -> list[TaskLogResponse]:
+    """Get logs for a run with optional filters.
+
+    Provides detailed audit trail for debugging and compliance.
+    """
+    from app.autonomous.repositories import RunRepository, LogRepository
+
+    run = await RunRepository.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if task_id:
+        logs = await LogRepository.get_by_task(task_id, level=level, limit=limit)
+    else:
+        logs = await LogRepository.get_by_run(run_id, level=level, limit=limit)
+
+    return [
+        TaskLogResponse(
+            id=log.id,
+            task_id=log.task_id,
+            level=log.level,
+            message=log.message,
+            tool_name=log.tool_name,
+            tool_input=log.tool_input,
+            tool_output=log.tool_output,
+            tool_duration_ms=log.tool_duration_ms,
+            created_at=log.created_at.isoformat() if log.created_at else "",
+        )
+        for log in logs
+    ]
+
+
+@router.get("/runs/{run_id}/audit")
+async def get_run_audit_trail(
+    run_id: str,
+    tool_name: str | None = None,
+) -> list[dict]:
+    """Get tool invocation audit trail for a run.
+
+    Returns all tool calls made during the run, useful for:
+    - Debugging agent behavior
+    - Security auditing
+    - Cost analysis
+    """
+    from app.autonomous.repositories import RunRepository, LogRepository
+
+    run = await RunRepository.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    logs = await LogRepository.get_tool_audit_trail(run_id, tool_name=tool_name)
+
+    return [
+        {
+            "task_id": log.task_id,
+            "tool_name": log.tool_name,
+            "tool_input": log.tool_input,
+            "tool_output": log.tool_output[:500] if log.tool_output else None,
+            "tool_duration_ms": log.tool_duration_ms,
+            "created_at": log.created_at.isoformat() if log.created_at else "",
+        }
+        for log in logs
+    ]
+
+
+@router.get("/runs/{run_id}/artifacts")
+async def get_run_artifacts(
+    run_id: str,
+    artifact_type: str | None = None,
+) -> list[dict]:
+    """Get all artifacts produced during a run."""
+    from app.autonomous.repositories import RunRepository, ArtifactRepository
+
+    run = await RunRepository.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if artifact_type:
+        artifacts = await ArtifactRepository.get_by_type(run_id, artifact_type)
+    else:
+        artifacts = await ArtifactRepository.get_by_run(run_id)
+
+    return [
+        {
+            "id": a.id,
+            "task_id": a.task_id,
+            "name": a.name,
+            "artifact_type": a.artifact_type,
+            "path": a.path,
+            "content": a.content[:1000] if a.content else None,
+            "content_hash": a.content_hash,
+            "extra_data": a.extra_data,
+            "producer_agent": a.producer_agent,
+            "created_at": a.created_at.isoformat() if a.created_at else "",
+        }
+        for a in artifacts
+    ]
+
+
+@router.get("/runs/{run_id}/state")
+async def get_run_state(run_id: str) -> dict:
+    """Get full run state for resume capability.
+
+    Returns the complete serialized state including:
+    - Run metadata
+    - Plan JSON
+    - Task graph state
+    - Config
+    """
+    from app.autonomous.repositories import RunRepository
+
+    state = await RunRepository.get_full_state(run_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    return state
+
+
+@router.post("/runs/{run_id}/resume")
+async def resume_run(run_id: str) -> StreamingResponse:
+    """Resume a paused orchestration run.
+
+    Loads state from database and continues execution.
+    """
+    from app.autonomous.persistent_engine import get_persistent_engine
+
+    engine = get_persistent_engine()
+    status = await engine.get_run_status(run_id)
+
+    if not status:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if status.get("state") != "paused":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Run is not paused (current state: {status.get('state')})"
+        )
+
+    async def generate():
+        async for event in engine.resume(run_id):
+            yield event.to_sse()
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Run-ID": run_id,
+        },
+    )
+
+
+@router.post("/runs/{run_id}/pause")
+async def pause_run(run_id: str) -> dict:
+    """Pause a running orchestration."""
+    from app.autonomous.persistent_engine import get_persistent_engine
+
+    engine = get_persistent_engine()
+    success = await engine.pause(run_id)
+
+    if success:
+        return {"status": "paused", "run_id": run_id}
+
+    raise HTTPException(status_code=400, detail="Could not pause run")
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_run(run_id: str) -> dict:
+    """Cancel an orchestration run."""
+    from app.autonomous.persistent_engine import get_persistent_engine
+
+    engine = get_persistent_engine()
+    success = await engine.cancel(run_id)
+
+    if success:
+        return {"status": "cancelled", "run_id": run_id}
+
+    raise HTTPException(status_code=400, detail="Could not cancel run")
+
+
+@router.delete("/runs/{run_id}")
+async def delete_run(run_id: str) -> dict:
+    """Delete a run and all associated data.
+
+    This permanently removes:
+    - Run metadata
+    - All tasks
+    - All logs
+    - All artifacts
+    """
+    from app.autonomous.repositories import RunRepository
+
+    run = await RunRepository.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if run.state not in ("done", "failed", "cancelled"):
+        raise HTTPException(
+            status_code=400,
+            detail="Can only delete completed, failed, or cancelled runs"
+        )
+
+    await RunRepository.delete(run_id)
+    return {"status": "deleted", "run_id": run_id}
+
+
+@router.get("/runs/interrupted")
+async def list_interrupted_runs() -> list[dict]:
+    """List runs that were interrupted by server restart.
+
+    These runs can be resumed using the resume endpoint.
+    """
+    from app.autonomous.persistent_engine import get_persistent_engine
+
+    engine = get_persistent_engine()
+    return await engine.load_interrupted_runs()

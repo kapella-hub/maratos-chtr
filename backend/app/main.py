@@ -21,6 +21,7 @@ from app.channels.manager import channel_manager, init_channels
 from app.skills.loader import load_skills_from_dir
 from app.api.models import HealthResponse
 from app.logging_config import setup_logging
+from app.audit import audit_logger
 
 # Configure logging early
 setup_logging(debug=settings.debug, json_logs=not settings.debug)
@@ -45,6 +46,10 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
+    # Start audit logger
+    await audit_logger.start()
+    logger.info("Audit logger started")
+
     # Load skills
     skills_dir = Path(__file__).parent.parent / "skills"
     if skills_dir.exists():
@@ -63,6 +68,15 @@ async def lifespan(app: FastAPI):
         init_channels(channel_config)
         await channel_manager.start_all()
         logger.info(f"Started {len(channel_config)} channels")
+
+    # Handle any interrupted tasks from previous run
+    try:
+        from app.subagents.manager import subagent_manager
+        interrupted_count = await subagent_manager.mark_interrupted_as_failed()
+        if interrupted_count > 0:
+            logger.info(f"Marked {interrupted_count} interrupted tasks as failed")
+    except Exception as e:
+        logger.warning(f"Failed to handle interrupted tasks: {e}")
 
     logger.info("MaratOS ready to serve requests")
 
@@ -88,6 +102,13 @@ async def lifespan(app: FastAPI):
         logger.info("All channels stopped")
     except Exception as e:
         logger.error(f"Error stopping channels: {e}")
+
+    # Stop audit logger (flush remaining events)
+    try:
+        await audit_logger.stop()
+        logger.info("Audit logger stopped")
+    except Exception as e:
+        logger.error(f"Error stopping audit logger: {e}")
 
     # Close database connections
     try:

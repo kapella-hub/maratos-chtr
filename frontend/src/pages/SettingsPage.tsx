@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings, Save, Loader2, FolderOpen, Plus, Trash2, Edit3, X, Check, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch } from 'lucide-react'
-import { fetchConfig, updateConfig, type Config, fetchProjects, createProject, updateProject, deleteProject, analyzeProject, removeAllowedDirectory, addAllowedDirectory, type Project } from '@/lib/api'
+import { Settings, Save, Loader2, FolderOpen, Plus, Trash2, Edit3, X, Check, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch, FileText, ChevronDown, ChevronRight } from 'lucide-react'
+import { fetchConfig, updateConfig, type Config, fetchProjects, createProject, updateProject, deleteProject, analyzeProject, removeAllowedDirectory, addAllowedDirectory, type Project, fetchProjectDocs, createProjectDoc, updateProjectDoc, deleteProjectDoc, fetchProjectDoc } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useState, useEffect } from 'react'
 import FolderBrowser from '@/components/FolderBrowser'
@@ -39,6 +39,10 @@ export default function SettingsPage() {
   const [showFolderBrowser, setShowFolderBrowser] = useState(false)
   const [folderBrowserTarget, setFolderBrowserTarget] = useState<'project' | 'allowedDir'>('project')
   const [removingDir, setRemovingDir] = useState<string | null>(null)
+  // Documentation state
+  const [showDocsPanel, setShowDocsPanel] = useState(false)
+  const [editingDoc, setEditingDoc] = useState<{ title: string; content: string; tags: string; id?: string } | null>(null)
+  const [docError, setDocError] = useState<string | null>(null)
 
   const { data: config, isLoading } = useQuery({
     queryKey: ['config'],
@@ -79,6 +83,41 @@ export default function SettingsPage() {
   const mutation = useMutation({
     mutationFn: updateConfig,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['config'] }),
+  })
+
+  // Project docs queries and mutations
+  const { data: projectDocs = [], isLoading: docsLoading } = useQuery({
+    queryKey: ['project-docs', editingProject?.name],
+    queryFn: () => editingProject?.name ? fetchProjectDocs(editingProject.name) : Promise.resolve([]),
+    enabled: !!editingProject?.name && !isAddingProject,
+  })
+
+  const createDocMutation = useMutation({
+    mutationFn: ({ projectName, data }: { projectName: string; data: { title: string; content: string; tags?: string[] } }) =>
+      createProjectDoc(projectName, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project-docs', editingProject?.name] })
+      setEditingDoc(null)
+      setDocError(null)
+    },
+    onError: (error: Error) => setDocError(error.message),
+  })
+
+  const updateDocMutation = useMutation({
+    mutationFn: ({ projectName, docId, data }: { projectName: string; docId: string; data: { title?: string; content?: string; tags?: string[] } }) =>
+      updateProjectDoc(projectName, docId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project-docs', editingProject?.name] })
+      setEditingDoc(null)
+      setDocError(null)
+    },
+    onError: (error: Error) => setDocError(error.message),
+  })
+
+  const deleteDocMutation = useMutation({
+    mutationFn: ({ projectName, docId }: { projectName: string; docId: string }) =>
+      deleteProjectDoc(projectName, docId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project-docs', editingProject?.name] }),
   })
 
   useEffect(() => {
@@ -278,6 +317,162 @@ export default function SettingsPage() {
                         <p className="text-xs text-muted-foreground">Allow MO to modify files in this project</p>
                       </div>
                     </label>
+
+                    {/* Documentation Panel - only for existing projects */}
+                    {!isAddingProject && (
+                      <div className="border border-border rounded-lg overflow-hidden">
+                        <button
+                          onClick={() => setShowDocsPanel(!showDocsPanel)}
+                          className="w-full flex items-center gap-2 px-3 py-2 bg-muted/30 hover:bg-muted/50 transition-colors"
+                        >
+                          {showDocsPanel ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                          <FileText className="w-4 h-4 text-blue-500" />
+                          <span className="text-sm font-medium">Documentation</span>
+                          <span className="text-xs text-muted-foreground ml-auto">
+                            {projectDocs.length} {projectDocs.length === 1 ? 'doc' : 'docs'}
+                          </span>
+                        </button>
+
+                        {showDocsPanel && (
+                          <div className="p-3 space-y-3 border-t border-border">
+                            {docError && (
+                              <div className="p-2 rounded bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+                                {docError}
+                              </div>
+                            )}
+
+                            {/* Doc Editor */}
+                            {editingDoc && (
+                              <div className="p-3 rounded-lg border border-blue-500/30 bg-blue-500/5 space-y-2">
+                                <input
+                                  type="text"
+                                  placeholder="Document title"
+                                  value={editingDoc.title}
+                                  onChange={(e) => setEditingDoc({ ...editingDoc, title: e.target.value })}
+                                  className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-input focus:outline-none focus:ring-2 focus:ring-ring"
+                                />
+                                <textarea
+                                  placeholder="Documentation content (markdown supported)"
+                                  value={editingDoc.content}
+                                  onChange={(e) => setEditingDoc({ ...editingDoc, content: e.target.value })}
+                                  rows={6}
+                                  className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-input focus:outline-none focus:ring-2 focus:ring-ring font-mono resize-y"
+                                />
+                                <input
+                                  type="text"
+                                  placeholder="Tags (comma-separated)"
+                                  value={editingDoc.tags}
+                                  onChange={(e) => setEditingDoc({ ...editingDoc, tags: e.target.value })}
+                                  className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-input focus:outline-none focus:ring-2 focus:ring-ring"
+                                />
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    onClick={() => { setEditingDoc(null); setDocError(null) }}
+                                    className="px-3 py-1.5 rounded text-xs hover:bg-muted"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      if (!editingDoc.title.trim() || !editingDoc.content.trim()) {
+                                        setDocError('Title and content are required')
+                                        return
+                                      }
+                                      const tags = editingDoc.tags.split(',').map(t => t.trim()).filter(Boolean)
+                                      if (editingDoc.id) {
+                                        updateDocMutation.mutate({
+                                          projectName: editingProject.name,
+                                          docId: editingDoc.id,
+                                          data: { title: editingDoc.title, content: editingDoc.content, tags }
+                                        })
+                                      } else {
+                                        createDocMutation.mutate({
+                                          projectName: editingProject.name,
+                                          data: { title: editingDoc.title, content: editingDoc.content, tags }
+                                        })
+                                      }
+                                    }}
+                                    disabled={createDocMutation.isPending || updateDocMutation.isPending}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+                                  >
+                                    {(createDocMutation.isPending || updateDocMutation.isPending) && <Loader2 className="w-3 h-3 animate-spin" />}
+                                    {editingDoc.id ? 'Update' : 'Add'}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Add Doc Button */}
+                            {!editingDoc && (
+                              <button
+                                onClick={() => setEditingDoc({ title: '', content: '', tags: '' })}
+                                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                Add Documentation
+                              </button>
+                            )}
+
+                            {/* Docs List */}
+                            {docsLoading ? (
+                              <div className="flex justify-center py-4">
+                                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                              </div>
+                            ) : projectDocs.length === 0 && !editingDoc ? (
+                              <p className="text-center text-xs text-muted-foreground py-4">
+                                No documentation yet. Add notes, API guides, or conventions.
+                              </p>
+                            ) : (
+                              <div className="space-y-1">
+                                {projectDocs.map((doc) => (
+                                  <div
+                                    key={doc.id}
+                                    className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 group"
+                                  >
+                                    <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-sm font-medium truncate">{doc.title}</div>
+                                      {doc.tags.length > 0 && (
+                                        <div className="flex gap-1 mt-0.5">
+                                          {doc.tags.slice(0, 3).map(tag => (
+                                            <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{tag}</span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            const fullDoc = await fetchProjectDoc(editingProject.name, doc.id)
+                                            setEditingDoc({ id: doc.id, title: fullDoc.title, content: fullDoc.content, tags: fullDoc.tags.join(', ') })
+                                          } catch (e) {
+                                            setDocError('Failed to load doc')
+                                          }
+                                        }}
+                                        className="p-1 rounded hover:bg-muted"
+                                      >
+                                        <Edit3 className="w-3 h-3 text-muted-foreground" />
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          if (confirm(`Delete "${doc.title}"?`)) {
+                                            deleteDocMutation.mutate({ projectName: editingProject.name, docId: doc.id })
+                                          }
+                                        }}
+                                        className="p-1 rounded hover:bg-red-500/10"
+                                      >
+                                        <Trash2 className="w-3 h-3 text-red-400" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Actions */}
                     <div className="flex justify-end gap-2 pt-2">

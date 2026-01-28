@@ -1,0 +1,213 @@
+# Security Review
+# Performs comprehensive security analysis
+
+id: security-review
+name: Security Review
+description: Performs security audit including static analysis, dependency scanning, and vulnerability assessment
+version: "1.0.0"
+author: MaratOS
+
+task_types:
+  - security_review
+
+tags:
+  - security
+  - audit
+  - vulnerability
+  - owasp
+  - sast
+
+triggers:
+  - security review
+  - security audit
+  - security scan
+  - check vulnerabilities
+  - owasp check
+
+inputs:
+  - name: workdir
+    type: path
+    description: Project directory to scan
+    required: true
+
+  - name: project_type
+    type: string
+    description: "Project type (python, node, go)"
+    required: true
+
+  - name: severity_threshold
+    type: string
+    description: "Minimum severity to report (low, medium, high, critical)"
+    default: medium
+
+  - name: include_deps
+    type: boolean
+    description: Include dependency vulnerability scan
+    default: true
+
+  - name: include_secrets
+    type: boolean
+    description: Scan for hardcoded secrets
+    default: true
+
+outputs:
+  - name: report_path
+    type: path
+    description: Path to security report
+
+  - name: findings
+    type: array
+    description: List of security findings
+
+  - name: severity_counts
+    type: object
+    description: Count of findings by severity
+
+produces:
+  - name: security_report
+    type: report
+    path_template: "{{workdir}}/security-report.md"
+    description: Detailed security report
+
+  - name: sarif_report
+    type: report
+    path_template: "{{workdir}}/security.sarif"
+    description: SARIF format for CI integration
+    required: false
+
+requires_tools:
+  - kiro
+  - shell
+
+quality_gates:
+  - id: no_critical
+    type: command_success
+    command: "grep -c 'CRITICAL' {{workdir}}/security-report.md | [ $(cat) -eq 0 ]"
+    description: No critical vulnerabilities found
+
+  - id: no_secrets
+    type: command_success
+    command: "grep -c 'SECRET DETECTED' {{workdir}}/security-report.md | [ $(cat) -eq 0 ]"
+    description: No hardcoded secrets found
+
+system_context: |
+  You are performing a comprehensive security review.
+
+  OWASP Top 10 checks:
+  1. Injection (SQL, Command, LDAP)
+  2. Broken Authentication
+  3. Sensitive Data Exposure
+  4. XML External Entities
+  5. Broken Access Control
+  6. Security Misconfiguration
+  7. Cross-Site Scripting (XSS)
+  8. Insecure Deserialization
+  9. Using Components with Known Vulnerabilities
+  10. Insufficient Logging & Monitoring
+
+  Code review focus:
+  - Input validation
+  - Output encoding
+  - Authentication flows
+  - Authorization checks
+  - Cryptographic usage
+  - Error handling
+  - Logging practices
+
+  Report format:
+  - Executive summary
+  - Critical findings first
+  - Clear remediation steps
+  - Risk ratings (CVSS style)
+
+quality_checklist:
+  - All endpoints checked for injection
+  - Authentication reviewed
+  - Secrets scanning complete
+  - Dependencies audited
+  - Report generated
+
+workflow:
+  - name: analyze_codebase
+    action: kiro_prompt
+    description: Analyze codebase for security patterns
+    params:
+      task: |
+        Analyze the {{project_type}} project at {{workdir}} for:
+        1. Authentication implementation
+        2. Authorization patterns
+        3. Input handling
+        4. Database queries
+        5. API endpoints
+        6. File operations
+        7. External API calls
+        8. Cryptographic usage
+
+  - name: run_sast
+    action: kiro_validate
+    description: Static application security testing
+    params:
+      task: |
+        Perform static security analysis on the codebase.
+
+        Check for:
+        - SQL injection vulnerabilities
+        - Command injection
+        - Path traversal
+        - XSS vulnerabilities
+        - Hardcoded secrets
+        - Insecure cryptography
+        - Dangerous function usage
+
+        Severity threshold: {{severity_threshold}}
+      files: "**/*.py,**/*.js,**/*.ts"
+      workdir: "{{workdir}}"
+
+  - name: scan_dependencies
+    action: shell
+    condition: "include_deps == true"
+    description: Scan dependencies for vulnerabilities
+    params:
+      command: |
+        if [ -f "{{workdir}}/requirements.txt" ] || [ -f "{{workdir}}/pyproject.toml" ]; then
+          pip-audit --desc --format=json > {{workdir}}/dep-audit.json 2>/dev/null || echo '[]' > {{workdir}}/dep-audit.json
+        fi
+        if [ -f "{{workdir}}/package.json" ]; then
+          npm audit --json > {{workdir}}/npm-audit.json 2>/dev/null || echo '{}' > {{workdir}}/npm-audit.json
+        fi
+      workdir: "{{workdir}}"
+
+  - name: scan_secrets
+    action: shell
+    condition: "include_secrets == true"
+    description: Scan for hardcoded secrets
+    params:
+      command: |
+        # Simple secret patterns (in production, use truffleHog or gitleaks)
+        grep -rn "password\s*=\s*['\"]" {{workdir}} --include="*.py" --include="*.js" --include="*.ts" > {{workdir}}/secret-scan.txt 2>/dev/null || true
+        grep -rn "api_key\s*=\s*['\"]" {{workdir}} --include="*.py" --include="*.js" --include="*.ts" >> {{workdir}}/secret-scan.txt 2>/dev/null || true
+        grep -rn "AWS_SECRET" {{workdir}} --include="*.py" --include="*.js" --include="*.ts" >> {{workdir}}/secret-scan.txt 2>/dev/null || true
+      workdir: "{{workdir}}"
+
+  - name: generate_report
+    action: kiro_prompt
+    description: Generate security report
+    params:
+      task: |
+        Generate a comprehensive security report based on the analysis.
+
+        Include:
+        1. Executive Summary
+        2. Critical Findings (with remediation)
+        3. High Severity Issues
+        4. Medium Severity Issues
+        5. Low Severity Issues
+        6. Dependency Vulnerabilities
+        7. Recommendations
+        8. Next Steps
+
+        Format as Markdown and save to {{workdir}}/security-report.md
+
+retry_policy:
+  max_attempts: 2
+  backoff_seconds: 5.0

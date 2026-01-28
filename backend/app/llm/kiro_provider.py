@@ -154,6 +154,11 @@ class KiroProvider:
         # Remove excessive empty lines
         result = '\n'.join(cleaned)
         result = re.sub(r'\n{3,}', '\n\n', result)
+
+        # Remove internal tool call/results blocks (shouldn't be shown to user)
+        result = re.sub(r'<tool_call>.*?</tool_call>\s*', '', result, flags=re.DOTALL)
+        result = re.sub(r'<tool_results?>.*?</tool_results?>\s*', '', result, flags=re.DOTALL)
+
         return result.strip()
 
     def _format_messages_as_prompt(

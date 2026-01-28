@@ -1,0 +1,212 @@
+# Ingest Project Skill
+# Generates context pack for project understanding without loading full repo
+
+id: ingest-project
+name: Ingest Project
+description: |
+  Analyzes a project and generates a context pack for efficient project understanding.
+  Creates: project.json manifest, MODULE_MAP.json, ENTRYPOINTS.json, and optionally ARCHITECTURE.md.
+  Enables fast code search and context retrieval without loading entire repos into LLM context.
+version: "1.0.0"
+author: MaratOS
+
+task_types:
+  - project_analysis
+  - project_understanding
+
+tags:
+  - project
+  - analysis
+  - context
+  - search
+  - understanding
+
+triggers:
+  - ingest project
+  - analyze project
+  - understand project
+  - scan project
+  - index project
+  - generate context pack
+  - create context pack
+
+inputs:
+  - name: project_path
+    type: path
+    description: Path to the project directory to analyze
+    required: true
+
+  - name: project_name
+    type: string
+    description: Name for the project (defaults to directory name)
+    required: false
+
+  - name: generate_architecture
+    type: boolean
+    description: Generate ARCHITECTURE.md using LLM analysis (slower but more detailed)
+    default: false
+
+  - name: force_regenerate
+    type: boolean
+    description: Force regeneration even if context pack exists and is fresh
+    default: false
+
+outputs:
+  - name: context_pack_path
+    type: path
+    description: Path to generated context pack directory
+
+  - name: manifest
+    type: object
+    description: Generated project manifest
+
+  - name: module_count
+    type: number
+    description: Number of modules detected
+
+  - name: entrypoint_count
+    type: number
+    description: Number of entrypoints detected
+
+produces:
+  - name: project_manifest
+    type: config
+    path_template: "~/.maratos/context-packs/{{project_name}}/project.json"
+    description: Project manifest with language, commands, dependencies
+
+  - name: module_map
+    type: config
+    path_template: "~/.maratos/context-packs/{{project_name}}/MODULE_MAP.json"
+    description: Folder to domain mappings
+
+  - name: entrypoints
+    type: config
+    path_template: "~/.maratos/context-packs/{{project_name}}/ENTRYPOINTS.json"
+    description: Main entry point files
+
+  - name: architecture
+    type: documentation
+    path_template: "~/.maratos/context-packs/{{project_name}}/ARCHITECTURE.md"
+    description: Generated architecture documentation
+    required: false
+
+requires_tools:
+  - filesystem
+  - kiro
+
+quality_gates:
+  - id: manifest_valid
+    type: file_exists
+    file_path: "~/.maratos/context-packs/{{project_name}}/project.json"
+    description: Project manifest was generated
+
+  - id: module_map_valid
+    type: file_exists
+    file_path: "~/.maratos/context-packs/{{project_name}}/MODULE_MAP.json"
+    description: Module map was generated
+
+  - id: entrypoints_valid
+    type: file_exists
+    file_path: "~/.maratos/context-packs/{{project_name}}/ENTRYPOINTS.json"
+    description: Entrypoints list was generated
+
+system_context: |
+  You are generating a context pack for project understanding.
+
+  The context pack enables:
+  1. Fast project overview without loading full repo
+  2. Efficient code search via ripgrep
+  3. Module/domain mapping for navigation
+  4. Entry point identification
+
+  Analysis principles:
+  - Focus on structure, not implementation details
+  - Identify key modules and their responsibilities
+  - Map folders to semantic domains (api, auth, database, etc.)
+  - Find main entry points for each component
+  - Extract build/test/run commands
+
+  Output format:
+  - project.json: manifest with language, framework, commands
+  - MODULE_MAP.json: folder -> domain mapping
+  - ENTRYPOINTS.json: main files list
+  - ARCHITECTURE.md: high-level architecture overview (optional)
+
+quality_checklist:
+  - Manifest includes correct language and framework
+  - Commands are accurate and runnable
+  - All source directories are mapped
+  - Entry points are correctly identified
+  - Dependencies are extracted
+
+workflow:
+  - name: validate_path
+    action: shell
+    description: Validate project path exists
+    params:
+      command: "test -d '{{project_path}}' && echo 'valid' || echo 'invalid'"
+
+  - name: generate_pack
+    action: kiro_prompt
+    description: Generate context pack using Python analyzer
+    params:
+      task: |
+        Generate a context pack for the project at: {{project_path}}
+
+        Use the Python API to generate the context pack:
+        ```python
+        from app.projects import generate_context_pack, save_context_pack
+
+        pack = generate_context_pack("{{project_path}}")
+        project_name = "{{project_name}}" or pack.manifest.name
+        save_context_pack(pack, project_name)
+        ```
+
+        Report:
+        1. Language and framework detected
+        2. Commands found (build, test, run, lint)
+        3. Number of modules mapped
+        4. Entry points identified
+        5. Key dependencies
+
+  - name: generate_architecture
+    action: kiro_architect
+    condition: "generate_architecture == true"
+    description: Generate ARCHITECTURE.md with LLM
+    params:
+      task: |
+        Analyze the project structure and generate ARCHITECTURE.md.
+
+        Read key files to understand:
+        1. Overall architecture pattern (monolith, microservices, etc.)
+        2. Data flow between components
+        3. External integrations
+        4. Key abstractions and their purposes
+
+        Format as markdown with:
+        - Overview
+        - Component diagram (ASCII)
+        - Data flow description
+        - Key design decisions
+        - Technology choices
+      workdir: "{{project_path}}"
+
+  - name: verify_outputs
+    action: shell
+    description: Verify context pack was generated
+    params:
+      command: |
+        PACK_DIR="$HOME/.maratos/context-packs/{{project_name}}"
+        if [ -f "$PACK_DIR/project.json" ] && [ -f "$PACK_DIR/MODULE_MAP.json" ]; then
+          echo "Context pack generated successfully at $PACK_DIR"
+          cat "$PACK_DIR/project.json" | head -20
+        else
+          echo "ERROR: Context pack generation failed"
+          exit 1
+        fi
+
+retry_policy:
+  max_attempts: 2
+  backoff_seconds: 5.0
+
+timeout_seconds: 300
