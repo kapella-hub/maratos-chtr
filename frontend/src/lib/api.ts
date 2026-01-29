@@ -225,7 +225,8 @@ export async function* streamChat(
   agentId: string = 'mo',
   sessionId?: string,
   signal?: AbortSignal,
-  projectName?: string | null
+  projectName?: string | null,
+  ruleIds?: string[]
 ): AsyncGenerator<ChatEvent> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
@@ -235,6 +236,7 @@ export async function* streamChat(
       agent_id: agentId,
       session_id: sessionId,
       project_name: projectName || undefined,
+      rule_ids: ruleIds?.length ? ruleIds : undefined,
     }),
     signal,
   })
@@ -1610,4 +1612,91 @@ export function subscribeToApprovals(
 
   // Return cleanup function
   return () => eventSource.close()
+}
+
+// =============================================================================
+// Rules API - Development Standards & Guidelines
+// =============================================================================
+
+export interface Rule {
+  id: string
+  name: string
+  description: string
+  content: string
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface RuleListItem {
+  id: string
+  name: string
+  description: string
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export async function fetchRules(): Promise<RuleListItem[]> {
+  const res = await fetch(`${API_BASE}/rules`)
+  if (!res.ok) throw new Error('Failed to fetch rules')
+  return res.json()
+}
+
+export async function fetchRule(id: string): Promise<Rule> {
+  const res = await fetch(`${API_BASE}/rules/${encodeURIComponent(id)}`)
+  if (!res.ok) throw new Error('Failed to fetch rule')
+  return res.json()
+}
+
+export async function createRule(data: {
+  name: string
+  description?: string
+  content: string
+  tags?: string[]
+}): Promise<Rule> {
+  const res = await fetch(`${API_BASE}/rules`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Failed to create rule' }))
+    throw new Error(error.detail || 'Failed to create rule')
+  }
+  return res.json()
+}
+
+export async function updateRule(
+  id: string,
+  data: { name?: string; description?: string; content?: string; tags?: string[] }
+): Promise<Rule> {
+  const res = await fetch(`${API_BASE}/rules/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Failed to update rule' }))
+    throw new Error(error.detail || 'Failed to update rule')
+  }
+  return res.json()
+}
+
+export async function deleteRule(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/rules/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error('Failed to delete rule')
+}
+
+export async function createExampleRules(): Promise<Rule[]> {
+  const res = await fetch(`${API_BASE}/rules/examples`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Failed to create example rules' }))
+    throw new Error(error.detail || 'Failed to create example rules')
+  }
+  return res.json()
 }

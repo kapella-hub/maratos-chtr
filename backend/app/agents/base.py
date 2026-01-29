@@ -196,6 +196,10 @@ class Agent:
             if "project" in context and context["project"]:
                 prompt += f"\n\n{context['project']}\n"
 
+            # Inject rules (development standards, guidelines)
+            if "rules" in context and context["rules"]:
+                prompt += f"\n\n{context['rules']}\n"
+
             # Inject workspace path
             if "workspace" in context:
                 prompt += f"\n\n## Workspace\nAll file modifications must be in: `{context['workspace']}`\n"

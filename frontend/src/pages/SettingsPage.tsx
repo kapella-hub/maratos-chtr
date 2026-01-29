@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings, Save, Loader2, FolderOpen, Plus, Trash2, Edit3, X, Check, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch, FileText, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
-import { fetchConfig, updateConfig, type Config, fetchProjects, createProject, updateProject, deleteProject, analyzeProject, removeAllowedDirectory, addAllowedDirectory, type Project, fetchProjectDocs, createProjectDoc, updateProjectDoc, deleteProjectDoc, fetchProjectDoc } from '@/lib/api'
+import { Settings, Save, Loader2, FolderOpen, Plus, Trash2, Edit3, X, Check, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch, FileText, ChevronDown, ChevronRight, RefreshCw, Scale } from 'lucide-react'
+import { fetchConfig, updateConfig, type Config, fetchProjects, createProject, updateProject, deleteProject, analyzeProject, removeAllowedDirectory, addAllowedDirectory, type Project, fetchProjectDocs, createProjectDoc, updateProjectDoc, deleteProjectDoc, fetchProjectDoc, fetchRules, fetchRule, createRule, updateRule, deleteRule, createExampleRules } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useState, useEffect } from 'react'
 import FolderBrowser from '@/components/FolderBrowser'
@@ -44,6 +44,9 @@ export default function SettingsPage() {
   const [showDocsPanel, setShowDocsPanel] = useState(false)
   const [editingDoc, setEditingDoc] = useState<{ title: string; content: string; tags: string; is_core: boolean; id?: string } | null>(null)
   const [docError, setDocError] = useState<string | null>(null)
+  // Rules state
+  const [editingRule, setEditingRule] = useState<{ id?: string; name: string; description: string; content: string; tags: string } | null>(null)
+  const [ruleError, setRuleError] = useState<string | null>(null)
 
   const { data: config, isLoading } = useQuery({
     queryKey: ['config'],
@@ -119,6 +122,44 @@ export default function SettingsPage() {
     mutationFn: ({ projectName, docId }: { projectName: string; docId: string }) =>
       deleteProjectDoc(projectName, docId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project-docs', editingProject?.name] }),
+  })
+
+  // Rules queries and mutations
+  const { data: rules = [], isLoading: rulesLoading } = useQuery({
+    queryKey: ['rules'],
+    queryFn: fetchRules,
+  })
+
+  const createRuleMutation = useMutation({
+    mutationFn: (data: { name: string; description?: string; content: string; tags?: string[] }) => createRule(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rules'] })
+      setEditingRule(null)
+      setRuleError(null)
+    },
+    onError: (error: Error) => setRuleError(error.message),
+  })
+
+  const updateRuleMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { name?: string; description?: string; content?: string; tags?: string[] } }) =>
+      updateRule(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rules'] })
+      setEditingRule(null)
+      setRuleError(null)
+    },
+    onError: (error: Error) => setRuleError(error.message),
+  })
+
+  const deleteRuleMutation = useMutation({
+    mutationFn: deleteRule,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['rules'] }),
+  })
+
+  const createExamplesMutation = useMutation({
+    mutationFn: createExampleRules,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['rules'] }),
+    onError: (error: Error) => setRuleError(error.message),
   })
 
   useEffect(() => {
@@ -604,6 +645,212 @@ export default function SettingsPage() {
                           onClick={() => { if (confirm(`Delete "${project.name}"?`)) deleteProjectMutation.mutate(project.name) }}
                           className="p-1.5 rounded hover:bg-red-500/10"
                           title="Delete project"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Rules Section */}
+          <section className="bg-card rounded-xl border border-border overflow-hidden">
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Scale className="w-4 h-4 text-emerald-500" />
+                <h2 className="font-medium">Development Rules</h2>
+                <span className="text-xs text-muted-foreground">({rules.length})</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {rules.length === 0 && (
+                  <button
+                    onClick={() => createExamplesMutation.mutate()}
+                    disabled={createExamplesMutation.isPending}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 disabled:opacity-50 transition-colors"
+                  >
+                    {createExamplesMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                    Add Examples
+                  </button>
+                )}
+                <button
+                  onClick={() => setEditingRule({ name: '', description: '', content: '', tags: '' })}
+                  disabled={!!editingRule}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm',
+                    'bg-primary/10 text-primary hover:bg-primary/20',
+                    'disabled:opacity-50 transition-colors'
+                  )}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4">
+              {ruleError && (
+                <div className="p-3 mb-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                  {ruleError}
+                </div>
+              )}
+
+              {/* Rule Editor */}
+              {editingRule && (
+                <div className="p-4 mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-medium text-sm">
+                      {editingRule.id ? `Edit: ${editingRule.name}` : 'Add Rule'}
+                    </h3>
+                    <button
+                      onClick={() => { setEditingRule(null); setRuleError(null) }}
+                      className="p-1 hover:bg-muted rounded"
+                    >
+                      <X className="w-4 h-4 text-muted-foreground" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
+                        <input
+                          type="text"
+                          placeholder="Clean Code Standards"
+                          value={editingRule.name}
+                          onChange={(e) => setEditingRule({ ...editingRule, name: e.target.value })}
+                          className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-input focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1">Tags</label>
+                        <input
+                          type="text"
+                          placeholder="python, testing, backend"
+                          value={editingRule.tags}
+                          onChange={(e) => setEditingRule({ ...editingRule, tags: e.target.value })}
+                          className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-input focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Description</label>
+                      <input
+                        type="text"
+                        placeholder="Brief description of this rule"
+                        value={editingRule.description}
+                        onChange={(e) => setEditingRule({ ...editingRule, description: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-input focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Content (Markdown)</label>
+                      <textarea
+                        placeholder="Write the rule content here. This will be injected into the prompt when this rule is selected."
+                        value={editingRule.content}
+                        onChange={(e) => setEditingRule({ ...editingRule, content: e.target.value })}
+                        rows={8}
+                        className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-input focus:outline-none focus:ring-2 focus:ring-ring font-mono resize-y"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button
+                        onClick={() => { setEditingRule(null); setRuleError(null) }}
+                        className="px-4 py-2 rounded-lg text-sm hover:bg-muted"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (!editingRule.name.trim() || !editingRule.content.trim()) {
+                            setRuleError('Name and content are required')
+                            return
+                          }
+                          const tags = editingRule.tags.split(',').map(t => t.trim()).filter(Boolean)
+                          if (editingRule.id) {
+                            updateRuleMutation.mutate({
+                              id: editingRule.id,
+                              data: { name: editingRule.name, description: editingRule.description, content: editingRule.content, tags }
+                            })
+                          } else {
+                            createRuleMutation.mutate({
+                              name: editingRule.name,
+                              description: editingRule.description,
+                              content: editingRule.content,
+                              tags
+                            })
+                          }
+                        }}
+                        disabled={createRuleMutation.isPending || updateRuleMutation.isPending}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                      >
+                        {(createRuleMutation.isPending || updateRuleMutation.isPending) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                        {editingRule.id ? 'Save' : 'Create'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Rules List */}
+              {rulesLoading ? (
+                <div className="flex justify-center p-8">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : rules.length === 0 && !editingRule ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Scale className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No rules yet</p>
+                  <p className="text-xs mt-1">Add development standards that can be applied to any chat</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {rules.map((rule) => (
+                    <div key={rule.id} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:border-emerald-500/30 transition-colors">
+                      <Scale className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm">{rule.name}</div>
+                        {rule.description && (
+                          <p className="text-xs text-muted-foreground truncate">{rule.description}</p>
+                        )}
+                      </div>
+                      {rule.tags.length > 0 && (
+                        <div className="hidden sm:flex gap-1">
+                          {rule.tags.slice(0, 3).map((tag) => (
+                            <span key={tag} className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">{tag}</span>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex gap-1">
+                        <button
+                          onClick={async () => {
+                            try {
+                              const fullRule = await fetchRule(rule.id)
+                              setEditingRule({
+                                id: fullRule.id,
+                                name: fullRule.name,
+                                description: fullRule.description,
+                                content: fullRule.content,
+                                tags: fullRule.tags.join(', ')
+                              })
+                            } catch (e) {
+                              setRuleError('Failed to load rule')
+                            }
+                          }}
+                          className="p-1.5 rounded hover:bg-muted"
+                          title="Edit rule"
+                        >
+                          <Edit3 className="w-3.5 h-3.5 text-muted-foreground" />
+                        </button>
+                        <button
+                          onClick={() => { if (confirm(`Delete "${rule.name}"?`)) deleteRuleMutation.mutate(rule.id) }}
+                          className="p-1.5 rounded hover:bg-red-500/10"
+                          title="Delete rule"
                         >
                           <Trash2 className="w-3.5 h-3.5 text-red-400" />
                         </button>

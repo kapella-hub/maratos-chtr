@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react'
-import { Send, Square, ListPlus, Sparkles, FolderCode, ChevronDown, ChevronRight, X, Loader2 } from 'lucide-react'
+import { Send, Square, ListPlus, Sparkles, FolderCode, ChevronDown, ChevronRight, X, Loader2, Scale, Check } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import SkillSelector from './SkillSelector'
-import type { Skill } from '@/lib/api'
+import type { Skill, RuleListItem } from '@/lib/api'
 import { fetchProjectStructure } from '@/lib/api'
 
 // Session commands
@@ -15,7 +15,7 @@ interface Project {
 }
 
 interface ChatInputProps {
-  onSend: (message: string, skill?: Skill | null) => void
+  onSend: (message: string, skill?: Skill | null, ruleIds?: string[]) => void
   onQueue?: (message: string) => void
   onStop?: () => void
   onCommand?: (command: SessionCommand) => void
@@ -26,6 +26,9 @@ interface ChatInputProps {
   projects?: Project[]
   selectedProject?: string | null
   onProjectSelect?: (projectName: string | null) => void
+  rules?: RuleListItem[]
+  selectedRules?: string[]
+  onRulesChange?: (ruleIds: string[]) => void
 }
 
 export default function ChatInput({
@@ -39,16 +42,21 @@ export default function ChatInput({
   projects = [],
   selectedProject,
   onProjectSelect,
+  rules = [],
+  selectedRules = [],
+  onRulesChange,
 }: ChatInputProps) {
   const [input, setInput] = useState('')
   const [isFocused, setIsFocused] = useState(false)
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null)
   const [showProjectDropdown, setShowProjectDropdown] = useState(false)
+  const [showRulesDropdown, setShowRulesDropdown] = useState(false)
   const [expandedProject, setExpandedProject] = useState<string | null>(null)
   const [projectStructure, setProjectStructure] = useState<string | null>(null)
   const [loadingStructure, setLoadingStructure] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const projectDropdownRef = useRef<HTMLDivElement>(null)
+  const rulesDropdownRef = useRef<HTMLDivElement>(null)
 
   // Fetch project structure when expanded
   useEffect(() => {
@@ -63,12 +71,15 @@ export default function ChatInput({
     }
   }, [expandedProject])
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (projectDropdownRef.current && !projectDropdownRef.current.contains(event.target as Node)) {
         setShowProjectDropdown(false)
         setExpandedProject(null)
+      }
+      if (rulesDropdownRef.current && !rulesDropdownRef.current.contains(event.target as Node)) {
+        setShowRulesDropdown(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -108,7 +119,7 @@ export default function ChatInput({
       onQueue(trimmed)
       setInput('')
     } else if (!isLoading) {
-      onSend(trimmed, selectedSkill)
+      onSend(trimmed, selectedSkill, selectedRules.length > 0 ? selectedRules : undefined)
       setInput('')
       setSelectedSkill(null) // Clear skill after sending
     }
@@ -344,6 +355,116 @@ export default function ChatInput({
                                 </AnimatePresence>
                               </div>
                             ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
+
+                {/* Rules selector button */}
+                {rules.length > 0 && onRulesChange && (
+                  <div className="relative" ref={rulesDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowRulesDropdown(!showRulesDropdown)}
+                      disabled={isLoading}
+                      className={cn(
+                        'flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm transition-all',
+                        'hover:bg-muted/50 disabled:opacity-50',
+                        selectedRules.length > 0
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                      title={selectedRules.length > 0 ? `${selectedRules.length} rules selected` : 'Select rules'}
+                    >
+                      <Scale className="w-4 h-4" />
+                      {selectedRules.length > 0 ? (
+                        <>
+                          <span className="font-medium">{selectedRules.length}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onRulesChange([])
+                            }}
+                            className="p-0.5 hover:bg-emerald-500/20 rounded"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </>
+                      ) : (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+
+                    {/* Rules dropdown */}
+                    <AnimatePresence>
+                      {showRulesDropdown && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 5 }}
+                          className="absolute bottom-full left-0 mb-2 w-72 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden"
+                        >
+                          <div className="p-2 border-b border-border/50 flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground px-2">Select rules to apply</span>
+                            {selectedRules.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => onRulesChange([])}
+                                className="text-xs text-muted-foreground hover:text-foreground px-2"
+                              >
+                                Clear all
+                              </button>
+                            )}
+                          </div>
+                          <div className="max-h-64 overflow-y-auto py-1">
+                            {rules.map((rule) => {
+                              const isSelected = selectedRules.includes(rule.id)
+                              return (
+                                <button
+                                  key={rule.id}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      onRulesChange(selectedRules.filter(id => id !== rule.id))
+                                    } else {
+                                      onRulesChange([...selectedRules, rule.id])
+                                    }
+                                  }}
+                                  className={cn(
+                                    'w-full text-left px-3 py-2 text-sm transition-colors',
+                                    'hover:bg-muted/50 flex items-start gap-2',
+                                    isSelected && 'bg-emerald-500/10'
+                                  )}
+                                >
+                                  <div className={cn(
+                                    'w-4 h-4 mt-0.5 rounded border flex-shrink-0 flex items-center justify-center',
+                                    isSelected
+                                      ? 'bg-emerald-500 border-emerald-500 text-white'
+                                      : 'border-border'
+                                  )}>
+                                    {isSelected && <Check className="w-3 h-3" />}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-medium truncate">{rule.name}</div>
+                                    {rule.description && (
+                                      <div className="text-xs text-muted-foreground truncate">{rule.description}</div>
+                                    )}
+                                    {rule.tags.length > 0 && (
+                                      <div className="flex flex-wrap gap-1 mt-1">
+                                        {rule.tags.slice(0, 3).map(tag => (
+                                          <span key={tag} className="text-[10px] px-1.5 py-0.5 bg-muted rounded">
+                                            {tag}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </button>
+                              )
+                            })}
                           </div>
                         </motion.div>
                       )}

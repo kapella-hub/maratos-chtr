@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Layers, FolderCode } from 'lucide-react'
 import ChatInput, { SessionCommand } from '@/components/ChatInput'
@@ -8,7 +8,7 @@ import { useChatStore } from '@/stores/chat'
 import type { ProjectPlan, ProjectTask } from '@/stores/chat'
 import { useToastStore } from '@/stores/toast'
 import { useCanvasStore } from '@/stores/canvas'
-import { streamChat, streamChatWithProjectAction, fetchConfig, fetchProjects, ThinkingBlock } from '@/lib/api'
+import { streamChat, streamChatWithProjectAction, fetchConfig, fetchProjects, fetchRules, ThinkingBlock } from '@/lib/api'
 import { saveChatSession, getChatSession } from '@/lib/chatHistory'
 
 export default function ChatPage() {
@@ -71,6 +71,15 @@ export default function ChatPage() {
     queryFn: fetchProjects,
   })
 
+  // Fetch rules for the selector
+  const { data: rules = [] } = useQuery({
+    queryKey: ['rules'],
+    queryFn: fetchRules,
+  })
+
+  // Track selected rules (persisted across messages)
+  const [selectedRules, setSelectedRules] = useState<string[]>([])
+
   // Always use MO agent
   useEffect(() => {
     if (agentId !== 'mo') {
@@ -107,7 +116,7 @@ export default function ChatPage() {
   }, [])
 
   // Process a single message
-  const processMessage = useCallback(async (content: string) => {
+  const processMessage = useCallback(async (content: string, ruleIds?: string[]) => {
     const controller = new AbortController()
     setAbortController(controller)
 
@@ -118,7 +127,7 @@ export default function ChatPage() {
     setThinking(true)
 
     try {
-      for await (const event of streamChat(content, agentId, sessionId || undefined, controller.signal, selectedProjectName)) {
+      for await (const event of streamChat(content, agentId, sessionId || undefined, controller.signal, selectedProjectName, ruleIds)) {
         if (event.type === 'session_id' && event.data) {
           const newSessionId = event.data as string
           sessionIdRef.current = newSessionId
@@ -347,9 +356,9 @@ export default function ChatPage() {
   }, [dequeueMessage, processMessage])
 
   // Handle sending
-  const handleSend = async (content: string, skill?: { id: string; name: string } | null) => {
+  const handleSend = async (content: string, skill?: { id: string; name: string } | null, ruleIds?: string[]) => {
     const messageContent = skill ? `[Using skill: ${skill.name}]\n\n${content}` : content
-    await processMessage(messageContent)
+    await processMessage(messageContent, ruleIds)
     processQueue()
   }
 
@@ -466,6 +475,9 @@ export default function ChatPage() {
           projects={projects}
           selectedProject={selectedProjectName}
           onProjectSelect={setSelectedProjectName}
+          rules={rules}
+          selectedRules={selectedRules}
+          onRulesChange={setSelectedRules}
         />
       </div>
 

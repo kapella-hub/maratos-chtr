@@ -456,6 +456,9 @@ class ChatRequest(BaseModel):
     # Explicit project selection from UI
     project_name: str | None = None  # User-selected project from dropdown
 
+    # Rules selection from UI
+    rule_ids: list[str] | None = None  # Selected rule IDs to apply
+
     # Inline project control
     project_action: str | None = None  # approve, adjust, pause, resume, cancel
     project_adjustments: dict[str, Any] | None = None  # For adjust action
@@ -1106,6 +1109,19 @@ async def chat(
         # Inject project context if loaded
         if project_context:
             context["project"] = project_context
+
+        # Inject selected rules if provided
+        if chat_request.rule_ids:
+            try:
+                from app.rules import get_rules_for_context
+                rules_context = get_rules_for_context(chat_request.rule_ids)
+                if rules_context:
+                    context["rules"] = rules_context
+                    logger.info(f"Injected {len(chat_request.rule_ids)} rules into context")
+            except ImportError:
+                logger.warning("Rules module not available")
+            except Exception as e:
+                logger.error(f"Failed to load rules: {e}")
 
         first_chunk = True
         in_model_thinking = False

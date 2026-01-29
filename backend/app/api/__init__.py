@@ -18,6 +18,7 @@ from app.api.canvas import router as canvas_router
 from app.api.tools import router as tools_router
 from app.api.resilience import router as resilience_router
 from app.api.approvals import router as approvals_router
+from app.api.rules import router as rules_router
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(chat_router, tags=["chat"])
@@ -36,5 +37,6 @@ api_router.include_router(canvas_router, tags=["canvas"])
 api_router.include_router(tools_router, tags=["tools"])
 api_router.include_router(resilience_router, tags=["resilience"])
 api_router.include_router(approvals_router, tags=["approvals"])
+api_router.include_router(rules_router, prefix="/rules", tags=["rules"])
 
 __all__ = ["api_router"]
