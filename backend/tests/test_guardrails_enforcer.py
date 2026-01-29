@@ -280,6 +280,7 @@ class TestBudgetEnforcement:
 
         low_budget_policy = AgentPolicy(
             agent_id="test",
+            description="Test agent with low budget",
             allowed_tools=["filesystem"],
             budget=BudgetPolicy(
                 max_tool_calls_per_message=2,
@@ -475,6 +476,7 @@ class TestBudgetExceededError:
         # Create very restricted budget
         policy = AgentPolicy(
             agent_id="test",
+            description="Test agent with restricted budget",
             allowed_tools=["filesystem"],
             budget=BudgetPolicy(max_tool_calls_per_message=1, max_tool_calls_per_session=1),
             filesystem=FilesystemPolicy(read_paths=["*"]),
@@ -497,7 +499,7 @@ class TestBudgetExceededError:
         r2 = await enforcer.check_tool_execution("filesystem", {"action": "read", "path": "/test2"})
         assert r2.allowed is False
         assert r2.budget_exceeded is True
-        assert "budget" in r2.error.lower() or "limit" in r2.error.lower()
+        assert "exceeded" in r2.error.lower()
 
     @pytest.mark.asyncio
     async def test_budget_exceeded_via_tool_executor(self):
@@ -509,6 +511,7 @@ class TestBudgetExceededError:
         # Create very restricted budget
         policy = AgentPolicy(
             agent_id="test",
+            description="Test agent with restricted budget",
             allowed_tools=["filesystem"],
             budget=BudgetPolicy(max_tool_calls_per_message=1, max_tool_calls_per_session=1),
             filesystem=FilesystemPolicy(read_paths=["*"]),

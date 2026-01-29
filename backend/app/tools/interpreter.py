@@ -615,6 +615,7 @@ async def execute_invocations(
                     session_id=context.session_id,
                     task_id=context.task_id,
                     agent_id=context.agent_id,
+                    skip_guardrails=True,  # Interpreter already enforces guardrails
                     **args,
                 ),
                 timeout=context.policy.per_call_timeout_seconds,

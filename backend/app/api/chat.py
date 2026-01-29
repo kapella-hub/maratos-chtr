@@ -31,15 +31,106 @@ from app.subagents.runner import subagent_runner
 from app.subagents.manager import subagent_manager, TaskStatus
 from app.audit import audit_logger
 from app.projects.mention_detector import get_project_context_for_session
-from app.autonomous.workflow_handler import (
-    run_autonomous_workflow,
-    should_trigger_autonomous_workflow,
+from app.workflows.handler import (
+    run_delivery_workflow,
+    get_active_workflow_for_session,
+    resume_workflow_with_docs_decision,
+    resume_workflow_with_decision,
+    parse_user_decision_from_message,
+)
+from app.workflows.delivery_loop import (
+    WorkflowState,
+    UserDecisionType,
+    UserDecisionResponse,
+)
+from app.workflows.router import (
+    classify_message_sync,
+    handle_clarification_response,
+    TaskType,
 )
 
 logger = logging.getLogger(__name__)
 
 # Pattern to match [SPAWN:agent_id] task description
 SPAWN_PATTERN = re.compile(r'\[SPAWN:(\w+)\]\s*(.+?)(?=\[SPAWN:|\Z)', re.DOTALL)
+
+
+def _workflow_event_to_progress(event_str: str) -> str | None:
+    """Convert a workflow SSE event to a user-friendly progress message.
+
+    Shows minimal progress as a clean status line.
+
+    Args:
+        event_str: The raw SSE event string (e.g., 'data: {...}\n\n')
+
+    Returns:
+        A user-friendly progress message, or None if no message needed.
+    """
+    try:
+        # Parse the SSE data
+        if not event_str.startswith("data: "):
+            return None
+        data_str = event_str[6:].strip()
+        if not data_str or data_str == "[DONE]":
+            return None
+
+        data = json.loads(data_str)
+        event_type = data.get("type")
+
+        # Show workflow phase changes inline with dots
+        if event_type == "workflow_state":
+            state = data.get("state", "")
+            fix_cycle = data.get('fix_cycles', 0) + 1
+            phase_info = {
+                "coding": "coding",
+                "testing": " · testing",
+                "fixing": f" · fixing ({fix_cycle}/3)",
+                "escalating": " · architect",
+                "deploying": " · devops",
+                "documenting": " · docs",
+            }
+            if state in phase_info:
+                return phase_info[state]
+
+        # Show test results inline
+        elif event_type == "gate_result":
+            gate = data.get("gate", "gate")
+            passed = data.get("passed", False)
+            tests_run = data.get("tests_run", 0)
+            tests_passed = data.get("tests_passed", 0)
+            tests_failed = data.get("tests_failed", 0)
+            no_tests = data.get("no_tests_found", False)
+
+            if gate == "tester":
+                if no_tests:
+                    return " _(new)_"
+                elif passed:
+                    if tests_run > 0:
+                        return f" ✓{tests_passed}/{tests_run}"
+                    return " ✓"
+                else:
+                    if tests_failed > 0:
+                        return f" ✗{tests_failed}"
+                    return " ✗"
+
+        # Show user decision on new line
+        elif event_type == "user_decision_requested":
+            question = data.get("question", "")
+            return f"\\n\\n{question}"
+
+        # Show completion on new line
+        elif event_type == "workflow_completed":
+            return " ✓"
+
+        elif event_type == "workflow_failed":
+            error = data.get("error", "Unknown error")
+            return f" ✗ {error}"
+
+        return None
+
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        logger.debug(f"Could not parse workflow event for progress: {e}")
+        return None
 
 # Auto-routing patterns - detect user intent and route to appropriate agent
 AUTO_ROUTE_PATTERNS = [
@@ -636,6 +727,155 @@ async def chat(
                 # Fall through to normal chat processing
                 yield f'data: {{"content": "Note: Project mode unavailable, handling as regular request.\\n\\n"}}\n\n'
 
+        # Check for active workflow awaiting user decision
+        active_workflow = get_active_workflow_for_session(session.id)
+        if active_workflow and active_workflow.state == WorkflowState.AWAITING_USER:
+            # User is responding to a workflow decision (commit, pr, deploy, docs)
+            pending_decision = active_workflow.pending_decision
+            if pending_decision:
+                logger.info(f"Workflow awaiting {pending_decision.value} decision, parsing user response")
+
+                # Parse the user's message into a structured decision
+                decision = parse_user_decision_from_message(
+                    message=actual_message,
+                    pending_decision=pending_decision,
+                    context=chat_request.context,
+                )
+
+                yield 'data: {"workflow_resuming": true}\n\n'
+                yield f'data: {{"pending_decision": "{pending_decision.value}", "user_approved": {str(decision.approved).lower()}}}\n\n'
+
+                async def save_workflow_msg(content: str) -> None:
+                    try:
+                        async with db.begin():
+                            wf_msg = DBMessage(
+                                id=str(uuid.uuid4()),
+                                session_id=session.id,
+                                role="assistant",
+                                content=content,
+                            )
+                            db.add(wf_msg)
+                    except Exception as e:
+                        logger.error(f"Failed to save workflow message: {e}")
+
+                async for workflow_event in resume_workflow_with_decision(
+                    workflow_id=active_workflow.workflow_id,
+                    decision=decision,
+                    context=chat_request.context,
+                    save_message_fn=save_workflow_msg,
+                ):
+                    yield workflow_event
+                    # Also emit progress messages
+                    progress_msg = _workflow_event_to_progress(workflow_event)
+                    if progress_msg:
+                        escaped_msg = progress_msg.replace('"', '\\"').replace('\n', '\\n')
+                        yield f'data: {{"content": "{escaped_msg}"}}\n\n'
+
+                yield "data: [DONE]\n\n"
+                return
+
+        # Delivery workflow: classify message and run deterministic workflow if coding task
+        classification = classify_message_sync(actual_message)
+        logger.debug(f"Router classification: {classification.task_type.value}, confidence={classification.confidence:.2f}, trigger={classification.should_trigger_workflow}")
+
+        if classification.should_trigger_workflow and agent_id == "mo":
+            task_type_label = classification.task_type.value
+            logger.info(f"Detected {task_type_label} task (confidence={classification.confidence:.2f}), starting delivery workflow: {actual_message[:50]}...")
+            yield 'data: {"thinking": true}\n\n'
+
+            # Emit classification info for UI
+            classification_event = json.dumps({
+                "workflow_classification": {
+                    "task_type": task_type_label,
+                    "confidence": round(classification.confidence, 2),
+                    "matched_keywords": classification.matched_keywords,
+                    "matched_command": classification.matched_command,
+                }
+            })
+            yield f'data: {classification_event}\n\n'
+
+            # Minimal workflow indicator
+            start_msg = "`workflow` "
+            yield f'data: {{"content": "{start_msg}"}}\n\n'
+            yield 'data: {"thinking": false}\n\n'
+            yield 'data: {"orchestrating": true}\n\n'
+
+            workspace = chat_request.context.get("workspace", "") if chat_request.context else ""
+
+            async def save_workflow_message(content: str) -> None:
+                try:
+                    async with db.begin():
+                        wf_msg = DBMessage(
+                            id=str(uuid.uuid4()),
+                            session_id=session.id,
+                            role="assistant",
+                            content=content,
+                        )
+                        db.add(wf_msg)
+                except Exception as e:
+                    logger.error(f"Failed to save workflow message: {e}")
+
+            try:
+                async for workflow_event in run_delivery_workflow(
+                    session_id=session.id,
+                    task=actual_message,
+                    workspace_path=workspace or None,
+                    context=chat_request.context,
+                    save_message_fn=save_workflow_message,
+                ):
+                    # Yield the raw event for frontend state tracking
+                    yield workflow_event
+
+                    # Also emit user-friendly progress messages
+                    progress_msg = _workflow_event_to_progress(workflow_event)
+                    if progress_msg:
+                        escaped_msg = progress_msg.replace('"', '\\"').replace('\n', '\\n')
+                        yield f'data: {{"content": "{escaped_msg}"}}\n\n'
+            except Exception as e:
+                logger.error(f"Delivery workflow error: {e}", exc_info=True)
+                escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
+                yield f'data: {{"error": "Workflow failed: {escaped_err}"}}\n\n'
+
+            yield 'data: {"orchestrating": false}\n\n'
+            yield "data: [DONE]\n\n"
+            return
+
+        # Handle clarification needed (confidence between thresholds)
+        if classification.needs_clarification and agent_id == "mo" and classification.clarification_question:
+            logger.info(f"Router needs clarification for: {actual_message[:50]}...")
+            yield 'data: {"thinking": false}\n\n'
+
+            # Store pending classification in session for next message
+            # (simplified - in production you'd persist this to DB)
+            clarification_event = json.dumps({
+                "workflow_clarification": {
+                    "question": classification.clarification_question,
+                    "task_type": classification.task_type.value,
+                    "confidence": round(classification.confidence, 2),
+                }
+            })
+            yield f'data: {clarification_event}\n\n'
+
+            # Send the clarification question as assistant content
+            question = classification.clarification_question.replace("\n", "\\n").replace('"', '\\"')
+            yield f'data: {{"content": "{question}"}}\n\n'
+
+            # Save the clarification as assistant message
+            try:
+                async with db.begin():
+                    clarify_msg = DBMessage(
+                        id=str(uuid.uuid4()),
+                        session_id=session.id,
+                        role="assistant",
+                        content=classification.clarification_question,
+                    )
+                    db.add(clarify_msg)
+            except SQLAlchemyError as e:
+                logger.error(f"Failed to save clarification message: {e}")
+
+            yield "data: [DONE]\n\n"
+            return
+
         # Auto-route: detect if this request should go directly to a specialized agent
         auto_route_agent, auto_route_task = detect_auto_route(actual_message)
         if auto_route_agent and agent_id == "mo":
@@ -1024,10 +1264,11 @@ async def chat(
                         last_progress[task.id] = current.progress
 
                         # Build progress event with goal data
+                        # Progress is stored as 0-1, convert to 0-100 for frontend
                         progress_data = {
                             "subagent": agent_id_spawn,
                             "task_id": task.id,
-                            "progress": round(current.progress, 2),
+                            "progress": round(current.progress * 100, 1),
                         }
 
                         # Include goal tracking if available
@@ -1211,39 +1452,6 @@ async def chat(
                                                     success=False,
                                                     error=nested_error,
                                                 )
-
-                            # Trigger autonomous workflow when coder completes without spawning more agents
-                            elif should_trigger_autonomous_workflow(
-                                agent_id_spawn,
-                                task_desc if task_desc else actual_message,
-                                chat_request.context
-                            ):
-                                logger.info(f"Triggering autonomous workflow after {agent_id_spawn} completion")
-
-                                # Create message saver function
-                                async def save_workflow_message(content: str) -> None:
-                                    try:
-                                        async with db.begin():
-                                            wf_msg = DBMessage(
-                                                id=str(uuid.uuid4()),
-                                                session_id=session.id,
-                                                role="assistant",
-                                                content=content,
-                                            )
-                                            db.add(wf_msg)
-                                    except Exception as e:
-                                        logger.error(f"Failed to save workflow message: {e}")
-
-                                # Run the autonomous test-driven workflow
-                                async for workflow_event in run_autonomous_workflow(
-                                    session_id=session.id,
-                                    original_task=task_desc if task_desc else actual_message,
-                                    coder_result=result_text,
-                                    context=chat_request.context,
-                                    db_session=db,
-                                    save_message_fn=save_workflow_message,
-                                ):
-                                    yield workflow_event
 
                         else:
                             error = current.error or "Unknown error"

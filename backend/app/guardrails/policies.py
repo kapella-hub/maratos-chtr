@@ -262,7 +262,7 @@ AGENT_POLICIES: dict[str, AgentPolicy] = {
             write_allowed=True,
             workspace_only=False,
         ),
-        budget=BudgetPolicy(),  # Use defaults (effectively unlimited)
+        budget=BudgetPolicy(max_spawned_tasks_per_run=0),  # Coder cannot spawn subagents
         diff_approval=DiffApprovalPolicy(enabled=False),
         notes="Pure implementation - reads existing code, writes new code",
     ),

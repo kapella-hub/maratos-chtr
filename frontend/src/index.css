@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -712,6 +713,15 @@ button:focus-visible {
   @apply bg-muted/80 border border-border/60 rounded-md;
   @apply text-xs font-mono text-muted-foreground;
   @apply shadow-sm;
+}
+
+/* Workflow progress inline code styling */
+.prose code:not(pre code) {
+  @apply px-1.5 py-0.5 rounded text-sm;
+  @apply bg-muted/50 text-muted-foreground;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 0.8em;
+  letter-spacing: 0.02em;
 }
 
 /* Status indicator */

@@ -47,7 +47,7 @@ DEFAULT_PATTERNS: list[RedactionPattern] = [
     RedactionPattern(
         name="api_key",
         pattern=re.compile(
-            r"\b(?:sk|pk|api|key|token|secret|password|auth)[-_]?(?:[a-zA-Z0-9]+[-_]?)*[a-zA-Z0-9]{10,}\b",
+            r"\b(?:sk|pk|api|key|token|secret|password|auth)[-_](?:[a-zA-Z0-9_-]+)\b",
             re.IGNORECASE,
         ),
         replacement="[REDACTED-KEY]",
