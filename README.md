@@ -80,6 +80,7 @@ MaratOS is a self-hostable AI platform with a beautiful web interface and multi-
 - 💬 **Multi-Channel** — Web, Telegram, iMessage, Webex
 - 🔧 **Kiro Integration** — Enterprise AI for quality coding
 - 🧩 **Skills System** — Reusable Kiro workflows
+- ⚖️ **Development Rules** — Reusable standards applied per-chat
 - 🚀 **Subagents** — Background task execution with progress
 - 🧠 **Infinite Memory** — Semantic search, auto-compaction
 - 🔒 **Sandboxed Writes** — Read anywhere, write to workspace
@@ -337,6 +338,72 @@ workflow:
 
 ---
 
+## Development Rules
+
+Rules are reusable development standards that can be selected at chat time and injected into the prompt to guide MO's behavior.
+
+### How It Works
+
+1. **Create rules** in Settings → Development Rules
+2. **Select rules** from the ⚖️ dropdown in the chat input (multi-select)
+3. **Rules are injected** into the system prompt for that conversation
+
+### Use Cases
+
+- **Language standards** — Python, TypeScript, Go coding conventions
+- **Framework patterns** — React, Angular, FastAPI best practices
+- **Testing requirements** — Coverage, patterns, edge cases
+- **API design** — RESTful conventions, response formats
+- **Full stack standards** — End-to-end project guidelines
+
+### Example Rules
+
+```yaml
+# Clean Code Standards
+- Descriptive naming (nouns for variables, verbs for functions)
+- Single responsibility functions (< 20 lines)
+- No magic numbers, use constants
+- Comment the "why", not the "what"
+
+# Python Standards
+- Follow PEP 8, use type hints
+- Use dataclasses or Pydantic for data structures
+- Async/await for I/O-bound operations
+- pytest with fixtures and parametrize
+
+# React + FastAPI Full Stack
+- Backend: Async SQLAlchemy, Pydantic v2, service layer
+- Frontend: React Query, Zustand, React Hook Form + Zod
+- Type-safe API contracts between frontend and backend
+```
+
+### API
+
+```bash
+# List rules
+GET /api/rules
+
+# Get rule with content
+GET /api/rules/{id}
+
+# Create rule
+POST /api/rules
+{"name": "My Rule", "description": "...", "content": "...", "tags": ["python"]}
+
+# Create example rules
+POST /api/rules/examples
+
+# Chat with rules
+POST /api/chat
+{"message": "...", "rule_ids": ["python-standards", "testing-requirements"]}
+```
+
+### Storage
+
+Rules are stored as YAML files in `~/.maratos/rules/`
+
+---
+
 ## Subagents
 
 Spawn background tasks that run independently:
@@ -489,6 +556,13 @@ docker run -p 8000:8000 \
 | `POST /api/memory/remember` | Store a memory |
 | `POST /api/memory/recall` | Search memories |
 | `GET /api/memory/stats` | Memory statistics |
+| **Rules** |
+| `GET /api/rules` | List all rules |
+| `GET /api/rules/{id}` | Get rule with content |
+| `POST /api/rules` | Create a rule |
+| `PUT /api/rules/{id}` | Update a rule |
+| `DELETE /api/rules/{id}` | Delete a rule |
+| `POST /api/rules/examples` | Create example rules |
 | **Channels** |
 | `GET /api/channels` | List messaging channels |
 | **Config** |
@@ -521,6 +595,7 @@ maratos/
 │       ├── agents/        # MO, Architect, Reviewer
 │       ├── channels/      # Telegram, iMessage, Webex
 │       ├── memory/        # Infinite memory system
+│       ├── rules/         # Development rules system
 │       ├── skills/        # Skill execution engine
 │       ├── subagents/     # Background task runner
 │       │   ├── manager.py # Task spawning & tracking
