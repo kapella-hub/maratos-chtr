@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Layers, FolderCode, X } from 'lucide-react'
+import { Layers, FolderCode } from 'lucide-react'
 import ChatInput, { SessionCommand } from '@/components/ChatInput'
 import { ChatStream, ProjectCard } from '@/components/chat'
 import ToastContainer from '@/components/ToastContainer'
@@ -455,36 +455,6 @@ export default function ChatPage() {
 
       {/* Floating Input */}
       <div className="floating-input">
-        {/* Project Selector */}
-        {projects.length > 0 && (
-          <div className="max-w-3xl mx-auto px-4 pb-2">
-            <div className="flex items-center gap-2">
-              <FolderCode className="w-4 h-4 text-muted-foreground" />
-              <select
-                value={selectedProjectName || ''}
-                onChange={(e) => setSelectedProjectName(e.target.value || null)}
-                disabled={isStreaming}
-                className="flex-1 bg-card border border-border/50 rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
-              >
-                <option value="">No project selected</option>
-                {projects.map((project) => (
-                  <option key={project.name} value={project.name}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-              {selectedProjectName && (
-                <button
-                  onClick={() => setSelectedProjectName(null)}
-                  className="p-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                  title="Clear project"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
         <ChatInput
           onSend={handleSend}
           onQueue={enqueueMessage}
@@ -493,6 +463,9 @@ export default function ChatPage() {
           isLoading={isStreaming}
           hasQueue={messageQueue.length > 0}
           placeholder="Message MO..."
+          projects={projects}
+          selectedProject={selectedProjectName}
+          onProjectSelect={setSelectedProjectName}
         />
       </div>
 

@@ -1,12 +1,18 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react'
-import { Send, Square, ListPlus, Sparkles } from 'lucide-react'
+import { Send, Square, ListPlus, Sparkles, FolderCode, ChevronDown, ChevronRight, X, Loader2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import SkillSelector from './SkillSelector'
 import type { Skill } from '@/lib/api'
+import { fetchProjectStructure } from '@/lib/api'
 
 // Session commands
 export type SessionCommand = 'reset' | 'status' | 'help'
+
+interface Project {
+  name: string
+  path: string
+}
 
 interface ChatInputProps {
   onSend: (message: string, skill?: Skill | null) => void
@@ -17,6 +23,9 @@ interface ChatInputProps {
   hasQueue?: boolean
   placeholder?: string
   showSkills?: boolean
+  projects?: Project[]
+  selectedProject?: string | null
+  onProjectSelect?: (projectName: string | null) => void
 }
 
 export default function ChatInput({
@@ -26,12 +35,45 @@ export default function ChatInput({
   onCommand,
   isLoading,
   placeholder = 'Ask MO anything...',
-  showSkills = true
+  showSkills = true,
+  projects = [],
+  selectedProject,
+  onProjectSelect,
 }: ChatInputProps) {
   const [input, setInput] = useState('')
   const [isFocused, setIsFocused] = useState(false)
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null)
+  const [showProjectDropdown, setShowProjectDropdown] = useState(false)
+  const [expandedProject, setExpandedProject] = useState<string | null>(null)
+  const [projectStructure, setProjectStructure] = useState<string | null>(null)
+  const [loadingStructure, setLoadingStructure] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const projectDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Fetch project structure when expanded
+  useEffect(() => {
+    if (expandedProject) {
+      setLoadingStructure(true)
+      fetchProjectStructure(expandedProject)
+        .then((data) => setProjectStructure(data.structure))
+        .catch(() => setProjectStructure(null))
+        .finally(() => setLoadingStructure(false))
+    } else {
+      setProjectStructure(null)
+    }
+  }, [expandedProject])
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (projectDropdownRef.current && !projectDropdownRef.current.contains(event.target as Node)) {
+        setShowProjectDropdown(false)
+        setExpandedProject(null)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // Auto-resize textarea
   useEffect(() => {
@@ -172,12 +214,142 @@ export default function ChatInput({
 
             {/* Textarea */}
             <div className="flex items-end gap-2 p-3">
-              {/* Icon */}
-              <div className={cn(
-                'flex-shrink-0 p-2 rounded-xl transition-colors duration-200',
-                isFocused ? 'text-primary' : 'text-muted-foreground'
-              )}>
-                <Sparkles className="w-5 h-5" />
+              {/* Left icons: Sparkles and optional Project selector */}
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {/* Sparkles icon */}
+                <div className={cn(
+                  'p-2 rounded-xl transition-colors duration-200',
+                  isFocused ? 'text-primary' : 'text-muted-foreground'
+                )}>
+                  <Sparkles className="w-5 h-5" />
+                </div>
+
+                {/* Project selector button */}
+                {projects.length > 0 && onProjectSelect && (
+                  <div className="relative" ref={projectDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowProjectDropdown(!showProjectDropdown)}
+                      disabled={isLoading}
+                      className={cn(
+                        'flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm transition-all',
+                        'hover:bg-muted/50 disabled:opacity-50',
+                        selectedProject
+                          ? 'bg-primary/10 text-primary border border-primary/20'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                      title={selectedProject ? `Project: ${selectedProject}` : 'Select project'}
+                    >
+                      <FolderCode className="w-4 h-4" />
+                      {selectedProject ? (
+                        <>
+                          <span className="max-w-[100px] truncate">{selectedProject}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onProjectSelect(null)
+                            }}
+                            className="p-0.5 hover:bg-primary/20 rounded"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </>
+                      ) : (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+
+                    {/* Project dropdown */}
+                    <AnimatePresence>
+                      {showProjectDropdown && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 5 }}
+                          className={cn(
+                            "absolute bottom-full left-0 mb-2 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden",
+                            expandedProject ? "w-[400px]" : "w-56"
+                          )}
+                        >
+                          <div className="p-2 border-b border-border/50">
+                            <span className="text-xs text-muted-foreground px-2">Select project</span>
+                          </div>
+                          <div className="max-h-[400px] overflow-y-auto py-1">
+                            {projects.map((project) => (
+                              <div key={project.name}>
+                                <div className="flex items-center">
+                                  {/* Expand/collapse button */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setExpandedProject(expandedProject === project.name ? null : project.name)
+                                    }}
+                                    className="p-2 text-muted-foreground hover:text-foreground transition-colors"
+                                  >
+                                    {expandedProject === project.name ? (
+                                      <ChevronDown className="w-3.5 h-3.5" />
+                                    ) : (
+                                      <ChevronRight className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                  {/* Project button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onProjectSelect(project.name)
+                                      setShowProjectDropdown(false)
+                                      setExpandedProject(null)
+                                    }}
+                                    className={cn(
+                                      'flex-1 text-left px-2 py-2 text-sm transition-colors',
+                                      'hover:bg-muted/50 rounded-r-lg',
+                                      selectedProject === project.name && 'bg-primary/10 text-primary'
+                                    )}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <FolderCode className="w-4 h-4 flex-shrink-0" />
+                                      <span className="truncate">{project.name}</span>
+                                    </div>
+                                  </button>
+                                </div>
+                                {/* Expanded structure */}
+                                <AnimatePresence>
+                                  {expandedProject === project.name && (
+                                    <motion.div
+                                      initial={{ height: 0, opacity: 0 }}
+                                      animate={{ height: 'auto', opacity: 1 }}
+                                      exit={{ height: 0, opacity: 0 }}
+                                      className="overflow-hidden"
+                                    >
+                                      <div className="ml-6 mr-2 mb-2 p-2 bg-muted/30 rounded-lg border border-border/30">
+                                        {loadingStructure ? (
+                                          <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                            Loading structure...
+                                          </div>
+                                        ) : projectStructure ? (
+                                          <pre className="text-xs text-muted-foreground font-mono whitespace-pre overflow-x-auto max-h-48">
+                                            {projectStructure}
+                                          </pre>
+                                        ) : (
+                                          <div className="text-xs text-muted-foreground py-2">
+                                            Unable to load structure
+                                          </div>
+                                        )}
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
               </div>
 
               <textarea

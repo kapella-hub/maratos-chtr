@@ -803,3 +803,176 @@ async def get_project_context(name: str) -> dict:
         "context": pack.get_compact_context(),
         "manifest": pack.manifest.to_dict(),
     }
+
+
+# =============================================================================
+# Project Structure Endpoint
+# =============================================================================
+
+
+class StructureResponse(BaseModel):
+    """Project structure tree response."""
+    project_name: str
+    project_path: str
+    structure: str  # Tree-formatted string
+
+
+def _generate_tree_structure(
+    root_path: Path,
+    max_depth: int = 3,
+    max_items_per_level: int = 15,
+) -> str:
+    """Generate a tree structure string for a project directory.
+
+    Args:
+        root_path: Root directory to scan
+        max_depth: Maximum depth to traverse
+        max_items_per_level: Maximum items to show per directory
+
+    Returns:
+        Tree-formatted string like:
+        ├── backend/
+        │   ├── main.py
+        │   └── models.py
+        └── frontend/
+            └── App.tsx
+    """
+    # Directories/files to skip
+    skip_dirs = {
+        "node_modules", ".git", "__pycache__", ".venv", "venv",
+        ".next", "dist", "build", ".pytest_cache", ".mypy_cache",
+        ".ruff_cache", "coverage", ".idea", ".vscode", "egg-info",
+        ".eggs", "*.egg-info", ".tox", ".nox",
+    }
+    skip_files = {
+        ".DS_Store", "Thumbs.db", "*.pyc", "*.pyo", "*.so",
+        "*.dylib", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+    }
+
+    # File extensions to prioritize showing
+    important_extensions = {
+        ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java",
+        ".md", ".yaml", ".yml", ".json", ".toml", ".sql",
+    }
+
+    def should_skip(name: str, is_dir: bool) -> bool:
+        """Check if item should be skipped."""
+        if is_dir:
+            return name in skip_dirs or name.startswith(".")
+        for pattern in skip_files:
+            if pattern.startswith("*"):
+                if name.endswith(pattern[1:]):
+                    return True
+            elif name == pattern:
+                return True
+        return False
+
+    def get_annotation(path: Path) -> str:
+        """Get annotation for a file/directory."""
+        name = path.name.lower()
+        if path.is_dir():
+            return ""
+        # Add helpful annotations for key files
+        annotations = {
+            "main.py": "(FastAPI app)",
+            "app.py": "(Flask app)",
+            "index.ts": "(entry)",
+            "index.tsx": "(entry)",
+            "index.js": "(entry)",
+            "app.tsx": "(React app)",
+            "app.ts": "(app)",
+            "package.json": "(deps)",
+            "requirements.txt": "(deps)",
+            "pyproject.toml": "(config)",
+            "dockerfile": "(docker)",
+            "docker-compose.yml": "(docker)",
+            "readme.md": "(docs)",
+        }
+        return annotations.get(name, "")
+
+    def build_tree(current_path: Path, prefix: str = "", depth: int = 0) -> list[str]:
+        """Recursively build tree lines."""
+        if depth > max_depth:
+            return []
+
+        lines = []
+        try:
+            items = list(current_path.iterdir())
+        except PermissionError:
+            return []
+
+        # Filter and sort items
+        filtered = []
+        for item in items:
+            if not should_skip(item.name, item.is_dir()):
+                filtered.append(item)
+
+        # Sort: directories first, then by importance, then alphabetically
+        def sort_key(p: Path) -> tuple:
+            is_dir = p.is_dir()
+            ext = p.suffix.lower()
+            is_important = ext in important_extensions or p.name.lower() in {
+                "readme.md", "package.json", "requirements.txt", "main.py", "app.py"
+            }
+            return (not is_dir, not is_important, p.name.lower())
+
+        filtered.sort(key=sort_key)
+
+        # Limit items
+        show_more = len(filtered) > max_items_per_level
+        if show_more:
+            filtered = filtered[:max_items_per_level]
+
+        for i, item in enumerate(filtered):
+            is_last = i == len(filtered) - 1 and not show_more
+            connector = "└── " if is_last else "├── "
+            extension = "    " if is_last else "│   "
+
+            annotation = get_annotation(item)
+            suffix = "/" if item.is_dir() else ""
+            annotation_str = f" {annotation}" if annotation else ""
+
+            lines.append(f"{prefix}{connector}{item.name}{suffix}{annotation_str}")
+
+            if item.is_dir():
+                lines.extend(build_tree(item, prefix + extension, depth + 1))
+
+        if show_more:
+            lines.append(f"{prefix}└── ... (more files)")
+
+        return lines
+
+    # Build the tree
+    tree_lines = build_tree(root_path)
+
+    # Format with header
+    project_name = root_path.name
+    header = f"Project structure: {root_path}/"
+    return header + "\n" + "\n".join(tree_lines)
+
+
+@router.get("/{name}/structure", response_model=StructureResponse)
+async def get_project_structure(
+    name: str,
+    max_depth: int = Query(default=3, ge=1, le=5, description="Max depth to traverse"),
+) -> StructureResponse:
+    """Get project directory structure as a tree.
+
+    Returns a formatted tree string showing the project's file structure.
+    Automatically excludes common non-essential directories like node_modules, .git, etc.
+    """
+    project = project_registry.get(name)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project not found: {name}")
+
+    project_path = Path(project.path).expanduser().resolve()
+    if not project_path.exists():
+        raise HTTPException(status_code=400, detail=f"Project path does not exist: {project.path}")
+
+    structure = _generate_tree_structure(project_path, max_depth=max_depth)
+
+    return StructureResponse(
+        project_name=name,
+        project_path=str(project_path),
+        structure=structure,
+    )

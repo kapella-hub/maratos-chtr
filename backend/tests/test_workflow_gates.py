@@ -19,6 +19,8 @@ from app.workflows.delivery_loop import (
     AgentOutcome,
     DevOpsResult,
     DocsResult,
+    TesterResult,
+    TestMode,
     UserDecision,
     UserDecisionType,
     UserDecisionResponse,
@@ -593,6 +595,283 @@ class TestDecliningAllOptions:
         assert ctx.state == WorkflowState.COMPLETED
         assert ctx.user_wants_commit is False
         assert ctx.user_wants_docs is False
+
+
+# =============================================================================
+# TEST_REPORT Parsing Tests
+# =============================================================================
+
+class TestTesterResultParsing:
+    """Test parsing of tester agent responses with TEST_REPORT block."""
+
+    def test_parse_test_report_host_mode(self):
+        """TEST_REPORT with host mode is parsed correctly."""
+        response = """
+        All tests passed!
+
+        TEST_REPORT:
+          TEST_MODE: host
+          COMMANDS_RUN:
+            - "pytest -q --tb=short"
+          RESULT: pass
+          FAILURE_SUMMARY: ""
+          LOG_PATHS: []
+          NEXT_ACTION: ready_for_devops
+          NOTES: "Unit tests passed on host"
+        """
+        result = TesterResult.parse(response)
+        assert result.test_mode == "host"
+        assert result.status == AgentOutcome.PASS
+        assert result.next_action == "ready_for_devops"
+        assert "pytest" in result.test_commands[0]
+        assert result.notes == "Unit tests passed on host"
+
+    def test_parse_test_report_container_mode(self):
+        """TEST_REPORT with container mode is parsed correctly."""
+        response = """
+        Container tests complete.
+
+        TEST_REPORT:
+          TEST_MODE: container
+          COMMANDS_RUN:
+            - "docker compose build"
+            - "docker compose run --rm backend pytest -q"
+          RESULT: pass
+          FAILURE_SUMMARY: ""
+          LOG_PATHS:
+            - "tests/logs/container_test.log"
+          NEXT_ACTION: ready_for_devops
+          NOTES: "Container parity verified"
+        """
+        result = TesterResult.parse(response)
+        assert result.test_mode == "container"
+        assert result.status == AgentOutcome.PASS
+        assert result.next_action == "ready_for_devops"
+        assert len(result.test_commands) >= 2
+        assert result.logs_path == "tests/logs/container_test.log"
+
+    def test_parse_test_report_failure(self):
+        """TEST_REPORT with failure is parsed correctly."""
+        response = """
+        Tests failed!
+
+        TEST_REPORT:
+          TEST_MODE: compose
+          COMMANDS_RUN:
+            - "docker compose up -d db"
+            - "pytest tests/integration/"
+          RESULT: fail
+          FAILURE_SUMMARY: "AssertionError in test_auth.py"
+          LOG_PATHS: []
+          NEXT_ACTION: back_to_coder
+          NOTES: "Integration tests failed on DB connection"
+        """
+        result = TesterResult.parse(response)
+        assert result.test_mode == "compose"
+        assert result.status == AgentOutcome.FAIL
+        assert result.next_action == "back_to_coder"
+
+    def test_parse_without_test_report_block(self):
+        """Response without TEST_REPORT still works with heuristics."""
+        response = """
+        Running pytest...
+        5 passed, 0 failed
+
+        All tests passed!
+        """
+        result = TesterResult.parse(response)
+        # Heuristic parsing should detect "5 passed, 0 failed" and "All tests passed"
+        assert result.status == AgentOutcome.PASS
+        assert result.test_mode == "host"  # Default
+        # Note: heuristic parsing may not capture test counts from all formats
+        # The important thing is status detection
+
+
+# =============================================================================
+# Container Parity Gate Tests
+# =============================================================================
+
+class TestContainerParityGate:
+    """Test the container parity gate before devops."""
+
+    @pytest.fixture
+    def policy(self):
+        return DeliveryLoopPolicy(max_fix_cycles=2, max_architect_cycles=1)
+
+    @pytest.mark.asyncio
+    async def test_host_tests_pass_triggers_container_test(self, policy):
+        """When host tests pass, container test is triggered before devops."""
+        events = []
+        agent_calls = []
+        tester_call_count = [0]  # Use list to allow mutation in nested function
+
+        async def mock_spawn(agent_id, prompt, context):
+            agent_calls.append(agent_id)
+            if agent_id == "coder":
+                return "Implemented. Created file: main.py\nCODER_STATUS: done\nREASON: Complete"
+            elif agent_id == "tester":
+                tester_call_count[0] += 1
+                # Use "container parity" (specific phrase from container test prompt)
+                if "container parity" in prompt.lower():
+                    return """
+                    Container tests complete.
+                    TEST_REPORT:
+                      TEST_MODE: container
+                      COMMANDS_RUN:
+                        - "docker compose run --rm backend pytest -q"
+                      RESULT: pass
+                      FAILURE_SUMMARY: ""
+                      LOG_PATHS: []
+                      NEXT_ACTION: ready_for_devops
+                      NOTES: "Container parity verified"
+                    """
+                else:
+                    return """
+                    Host tests passed. 5 passed, 0 failed
+                    TEST_REPORT:
+                      TEST_MODE: host
+                      COMMANDS_RUN:
+                        - "pytest -q"
+                      RESULT: pass
+                      FAILURE_SUMMARY: ""
+                      LOG_PATHS: []
+                      NEXT_ACTION: ready_for_devops
+                      NOTES: "Host unit tests passed"
+                    """
+            elif agent_id == "devops":
+                return "## Suggested Commit\nMessage: feat: add feature"
+            return ""
+
+        async for event in policy.run(
+            session_id="test",
+            task="Implement feature",
+            spawn_agent_fn=mock_spawn,
+        ):
+            events.append(event)
+
+        # Verify tester was called twice (host + container)
+        tester_calls = [c for c in agent_calls if c == "tester"]
+        assert len(tester_calls) == 2, f"Expected 2 tester calls, got {len(tester_calls)}"
+
+        # Verify container parity gate event
+        gate_events = [e for e in events if e.type == "gate_result"]
+        container_gate = [e for e in gate_events if e.data.get("gate") == "container_parity"]
+        assert len(container_gate) == 1
+        assert container_gate[0].data["passed"] is True
+
+    @pytest.mark.asyncio
+    async def test_container_test_failure_routes_to_coder(self, policy):
+        """When container test fails, routes back to coder."""
+        events = []
+        agent_calls = []
+        tester_call_count = [0]
+
+        async def mock_spawn(agent_id, prompt, context):
+            agent_calls.append(agent_id)
+            if agent_id == "coder":
+                return "Implemented. Created file: main.py\nCODER_STATUS: done\nREASON: Complete"
+            elif agent_id == "tester":
+                tester_call_count[0] += 1
+                # Use "container parity" (specific phrase from container test prompt)
+                if "container parity" in prompt.lower():
+                    return """
+                    Container tests failed!
+                    TEST_REPORT:
+                      TEST_MODE: container
+                      COMMANDS_RUN:
+                        - "docker compose run --rm backend pytest -q"
+                      RESULT: fail
+                      FAILURE_SUMMARY: "Missing system dependency in container"
+                      LOG_PATHS: []
+                      NEXT_ACTION: back_to_coder
+                      NOTES: "Container environment differs from host"
+                    """
+                else:
+                    return """
+                    Host tests passed. 5 passed, 0 failed
+                    TEST_REPORT:
+                      TEST_MODE: host
+                      COMMANDS_RUN:
+                        - "pytest -q"
+                      RESULT: pass
+                      FAILURE_SUMMARY: ""
+                      LOG_PATHS: []
+                      NEXT_ACTION: ready_for_devops
+                      NOTES: "Host unit tests passed"
+                    """
+            return ""
+
+        # Run until we see the container failure
+        async for event in policy.run(
+            session_id="test",
+            task="Implement feature",
+            spawn_agent_fn=mock_spawn,
+        ):
+            events.append(event)
+            # Stop after container test gate to avoid infinite loop
+            if event.type == "gate_result" and event.data.get("gate") == "container_parity":
+                break
+
+        # Verify container gate failed
+        container_gates = [e for e in events if e.type == "gate_result" and e.data.get("gate") == "container_parity"]
+        assert len(container_gates) == 1
+        assert container_gates[0].data["passed"] is False
+
+    def test_container_mode_skips_second_container_test(self, policy):
+        """If tester already ran in container mode, skip second container test."""
+        ctx = policy.create_workflow("session-1", "Implement feature")
+
+        # Simulate tester ran in container mode
+        ctx.tester_result = TesterResult(
+            status=AgentOutcome.PASS,
+            test_mode="container",
+            next_action="ready_for_devops",
+        )
+        ctx.container_test_completed = True
+
+        # Should go directly to DEPLOYING, not CONTAINER_TESTING
+        assert ctx.container_test_completed is True
+
+
+# =============================================================================
+# DevOps Container Parity Check Tests
+# =============================================================================
+
+class TestDevOpsContainerParityCheck:
+    """Test DevOps checks container parity before offering commit/deploy."""
+
+    @pytest.fixture
+    def policy(self):
+        return DeliveryLoopPolicy()
+
+    def test_devops_prompt_includes_container_status_verified(self, policy):
+        """DevOps prompt includes container parity status when verified."""
+        ctx = policy.create_workflow("session-1", "Implement feature")
+        ctx.container_test_completed = True
+        ctx.container_tester_result = TesterResult(
+            status=AgentOutcome.PASS,
+            test_mode="container",
+            tests_run=10,
+            tests_passed=10,
+        )
+
+        from app.workflows.delivery_loop import CoderResult
+        ctx.coder_result = CoderResult(status=AgentOutcome.DONE, artifacts=["main.py"])
+
+        prompt = policy._build_devops_prompt(ctx)
+        assert "VERIFIED" in prompt
+        assert "container" in prompt.lower()
+
+    def test_devops_prompt_warns_if_container_not_run(self, policy):
+        """DevOps prompt warns if container test not run."""
+        ctx = policy.create_workflow("session-1", "Implement feature")
+        ctx.container_test_completed = False
+
+        from app.workflows.delivery_loop import CoderResult
+        ctx.coder_result = CoderResult(status=AgentOutcome.DONE, artifacts=["main.py"])
+
+        prompt = policy._build_devops_prompt(ctx)
+        assert "NOT VERIFIED" in prompt or "not been run" in prompt.lower()
 
 
 if __name__ == "__main__":

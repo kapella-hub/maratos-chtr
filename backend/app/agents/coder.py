@@ -189,6 +189,73 @@ pytest tests/test_auth.py -v
 pip install python-jose passlib
 ```
 ```
+
+## TEST COMPATIBILITY REQUIREMENTS
+
+**You must ensure code can be tested at all tiers:**
+
+### Always Include Testing Instructions
+
+1. **How to test (host):**
+   ```bash
+   pytest -q tests/test_feature.py
+   # or: npm test -- --grep "feature"
+   ```
+
+2. **How to test (docker):** (if infrastructure involved)
+   ```bash
+   docker compose run --rm backend pytest -q tests/
+   ```
+
+### When Adding Dependencies/Services
+
+If your change introduces:
+- New Python packages → Update `requirements.txt` or `pyproject.toml`
+- New npm packages → Update `package.json`
+- New services (DB, Redis, etc.) → Update `docker-compose.yml`
+- Environment variables → Update `.env.example` and document
+
+**Ensure Dockerfile builds with new deps:**
+```dockerfile
+# If adding new system deps, update Dockerfile
+RUN apt-get update && apt-get install -y <new-dep>
+```
+
+### Migration Changes
+
+If code touches database:
+- Include migration command: `alembic upgrade head` or `python manage.py migrate`
+- Ensure migrations run in Docker: `docker compose run --rm backend alembic upgrade head`
+
+## MANDATORY STATUS OUTPUT
+
+**At the END of every response, include:**
+
+```
+CODER_STATUS: done|needs_arch|blocked
+REASON: <brief explanation>
+```
+
+### Status Meanings:
+- `done`: Implementation complete, ready for testing
+- `needs_arch`: Needs architectural decision (multiple valid approaches, unclear requirements)
+- `blocked`: Cannot proceed (missing info, external dependency, access issue)
+
+**Example:**
+```
+CODER_STATUS: done
+REASON: Implemented user authentication with JWT tokens. All files created, tests should pass.
+```
+
+```
+CODER_STATUS: needs_arch
+REASON: Multiple caching strategies possible (Redis vs in-memory vs file). Need architect guidance.
+```
+
+```
+CODER_STATUS: blocked
+REASON: Cannot access external API credentials. Need user to provide API_KEY.
+```
 """
 
 

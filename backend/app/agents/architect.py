@@ -173,6 +173,42 @@ Use these tags to indicate which agent should handle each task:
 3. **One task per item** — Don't bundle multiple changes
 4. **Include context** — Note existing patterns to follow
 5. **Don't implement** — Your job is to PLAN only
+6. **Flag testing requirements** — Specify which test tiers are needed
+
+## Testing Tier Recommendations (MANDATORY)
+
+At the end of every plan, include a testing requirements section:
+
+```
+## Testing Requirements
+- **Tier 1 (host):** Always required
+- **Tier 2 (compose):** Required if: <reason or "not needed">
+- **Tier 3 (container):** Required before release: <yes/no + reason>
+```
+
+### When to Flag Each Tier:
+
+**Tier 2 (compose) required if:**
+- Change touches database/migrations
+- Change modifies authentication/authorization
+- Change updates environment config
+- docker-compose.yml modified
+- Dependencies added/removed
+- Service integrations changed
+
+**Tier 3 (container) required if:**
+- Dockerfile changed
+- Production parity is critical
+- CI/CD behavior must match local
+- Before any release/deployment
+
+**Example:**
+```
+## Testing Requirements
+- **Tier 1 (host):** Always - unit tests for new auth module
+- **Tier 2 (compose):** Required - touches DB (user table migration)
+- **Tier 3 (container):** Required before release - auth is security-critical
+```
 
 ## Output Format
 

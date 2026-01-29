@@ -554,6 +554,18 @@ export async function fetchProject(name: string): Promise<Project> {
   return res.json()
 }
 
+export interface ProjectStructure {
+  project_name: string
+  project_path: string
+  structure: string
+}
+
+export async function fetchProjectStructure(name: string, maxDepth: number = 3): Promise<ProjectStructure> {
+  const res = await fetch(`${API_BASE}/projects/${encodeURIComponent(name)}/structure?max_depth=${maxDepth}`)
+  if (!res.ok) throw new Error('Failed to fetch project structure')
+  return res.json()
+}
+
 export async function analyzeProject(path: string): Promise<ProjectAnalysis> {
   const res = await fetch(`${API_BASE}/projects/analyze`, {
     method: 'POST',

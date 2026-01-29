@@ -186,6 +186,111 @@ function fixCodeBlocks(text: string): string {
   return text.replace(/```(\w+)\s+([^\n])/g, '```$1\n$2')
 }
 
+/**
+ * Detect and wrap tree-like structures in code blocks.
+ * Matches patterns like:
+ * ├── folder/
+ * │   ├── file.py
+ * └── README.md
+ */
+function wrapTreeStructures(text: string): string {
+  // Patterns for tree detection:
+  // 1. Lines with tree branch characters (├── or └──)
+  // 2. Lines with vertical continuation (│ followed by spaces)
+  // 3. Empty tree lines (just │ or spaces)
+  const treeChars = '├└│─┬┴┼┤┌┐┘'
+
+  const isTreeLine = (line: string): boolean => {
+    // Must contain tree characters
+    if (![...treeChars].some(c => line.includes(c))) return false
+    // Line with branch: ├── or └──
+    if (/[├└]──/.test(line)) return true
+    // Continuation line: starts with │ or spaces then │
+    if (/^[ \t]*│/.test(line)) return true
+    return false
+  }
+
+  const lines = text.split('\n')
+  const result: string[] = []
+  let inTree = false
+  let treeLines: string[] = []
+  let treeHeader: string | null = null
+
+  // Helper to check if a line looks like a tree header (project-name/ or "structure:")
+  const isHeaderLine = (line: string) => {
+    if (!line) return false
+    const trimmed = line.trim()
+    // Project path like "myproject/" or "/path/to/project/"
+    if (/^[A-Za-z0-9_\-./~]+\/?$/.test(trimmed)) return true
+    // Contains "structure" keyword
+    if (trimmed.toLowerCase().includes('structure')) return true
+    return false
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const lineIsTree = isTreeLine(line)
+
+    // Also check for blank lines within a tree (they should be included)
+    const isBlankInTree = inTree && line.trim() === '' &&
+      i + 1 < lines.length && isTreeLine(lines[i + 1])
+
+    if (lineIsTree || isBlankInTree) {
+      if (!inTree) {
+        // Starting a new tree block
+        inTree = true
+        // Check if previous non-empty line was a header
+        for (let j = result.length - 1; j >= 0; j--) {
+          const prevLine = result[j]
+          if (prevLine.trim() === '') continue
+          if (isHeaderLine(prevLine)) {
+            treeHeader = result.splice(j).join('\n').trim()
+          }
+          break
+        }
+      }
+      treeLines.push(line)
+    } else if (inTree) {
+      // Check if this is just whitespace before more tree content
+      if (line.trim() === '' && i + 1 < lines.length) {
+        const nextNonEmpty = lines.slice(i + 1).find(l => l.trim() !== '')
+        if (nextNonEmpty && isTreeLine(nextNonEmpty)) {
+          treeLines.push(line)
+          continue
+        }
+      }
+
+      // End of tree block - wrap it
+      if (treeLines.length > 0) {
+        const treeContent = treeHeader
+          ? `${treeHeader}\n${treeLines.join('\n')}`
+          : treeLines.join('\n')
+        result.push('```')
+        result.push(treeContent)
+        result.push('```')
+      }
+      inTree = false
+      treeLines = []
+      treeHeader = null
+      result.push(line)
+    } else {
+      result.push(line)
+    }
+  }
+
+  // Handle tree at end of text
+  if (inTree && treeLines.length > 0) {
+    const treeContent = treeHeader
+      ? `${treeHeader}\n${treeLines.join('\n')}`
+      : treeLines.join('\n')
+    result.push('```')
+    result.push(treeContent)
+    result.push('```')
+  }
+
+  return result.join('\n')
+}
+
 // Copy button component
 function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false)
@@ -351,7 +456,8 @@ export default function MessageBubble({ message, isThinking, showTimestamp = tru
     const { content: rawContent, hadThinking, isThinkingInProgress } = stripHiddenBlocks(message.content)
     const filtered = filterToolLogs(rawContent)
     const withFixedCodeBlocks = fixCodeBlocks(filtered)
-    const content = stripAnsi(withFixedCodeBlocks)
+    const withWrappedTrees = wrapTreeStructures(withFixedCodeBlocks)
+    const content = stripAnsi(withWrappedTrees)
     return { content, hadThinking, isThinkingInProgress }
   }, [message.content])
 

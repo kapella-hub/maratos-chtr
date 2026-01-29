@@ -29,7 +29,8 @@ class WorkflowState(str, Enum):
     """Deterministic workflow states."""
     PENDING = "pending"           # Workflow created, not started
     CODING = "coding"             # Coder is implementing
-    TESTING = "testing"           # Tester is validating
+    TESTING = "testing"           # Tester is validating (host/compose mode)
+    CONTAINER_TESTING = "container_testing"  # Tester running container parity test
     FIXING = "fixing"             # Coder is fixing test failures
     ESCALATING = "escalating"     # Architect is redesigning
     DEPLOYING = "deploying"       # DevOps offering commit/deploy
@@ -39,11 +40,20 @@ class WorkflowState(str, Enum):
     FAILED = "failed"             # Workflow failed (budget exceeded or error)
 
 
+class TestMode(str, Enum):
+    """Test execution modes for tiered testing strategy."""
+    HOST = "host"           # Fast unit/lint tests on host
+    COMPOSE = "compose"     # Integration tests with docker-compose dependencies
+    CONTAINER = "container" # Full container parity tests
+
+
 # Valid state transitions (enforced)
 STATE_TRANSITIONS: dict[WorkflowState, set[WorkflowState]] = {
     WorkflowState.PENDING: {WorkflowState.CODING, WorkflowState.FAILED},
     WorkflowState.CODING: {WorkflowState.TESTING, WorkflowState.ESCALATING, WorkflowState.FAILED},
-    WorkflowState.TESTING: {WorkflowState.DEPLOYING, WorkflowState.FIXING, WorkflowState.ESCALATING, WorkflowState.FAILED},
+    # TESTING can go to CONTAINER_TESTING (normal flow) or DEPLOYING (no tests found)
+    WorkflowState.TESTING: {WorkflowState.CONTAINER_TESTING, WorkflowState.DEPLOYING, WorkflowState.FIXING, WorkflowState.ESCALATING, WorkflowState.FAILED},
+    WorkflowState.CONTAINER_TESTING: {WorkflowState.DEPLOYING, WorkflowState.FIXING, WorkflowState.FAILED},
     WorkflowState.FIXING: {WorkflowState.TESTING, WorkflowState.ESCALATING, WorkflowState.FAILED},
     WorkflowState.ESCALATING: {WorkflowState.CODING, WorkflowState.FAILED},
     WorkflowState.DEPLOYING: {WorkflowState.AWAITING_USER, WorkflowState.DOCUMENTING, WorkflowState.COMPLETED, WorkflowState.FAILED},
@@ -221,6 +231,8 @@ class CoderResult:
 class TesterResult:
     """Structured result from TESTER agent."""
     status: AgentOutcome  # pass, fail, error
+    test_mode: str = "host"  # host, compose, container
+    next_action: str = "back_to_coder"  # back_to_coder, escalate_arch, ready_for_devops
     test_commands: list[str] = field(default_factory=list)
     logs_path: str | None = None
     failure_summary: str = ""
@@ -229,6 +241,7 @@ class TesterResult:
     tests_failed: int = 0
     no_tests_found: bool = False  # For greenfield projects
     tests_created: bool = False   # Tester created new tests
+    notes: str = ""  # Why this mode was chosen
     raw_response: str = ""
 
     @classmethod
@@ -310,13 +323,21 @@ class TesterResult:
         for pattern, is_specific in fail_patterns:
             match = re.search(pattern, response, re.I if not is_specific else 0)
             if match:
-                status = AgentOutcome.FAIL
+                # Extract fail count if pattern has a group
+                extracted_count = None
                 if match.groups():
                     try:
-                        tests_failed = int(match.group(1))
+                        extracted_count = int(match.group(1))
+                        tests_failed = extracted_count
                     except (ValueError, IndexError):
                         pass
-                break
+
+                # Only set FAIL if:
+                # 1. No count was extracted (pattern matched but no number), OR
+                # 2. Count was extracted and is > 0
+                if extracted_count is None or extracted_count > 0:
+                    status = AgentOutcome.FAIL
+                    break
 
         # Extract test counts
         count_patterns = [
@@ -389,15 +410,75 @@ class TesterResult:
                 logger.warning("FAIL detected but no test output found - reconsidering as PASS")
                 status = AgentOutcome.PASS
 
+        # Parse TEST_REPORT block if present
+        test_mode = "host"
+        next_action = "back_to_coder" if status == AgentOutcome.FAIL else "ready_for_devops"
+        notes = ""
+        logs_path = None
+
+        # Look for TEST_REPORT YAML block - capture everything after TEST_REPORT:
+        test_report_match = re.search(
+            r'TEST_REPORT:\s*\n((?:[ \t]+[^\n]*\n?)+)',
+            response,
+            re.MULTILINE
+        )
+        if test_report_match:
+            report_text = test_report_match.group(1)
+
+            # Extract TEST_MODE
+            mode_match = re.search(r'TEST_MODE:\s*(\w+)', report_text, re.I)
+            if mode_match:
+                test_mode = mode_match.group(1).lower()
+
+            # Extract RESULT (override status if present)
+            result_match = re.search(r'RESULT:\s*(\w+)', report_text, re.I)
+            if result_match:
+                result_val = result_match.group(1).lower()
+                if result_val == "pass":
+                    status = AgentOutcome.PASS
+                elif result_val == "fail":
+                    status = AgentOutcome.FAIL
+
+            # Extract NEXT_ACTION
+            action_match = re.search(r'NEXT_ACTION:\s*(\w+)', report_text, re.I)
+            if action_match:
+                next_action = action_match.group(1).lower()
+
+            # Extract NOTES
+            notes_match = re.search(r'NOTES:\s*["\']?([^"\'\n]+)', report_text, re.I)
+            if notes_match:
+                notes = notes_match.group(1).strip()
+
+            # Extract LOG_PATHS - look for lines with "-" followed by path
+            logs_match = re.search(r'LOG_PATHS:\s*\n((?:[ \t]+-[^\n]+\n?)+)', report_text, re.I)
+            if logs_match:
+                logs_text = logs_match.group(1)
+                log_paths = re.findall(r'-\s*["\']?([^"\'}\n]+)["\']?', logs_text)
+                if log_paths and log_paths[0].strip():
+                    logs_path = log_paths[0].strip()
+
+            # Extract COMMANDS_RUN - look for lines with "-" followed by command
+            cmds_match = re.search(r'COMMANDS_RUN:\s*\n((?:[ \t]+-[^\n]+\n?)+)', report_text, re.I)
+            if cmds_match:
+                cmds_text = cmds_match.group(1)
+                for cmd in re.findall(r'-\s*["\']?([^"\'}\n]+)["\']?', cmds_text):
+                    cmd_clean = cmd.strip().strip('"').strip("'")
+                    if cmd_clean and cmd_clean not in test_commands:
+                        test_commands.append(cmd_clean)
+
         return cls(
             status=status,
+            test_mode=test_mode,
+            next_action=next_action,
             test_commands=list(set(test_commands)),
+            logs_path=logs_path,
             failure_summary=failure_summary,
             tests_run=tests_run,
             tests_passed=tests_passed,
             tests_failed=tests_failed,
             no_tests_found=no_tests_found,
             tests_created=tests_created,
+            notes=notes,
             raw_response=response,
         )
 
@@ -628,9 +709,15 @@ class WorkflowContext:
     # Results from each stage
     coder_result: CoderResult | None = None
     tester_result: TesterResult | None = None
+    container_tester_result: TesterResult | None = None  # Container parity test result
     architect_result: ArchitectResult | None = None
     devops_result: DevOpsResult | None = None
     docs_result: DocsResult | None = None
+
+    # Container parity tracking
+    container_test_completed: bool = False
+    container_test_skipped: bool = False
+    container_skip_reason: str | None = None
 
     # User decisions (structured)
     user_wants_commit: bool = False
@@ -816,6 +903,10 @@ class DeliveryLoopPolicy:
                 async for event in self._run_tester(ctx, context, spawn_agent_fn):
                     yield event
 
+            elif ctx.state == WorkflowState.CONTAINER_TESTING:
+                async for event in self._run_container_tester(ctx, context, spawn_agent_fn):
+                    yield event
+
             elif ctx.state == WorkflowState.FIXING:
                 async for event in self._run_fixer(ctx, context, spawn_agent_fn):
                     yield event
@@ -970,31 +1061,49 @@ class DeliveryLoopPolicy:
             data={
                 "gate": "tester",
                 "passed": result.status == AgentOutcome.PASS,
+                "test_mode": result.test_mode,
+                "next_action": result.next_action,
                 "tests_run": result.tests_run,
                 "tests_passed": result.tests_passed,
                 "tests_failed": result.tests_failed,
                 "no_tests_found": result.no_tests_found,
                 "tests_created": result.tests_created,
                 "failure_summary": result.failure_summary[:200] if result.failure_summary else None,
+                "notes": result.notes,
             },
         )
 
         # Log detailed test result
         logger.info(
-            f"Test result: status={result.status.value}, "
+            f"Test result: status={result.status.value}, mode={result.test_mode}, "
+            f"next_action={result.next_action}, "
             f"run={result.tests_run}, passed={result.tests_passed}, failed={result.tests_failed}, "
             f"no_tests_found={result.no_tests_found}, tests_created={result.tests_created}"
         )
 
         # Determine next state
         if result.status == AgentOutcome.PASS:
-            ctx.transition(WorkflowState.DEPLOYING)  # Tests passed, go to devops
+            # If tests passed, check if we need container parity test
+            # Skip container test if:
+            # 1. Already in container mode
+            # 2. Container test already completed
+            # 3. No Dockerfile exists (simple projects)
+            if result.test_mode == "container" or ctx.container_test_completed:
+                # Container test already done, go to devops
+                ctx.container_test_completed = True
+                ctx.transition(WorkflowState.DEPLOYING)
+            else:
+                # Need container parity test before devops
+                ctx.transition(WorkflowState.CONTAINER_TESTING)
         elif result.status == AgentOutcome.FAIL:
             # Only increment fix_cycles for actual test failures, not "no tests" scenarios
             if result.no_tests_found and not result.tests_created:
-                # No tests found and none were created - this shouldn't count as a failure
-                # Go to devops anyway since there's nothing to test
-                logger.warning("No tests found or created - proceeding to devops")
+                # No tests found and none were created - skip container test too
+                # since there's nothing to test in containers either
+                logger.warning("No tests found or created - skipping to devops")
+                ctx.container_test_completed = True
+                ctx.container_test_skipped = True
+                ctx.container_skip_reason = "No tests found in project"
                 ctx.transition(WorkflowState.DEPLOYING)
             else:
                 ctx.fix_cycles += 1
@@ -1008,6 +1117,69 @@ class DeliveryLoopPolicy:
                     ctx.transition(WorkflowState.FAILED)
         else:
             ctx.error = "Tester error"
+            ctx.transition(WorkflowState.FAILED)
+
+    async def _run_container_tester(
+        self,
+        ctx: WorkflowContext,
+        context: dict[str, Any],
+        spawn_agent_fn: Callable,
+    ) -> AsyncIterator[WorkflowEvent]:
+        """Run TESTER in container mode for parity check before devops."""
+        yield WorkflowEvent(
+            type="agent_started",
+            workflow_id=ctx.workflow_id,
+            data={"agent": "tester", "mode": "container_parity"},
+        )
+
+        # Build container test prompt
+        prompt = self._build_container_test_prompt(ctx)
+
+        # Spawn tester agent with container mode
+        response = await spawn_agent_fn("tester", prompt, context)
+
+        # Parse result
+        result = TesterResult.parse(response)
+        ctx.container_tester_result = result
+        ctx.container_test_completed = True
+
+        yield WorkflowEvent(
+            type="gate_result",
+            workflow_id=ctx.workflow_id,
+            data={
+                "gate": "container_parity",
+                "passed": result.status == AgentOutcome.PASS,
+                "test_mode": result.test_mode,
+                "tests_run": result.tests_run,
+                "tests_passed": result.tests_passed,
+                "tests_failed": result.tests_failed,
+                "failure_summary": result.failure_summary[:200] if result.failure_summary else None,
+                "notes": result.notes,
+            },
+        )
+
+        logger.info(
+            f"Container parity test: status={result.status.value}, "
+            f"run={result.tests_run}, passed={result.tests_passed}, failed={result.tests_failed}"
+        )
+
+        # Determine next state
+        if result.status == AgentOutcome.PASS:
+            # Container tests passed, proceed to devops
+            ctx.transition(WorkflowState.DEPLOYING)
+        elif result.status == AgentOutcome.FAIL:
+            # Container tests failed - route back to coder with container failure info
+            ctx.fix_cycles += 1
+            logger.info(f"Container test failed, fix cycle {ctx.fix_cycles}/{ctx.max_fix_cycles}")
+            if ctx.fix_cycles < ctx.max_fix_cycles:
+                ctx.transition(WorkflowState.FIXING)
+            elif ctx.architect_cycles < ctx.max_architect_cycles:
+                ctx.transition(WorkflowState.ESCALATING)
+            else:
+                ctx.error = "Container parity tests failed and all budgets exceeded"
+                ctx.transition(WorkflowState.FAILED)
+        else:
+            ctx.error = "Container tester error"
             ctx.transition(WorkflowState.FAILED)
 
     async def _run_fixer(
@@ -1414,7 +1586,7 @@ class DeliveryLoopPolicy:
         return base_prompt
 
     def _build_tester_prompt(self, ctx: WorkflowContext) -> str:
-        """Build prompt for testing."""
+        """Build prompt for testing (host/compose mode)."""
         files_info = ""
         if ctx.coder_result and ctx.coder_result.artifacts:
             files_info = f"**Files to test:** {', '.join(ctx.coder_result.artifacts)}"
@@ -1427,6 +1599,12 @@ class DeliveryLoopPolicy:
 
 {files_info}
 
+**TEST MODE SELECTION:**
+First, determine the appropriate test mode based on the TEST STRATEGY CONTRACT:
+- Use TEST_MODE=host for simple changes (default)
+- Use TEST_MODE=compose if DB/auth/config/deps changed
+- Note: TEST_MODE=container will be run separately before devops gate
+
 **IMPORTANT: Follow these steps IN ORDER:**
 
 ### Step 1: Check for Existing Tests
@@ -1438,49 +1616,154 @@ class DeliveryLoopPolicy:
 - Write tests that validate core features work
 
 ### Step 3: Run the Tests
+For TEST_MODE=host:
 <tool_call>{{"tool": "shell", "args": {{"command": "python -m pytest -v --tb=short 2>&1 | head -50"}}}}</tool_call>
+
+For TEST_MODE=compose (if dependencies needed):
+<tool_call>{{"tool": "shell", "args": {{"command": "docker compose up -d db && python -m pytest -v tests/integration/ --tb=short 2>&1 | head -50"}}}}</tool_call>
 
 OR for JavaScript projects:
 <tool_call>{{"tool": "shell", "args": {{"command": "npm test 2>&1 | head -50"}}}}</tool_call>
 
 ### Step 4: Report Results CLEARLY
 
-**MANDATORY OUTPUT FORMAT - Include this EXACTLY:**
+**MANDATORY TEST_REPORT FORMAT (include at END of response):**
 
-```
-## Test Results
-- **Status:** PASS or FAIL
-- **Tests run:** <number>
-- **Tests passed:** <number>
-- **Tests failed:** <number>
+```yaml
+TEST_REPORT:
+  TEST_MODE: host
+  COMMANDS_RUN:
+    - "pytest -v --tb=short"
+  RESULT: pass
+  FAILURE_SUMMARY: ""
+  LOG_PATHS: []
+  NEXT_ACTION: ready_for_devops
+  NOTES: "Unit tests for new auth module passed"
 ```
 
 If tests PASS, say "All X tests passed" clearly.
-If tests FAIL, include the actual error output.
+If tests FAIL, include the actual error output and set NEXT_ACTION: back_to_coder.
 If NO tests exist and you created them, run them and report results.
 
 **DO NOT say "tests would fail" or "this could fail" - only report ACTUAL test execution results.**
 """
 
+    def _build_container_test_prompt(self, ctx: WorkflowContext) -> str:
+        """Build prompt for container parity testing before devops gate."""
+        files_info = ""
+        if ctx.coder_result and ctx.coder_result.artifacts:
+            files_info = f"**Files changed:** {', '.join(ctx.coder_result.artifacts)}"
+
+        previous_test_info = ""
+        if ctx.tester_result:
+            previous_test_info = f"""
+**Previous Test Results (host/compose mode):**
+- Mode: {ctx.tester_result.test_mode}
+- Result: {ctx.tester_result.status.value}
+- Tests passed: {ctx.tester_result.tests_passed}/{ctx.tester_result.tests_run}
+"""
+
+        return f"""Run CONTAINER PARITY TEST before devops gate.
+
+**⚠️ MANDATORY: TEST_MODE must be 'container' for this run.**
+
+This is the final test gate before commit/deploy. Tests must pass inside Docker containers
+to ensure CI/production parity.
+
+**Original Task:** {ctx.original_task}
+
+**Workspace:** {ctx.workspace_path or 'Current directory'}
+
+{files_info}
+{previous_test_info}
+
+**REQUIRED STEPS:**
+
+### Step 1: Check for Dockerfile
+<tool_call>{{"tool": "shell", "args": {{"command": "ls -la Dockerfile* docker-compose*.yml 2>/dev/null || echo 'No Docker files found'"}}}}</tool_call>
+
+### Step 2: Build Containers
+<tool_call>{{"tool": "shell", "args": {{"command": "docker compose build 2>&1 | tail -20"}}}}</tool_call>
+
+### Step 3: Run Tests INSIDE Container
+For Python:
+<tool_call>{{"tool": "shell", "args": {{"command": "docker compose run --rm backend pytest -q --tb=short 2>&1 | head -50"}}}}</tool_call>
+
+For JavaScript:
+<tool_call>{{"tool": "shell", "args": {{"command": "docker compose run --rm frontend npm test 2>&1 | head -50"}}}}</tool_call>
+
+### Step 4: Cleanup
+<tool_call>{{"tool": "shell", "args": {{"command": "docker compose down 2>&1"}}}}</tool_call>
+
+### Step 5: Report Results
+
+**MANDATORY TEST_REPORT FORMAT:**
+
+```yaml
+TEST_REPORT:
+  TEST_MODE: container
+  COMMANDS_RUN:
+    - "docker compose build"
+    - "docker compose run --rm backend pytest -q"
+  RESULT: pass|fail
+  FAILURE_SUMMARY: ""
+  LOG_PATHS: []
+  NEXT_ACTION: ready_for_devops|back_to_coder
+  NOTES: "Container parity verified - same results as host"
+```
+
+**If no Dockerfile exists:**
+- Note this in NOTES field
+- Set RESULT: pass (skip container test for non-dockerized projects)
+- Set NEXT_ACTION: ready_for_devops
+
+**If container tests fail but host tests passed:**
+- This indicates environment parity issue
+- Set NEXT_ACTION: back_to_coder
+- Include specific failure in FAILURE_SUMMARY
+"""
+
     def _build_fix_prompt(self, ctx: WorkflowContext) -> str:
         """Build prompt for fixing test failures."""
         failure_info = ""
-        if ctx.tester_result:
-            test_cmds = ', '.join(ctx.tester_result.test_commands) if ctx.tester_result.test_commands else 'pytest'
+
+        # Check for container test failure first (more recent)
+        active_test_result = ctx.container_tester_result if ctx.container_tester_result else ctx.tester_result
+
+        if active_test_result:
+            test_cmds = ', '.join(active_test_result.test_commands) if active_test_result.test_commands else 'pytest'
+            test_mode = active_test_result.test_mode
             failure_info = f"""
 **Test Failure Details:**
-- Tests run: {ctx.tester_result.tests_run}
-- Tests passed: {ctx.tester_result.tests_passed}
-- Tests failed: {ctx.tester_result.tests_failed}
+- Test mode: {test_mode.upper()}
+- Tests run: {active_test_result.tests_run}
+- Tests passed: {active_test_result.tests_passed}
+- Tests failed: {active_test_result.tests_failed}
 - Test command: {test_cmds}
 
 **Actual Error Output:**
 ```
-{ctx.tester_result.failure_summary[:1500] if ctx.tester_result.failure_summary else 'No specific error captured - run tests to see failures'}
+{active_test_result.failure_summary[:1500] if active_test_result.failure_summary else 'No specific error captured - run tests to see failures'}
 ```
 """
+            # Add container-specific info if this was a container test failure
+            if test_mode == "container" and ctx.tester_result:
+                failure_info += f"""
+**NOTE: Container parity test failed!**
+Host/compose tests passed, but container tests failed. This indicates environment differences.
+
+Host test result: {ctx.tester_result.status.value}
+Container test result: {active_test_result.status.value}
+
+Common causes:
+- Missing system dependencies in Dockerfile
+- Different Python/Node versions in container
+- Environment variable differences
+- File path or permission issues
+"""
+
             # If no tests were found but we're in fix mode, note that
-            if ctx.tester_result.no_tests_found:
+            if active_test_result.no_tests_found:
                 failure_info += """
 **NOTE:** No tests were found in the previous run. You may need to:
 1. Create test files (test_*.py)
@@ -1544,6 +1827,32 @@ Architect cycle: {ctx.architect_cycles}/{ctx.max_architect_cycles}
         """Build prompt for devops - analyze changes and prepare for user decisions."""
         artifacts = ctx.coder_result.artifacts if ctx.coder_result else []
 
+        # Build container parity status
+        container_status = ""
+        if ctx.container_test_completed:
+            if ctx.container_tester_result:
+                container_status = f"""
+**Container Parity Status:** ✅ VERIFIED
+- Mode: container
+- Result: {ctx.container_tester_result.status.value}
+- Tests: {ctx.container_tester_result.tests_passed}/{ctx.container_tester_result.tests_run} passed
+"""
+            else:
+                container_status = """
+**Container Parity Status:** ✅ VERIFIED (no Docker in project)
+"""
+        elif ctx.container_test_skipped:
+            container_status = f"""
+**Container Parity Status:** ⚠️ SKIPPED
+- Reason: {ctx.container_skip_reason or 'Unknown'}
+"""
+        else:
+            container_status = """
+**Container Parity Status:** ⚠️ NOT VERIFIED
+- Container tests have not been run
+- Recommend running container tests before commit
+"""
+
         return f"""Implementation complete and tests passing! Analyze the changes and prepare deployment options.
 
 **Completed Task:** {ctx.original_task}
@@ -1551,6 +1860,7 @@ Architect cycle: {ctx.architect_cycles}/{ctx.max_architect_cycles}
 **Files Modified:** {', '.join(artifacts) or 'Check workspace for changes'}
 
 **Workspace:** {ctx.workspace_path or 'Current directory'}
+{container_status}
 
 **REQUIRED: Execute these steps in order:**
 
