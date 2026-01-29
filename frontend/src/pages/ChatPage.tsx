@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Layers, FolderCode, Sparkles } from 'lucide-react'
+import { Layers, FolderCode, X } from 'lucide-react'
 import ChatInput, { SessionCommand } from '@/components/ChatInput'
 import { ChatStream, ProjectCard } from '@/components/chat'
 import ToastContainer from '@/components/ToastContainer'
@@ -8,7 +8,7 @@ import { useChatStore } from '@/stores/chat'
 import type { ProjectPlan, ProjectTask } from '@/stores/chat'
 import { useToastStore } from '@/stores/toast'
 import { useCanvasStore } from '@/stores/canvas'
-import { streamChat, streamChatWithProjectAction, fetchConfig, ThinkingBlock } from '@/lib/api'
+import { streamChat, streamChatWithProjectAction, fetchConfig, fetchProjects, ThinkingBlock } from '@/lib/api'
 import { saveChatSession, getChatSession } from '@/lib/chatHistory'
 
 export default function ChatPage() {
@@ -26,10 +26,12 @@ export default function ChatPage() {
     activeSubagents,
     inlineProject,
     activeProjectContext,
+    selectedProjectName,
     setSessionId,
     setAgentId,
     setCurrentModel,
     setActiveProjectContext,
+    setSelectedProjectName,
     addMessage,
     appendToLastMessage,
     setLastMessageAgent,
@@ -61,6 +63,12 @@ export default function ChatPage() {
   useQuery({
     queryKey: ['config'],
     queryFn: fetchConfig,
+  })
+
+  // Fetch projects for the selector
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'],
+    queryFn: fetchProjects,
   })
 
   // Always use MO agent
@@ -110,7 +118,7 @@ export default function ChatPage() {
     setThinking(true)
 
     try {
-      for await (const event of streamChat(content, agentId, sessionId || undefined, controller.signal)) {
+      for await (const event of streamChat(content, agentId, sessionId || undefined, controller.signal, selectedProjectName)) {
         if (event.type === 'session_id' && event.data) {
           const newSessionId = event.data as string
           sessionIdRef.current = newSessionId
@@ -238,7 +246,7 @@ export default function ChatPage() {
       setAbortController(null)
       clearSubagents()
     }
-  }, [agentId, sessionId, addMessage, appendToLastMessage, setSessionId, setLastMessageAgent, setCurrentModel, setActiveProjectContext, setStreaming, setThinking, setModelThinking, setCurrentThinkingBlock, setLastMessageThinking, setOrchestrating, updateSubagent, clearSubagents, setAbortController, setProjectStatus, setProjectPlan, updateProjectTask, addProjectEvent, setProjectError, addCanvasArtifact, addToast])
+  }, [agentId, sessionId, selectedProjectName, addMessage, appendToLastMessage, setSessionId, setLastMessageAgent, setCurrentModel, setActiveProjectContext, setStreaming, setThinking, setModelThinking, setCurrentThinkingBlock, setLastMessageThinking, setOrchestrating, updateSubagent, clearSubagents, setAbortController, setProjectStatus, setProjectPlan, updateProjectTask, addProjectEvent, setProjectError, addCanvasArtifact, addToast])
 
   // Project action handlers
   const handleProjectApprove = useCallback(async () => {
@@ -389,18 +397,12 @@ export default function ChatPage() {
       )}
 
       {/* Active Project Context Indicator */}
-      {activeProjectContext && (
+      {(activeProjectContext || selectedProjectName) && (
         <div className="max-w-3xl mx-auto w-full px-4 pt-2">
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-sm">
             <FolderCode className="w-4 h-4 text-primary" />
             <span className="text-muted-foreground">Project:</span>
-            <span className="font-medium text-foreground">{activeProjectContext.name}</span>
-            {activeProjectContext.auto_detected && (
-              <span className="flex items-center gap-1 text-xs text-primary ml-auto">
-                <Sparkles className="w-3 h-3" />
-                auto-detected
-              </span>
-            )}
+            <span className="font-medium text-foreground">{activeProjectContext?.name || selectedProjectName}</span>
           </div>
         </div>
       )}
@@ -453,6 +455,36 @@ export default function ChatPage() {
 
       {/* Floating Input */}
       <div className="floating-input">
+        {/* Project Selector */}
+        {projects.length > 0 && (
+          <div className="max-w-3xl mx-auto px-4 pb-2">
+            <div className="flex items-center gap-2">
+              <FolderCode className="w-4 h-4 text-muted-foreground" />
+              <select
+                value={selectedProjectName || ''}
+                onChange={(e) => setSelectedProjectName(e.target.value || null)}
+                disabled={isStreaming}
+                className="flex-1 bg-card border border-border/50 rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+              >
+                <option value="">No project selected</option>
+                {projects.map((project) => (
+                  <option key={project.name} value={project.name}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+              {selectedProjectName && (
+                <button
+                  onClick={() => setSelectedProjectName(null)}
+                  className="p-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                  title="Clear project"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         <ChatInput
           onSend={handleSend}
           onQueue={enqueueMessage}

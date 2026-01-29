@@ -224,12 +224,18 @@ export async function* streamChat(
   message: string,
   agentId: string = 'mo',
   sessionId?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  projectName?: string | null
 ): AsyncGenerator<ChatEvent> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, agent_id: agentId, session_id: sessionId }),
+    body: JSON.stringify({
+      message,
+      agent_id: agentId,
+      session_id: sessionId,
+      project_name: projectName || undefined,
+    }),
     signal,
   })
 

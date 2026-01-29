@@ -112,6 +112,9 @@ interface ChatStore {
   // Active project context (auto-detected or explicitly set)
   activeProjectContext: ProjectContextInfo | null
 
+  // User-selected project from dropdown (not auto-detected)
+  selectedProjectName: string | null
+
   // Inline project state
   inlineProject: InlineProject
 
@@ -119,6 +122,7 @@ interface ChatStore {
   setAgentId: (id: string) => void
   setCurrentModel: (model: string | null) => void
   setActiveProjectContext: (context: ProjectContextInfo | null) => void
+  setSelectedProjectName: (name: string | null) => void
   addMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void
   appendToLastMessage: (content: string) => void
   setLastMessageAgent: (agentId: string) => void
@@ -171,12 +175,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   abortController: null,
   currentThinkingBlock: null,
   activeProjectContext: null,
+  selectedProjectName: null,
   inlineProject: { ...initialProject },
 
   setSessionId: (id) => set({ sessionId: id }),
   setAgentId: (id) => set({ agentId: id }),
   setCurrentModel: (model) => set({ currentModel: model }),
   setActiveProjectContext: (context) => set({ activeProjectContext: context }),
+  setSelectedProjectName: (name) => set({ selectedProjectName: name }),
   setAbortController: (controller) => set({ abortController: controller }),
   
   stopGeneration: () => {
@@ -279,6 +285,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     isOrchestrating: false,
     activeSubagents: [],
     activeProjectContext: null,
+    selectedProjectName: null,
     inlineProject: { ...initialProject },
   }),
 

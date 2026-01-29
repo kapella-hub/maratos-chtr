@@ -145,18 +145,6 @@ def get_project_context_for_session(
         # Project no longer exists, clear it
         logger.warning(f"Session's active project '{session_active_project}' no longer exists")
 
-    # Priority 3: Auto-detect from message
-    mention_result = detect_project_mentions(message)
-    if mention_result.detected:
-        if mention_result.multiple_detected:
-            logger.info(
-                f"Multiple projects mentioned: {mention_result.project_names}, "
-                f"using primary: {mention_result.primary_project}"
-            )
-
-        project_name = mention_result.primary_project
-        project = project_registry.get(project_name)
-        if project:
-            return project_name, project.get_context(), True
-
+    # Auto-detection from message disabled - users select projects explicitly
+    # in the chat UI instead of relying on mention detection
     return None, None, False

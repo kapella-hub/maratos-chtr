@@ -453,6 +453,9 @@ class ChatRequest(BaseModel):
     agent_id: str | None = None  # Optional: specify agent (mo, architect, reviewer)
     context: dict[str, Any] | None = None
 
+    # Explicit project selection from UI
+    project_name: str | None = None  # User-selected project from dropdown
+
     # Inline project control
     project_action: str | None = None  # approve, adjust, pause, resume, cancel
     project_adjustments: dict[str, Any] | None = None  # For adjust action
@@ -635,8 +638,10 @@ async def chat(
             explicit_project_from_command = result["project_loaded"]
             project_name_for_context = explicit_project_from_command
 
-    # Auto-detect project context if not explicitly set via command
-    if not project_context and not explicit_project_from_command:
+    # Get project context - explicit selection from UI or session's active project
+    # Priority: /project command > UI selection > session active project
+    explicit_project = explicit_project_from_command or chat_request.project_name
+    if not project_context:
         (
             project_name_for_context,
             project_context,
@@ -644,16 +649,14 @@ async def chat(
         ) = get_project_context_for_session(
             session_active_project=session.active_project_name,
             message=chat_request.message,
-            explicit_project=explicit_project_from_command,
+            explicit_project=explicit_project,
         )
 
-        if project_context and project_auto_detected:
-            logger.info(f"Auto-detected project mention: {project_name_for_context}")
+        if project_context and chat_request.project_name:
+            logger.info(f"Using user-selected project: {project_name_for_context}")
 
-    # Update session's active project if changed via command or auto-detection
-    new_active_project = explicit_project_from_command or (
-        project_name_for_context if project_auto_detected else None
-    )
+    # Update session's active project if changed via command or explicit selection
+    new_active_project = explicit_project_from_command or chat_request.project_name
     if new_active_project and new_active_project != session.active_project_name:
         try:
             session.active_project_name = new_active_project
