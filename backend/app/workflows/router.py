@@ -237,11 +237,16 @@ DEVOPS_KEYWORDS = {
     "deploy": 0.85,
     "deployment": 0.8,
     "docker": 0.8,
+    "dockerfile": 0.85,
+    "container": 0.85,
+    "containerize": 0.9,
     "kubernetes": 0.85,
+    "k8s": 0.85,
     "ci/cd": 0.9,
     "pipeline": 0.75,
     "github actions": 0.85,
     "terraform": 0.85,
+    "spin up": 0.8,
 }
 
 
@@ -267,9 +272,42 @@ STRONG_IMPERATIVE_VERBS = (
 WEAK_IMPERATIVE_VERBS = (
     "add", "make", "update", "modify", "change", "edit",
     "delete", "remove", "drop",
-    "setup", "configure", "install", "deploy",
-    "test", "run", "execute", "check",
+    "setup", "configure", "install",
+    "test", "check",
 )
+
+# Operations verbs - indicate running/deploying rather than coding
+OPERATIONS_VERBS = (
+    "deploy", "run", "start", "launch", "spin", "host", "serve",
+    "execute", "boot", "restart", "stop", "scale",
+)
+
+# Infrastructure/operations context - indicates devops domain
+OPERATIONS_CONTEXT = {
+    "container", "docker", "dockerfile", "image",
+    "kubernetes", "k8s", "pod", "cluster", "node",
+    "server", "vm", "instance", "cloud",
+    "aws", "gcp", "azure", "heroku", "vercel", "netlify",
+    "ci", "cd", "pipeline", "workflow", "action",
+    "environment", "production", "staging", "dev",
+    "port", "localhost", "nginx", "apache",
+}
+
+# Phrases that indicate "make it run" intent
+OPERATIONS_PHRASES = [
+    r"\bspin\s+(?:it\s+)?up\b",
+    r"\bget\s+(?:it\s+)?running\b",
+    r"\bmake\s+(?:it\s+)?live\b",
+    r"\bput\s+(?:it\s+)?(?:in(?:to)?|on)\s+(?:a\s+)?(?:container|docker|server|cloud)\b",
+    r"\brun\s+(?:it\s+)?(?:in|on|with)\b",
+    r"\bstart\s+(?:it\s+)?(?:up|in|on)\b",
+    r"\blaunch\s+(?:it|this|the)\b",
+    r"\bhost\s+(?:it|this)\b",
+    r"\bserve\s+(?:it|this)\b",
+    r"\bdeploy\s+(?:it|this|to)\b",
+    r"\bcontainerize\b",
+    r"\bdockerize\b",
+]
 
 
 def _is_question(message: str) -> tuple[bool, str]:
@@ -356,6 +394,70 @@ def _is_imperative(message: str) -> tuple[bool, str, float]:
     return False, "", 0.0
 
 
+def _is_operations_task(message: str) -> tuple[bool, str, float]:
+    """Detect if message is about operations/devops (running, deploying, infrastructure).
+
+    Returns (is_operations, reason, confidence).
+
+    This detects intent to:
+    - Run/start/launch something (not write code for it)
+    - Deploy or containerize
+    - Work with infrastructure
+    """
+    msg_lower = message.lower().strip()
+    words = msg_lower.split()
+
+    if not words:
+        return False, "", 0.0
+
+    # Check for operations phrases first (highest signal)
+    for pattern in OPERATIONS_PHRASES:
+        if re.search(pattern, msg_lower):
+            return True, f"matches operations phrase", 0.9
+
+    first_word = words[0]
+
+    # Starts with operations verb
+    if first_word in OPERATIONS_VERBS:
+        # Check for infrastructure context
+        has_ops_context = any(ctx in msg_lower for ctx in OPERATIONS_CONTEXT)
+        if has_ops_context:
+            return True, f"operations verb '{first_word}' + context", 0.9
+        # Even without explicit context, "deploy", "spin", "host" are strong signals
+        if first_word in ("deploy", "spin", "host", "serve", "launch"):
+            return True, f"strong operations verb '{first_word}'", 0.85
+        # "run" alone is ambiguous (could mean run tests)
+        return True, f"operations verb '{first_word}'", 0.6
+
+    # Check for "please" + operations verb
+    if first_word == "please" and len(words) > 1:
+        verb = words[1]
+        if verb in OPERATIONS_VERBS:
+            has_ops_context = any(ctx in msg_lower for ctx in OPERATIONS_CONTEXT)
+            return True, f"please + operations verb '{verb}'", 0.85 if has_ops_context else 0.7
+
+    # Check for infrastructure context with any action
+    has_ops_context = any(ctx in msg_lower for ctx in OPERATIONS_CONTEXT)
+    if has_ops_context:
+        # Look for action verbs that combined with ops context = devops task
+        action_verbs = ("put", "get", "make", "set", "use", "add", "create")
+        if first_word in action_verbs:
+            return True, f"action verb + operations context", 0.75
+
+    # "I want/need" + operations verb
+    want_patterns = [
+        r"(?:want|need|would like)\s+(?:to\s+)?(?:you\s+)?(?:to\s+)?(\w+)",
+    ]
+    for pattern in want_patterns:
+        match = re.search(pattern, msg_lower)
+        if match:
+            verb = match.group(1)
+            if verb in OPERATIONS_VERBS:
+                return True, f"want/need + operations verb '{verb}'", 0.8
+
+    return False, "", 0.0
+
+
 # =============================================================================
 # Keyword-based Classifier
 # =============================================================================
@@ -366,8 +468,11 @@ def classify_by_keywords(message: str) -> ClassificationResult:
     Priority:
     1. Explicit commands (/code, /fix, etc.)
     2. Question detection (structural)
-    3. Imperative detection (structural)
-    4. Keyword matching (fallback)
+    3. Non-coding indicators
+    4. Operations/DevOps detection (structural)
+    5. Testing detection
+    6. Imperative coding detection (structural)
+    7. Keyword matching (fallback)
     """
     message_lower = message.lower().strip()
     matched_keywords = []
@@ -413,8 +518,21 @@ def classify_by_keywords(message: str) -> ClassificationResult:
                 reasoning=f"Non-coding indicator: {keyword}",
             )
 
-    # 4. Check for specialized keywords first (testing, devops)
-    # Check for testing keywords
+    # 4. Smart operations/devops detection (structural)
+    is_ops, ops_reason, ops_confidence = _is_operations_task(message)
+    if is_ops and ops_confidence >= 0.7:
+        matched_keywords.append(f"operations:{ops_reason}")
+        return ClassificationResult(
+            task_type=TaskType.DEVOPS,
+            confidence=ops_confidence,
+            should_trigger_workflow=ops_confidence >= router_config.auto_trigger_threshold,
+            needs_clarification=router_config.clarify_threshold <= ops_confidence < router_config.auto_trigger_threshold,
+            clarification_question="This looks like a deployment/infrastructure task. Should I use the devops workflow? (yes/no)" if router_config.clarify_threshold <= ops_confidence < router_config.auto_trigger_threshold else None,
+            matched_keywords=matched_keywords,
+            reasoning=f"Operations task: {ops_reason}",
+        )
+
+    # 5. Check for testing keywords
     for keyword, weight in TESTING_KEYWORDS.items():
         if keyword in message_lower:
             matched_keywords.append(keyword)
@@ -422,21 +540,14 @@ def classify_by_keywords(message: str) -> ClassificationResult:
                 base_confidence = weight
                 task_type = TaskType.TESTING
 
-    # Check for devops keywords
-    for keyword, weight in DEVOPS_KEYWORDS.items():
-        if keyword in message_lower:
-            matched_keywords.append(keyword)
-            if weight > base_confidence:
-                base_confidence = weight
-                task_type = TaskType.DEVOPS
-
-    # 5. Check for imperative commands - boost confidence for clear commands
-    # Only if not already classified as testing/devops
+    # 6. Check for imperative commands - boost confidence for clear coding commands
+    # Only if not already classified as testing
     is_imperative, imperative_verb, imperative_confidence = _is_imperative(message)
-    if is_imperative and task_type not in (TaskType.TESTING, TaskType.DEVOPS):
+    if is_imperative and task_type != TaskType.TESTING:
         matched_keywords.append(f"imperative:{imperative_verb}")
         base_confidence = max(base_confidence, imperative_confidence)
-        task_type = TaskType.CODING
+        if task_type == TaskType.UNKNOWN:
+            task_type = TaskType.CODING
 
     # Check for strong coding keywords
     for keyword, weight in STRONG_CODING_KEYWORDS.items():
@@ -677,8 +788,79 @@ def classify_message_sync(message: str) -> ClassificationResult:
 
 
 # =============================================================================
+# Pending Clarification Tracking
+# =============================================================================
+
+from dataclasses import dataclass as _dataclass
+from datetime import datetime as _datetime
+from typing import Dict
+
+
+@_dataclass
+class PendingClarification:
+    """Tracks a pending workflow clarification for a session."""
+    original_task: str
+    task_type: TaskType
+    confidence: float
+    asked_at: _datetime
+    matched_keywords: list[str]
+
+
+# In-memory store for pending clarifications (session_id -> PendingClarification)
+# In production, this would be persisted to the database
+_pending_clarifications: Dict[str, PendingClarification] = {}
+
+# How long a clarification is valid (5 minutes)
+CLARIFICATION_TIMEOUT_SECONDS = 300
+
+
+def store_pending_clarification(
+    session_id: str,
+    original_task: str,
+    classification: ClassificationResult,
+) -> None:
+    """Store a pending clarification for a session."""
+    _pending_clarifications[session_id] = PendingClarification(
+        original_task=original_task,
+        task_type=classification.task_type,
+        confidence=classification.confidence,
+        asked_at=_datetime.now(),
+        matched_keywords=classification.matched_keywords,
+    )
+    logger.debug(f"Stored pending clarification for session {session_id[:8]}")
+
+
+def get_pending_clarification(session_id: str) -> PendingClarification | None:
+    """Get pending clarification for a session, if any and not expired."""
+    pending = _pending_clarifications.get(session_id)
+    if not pending:
+        return None
+
+    # Check if expired
+    elapsed = (_datetime.now() - pending.asked_at).total_seconds()
+    if elapsed > CLARIFICATION_TIMEOUT_SECONDS:
+        del _pending_clarifications[session_id]
+        logger.debug(f"Clarification for session {session_id[:8]} expired")
+        return None
+
+    return pending
+
+
+def clear_pending_clarification(session_id: str) -> None:
+    """Clear pending clarification for a session."""
+    if session_id in _pending_clarifications:
+        del _pending_clarifications[session_id]
+        logger.debug(f"Cleared pending clarification for session {session_id[:8]}")
+
+
+# =============================================================================
 # User Response Handlers
 # =============================================================================
+
+# Affirmative responses
+YES_RESPONSES = {"yes", "y", "yeah", "yep", "sure", "ok", "okay", "go", "proceed", "do it", "yes please", "let's go", "lets go"}
+NO_RESPONSES = {"no", "n", "nope", "nah", "cancel", "stop", "don't", "dont", "nevermind", "never mind", "skip"}
+
 
 def handle_clarification_response(response: str) -> bool:
     """Handle user's response to clarification question.
@@ -691,12 +873,9 @@ def handle_clarification_response(response: str) -> bool:
     """
     response_lower = response.lower().strip()
 
-    yes_responses = {"yes", "y", "yeah", "yep", "sure", "ok", "okay", "go", "proceed", "do it"}
-    no_responses = {"no", "n", "nope", "nah", "cancel", "stop", "don't", "dont"}
-
-    if response_lower in yes_responses:
+    if response_lower in YES_RESPONSES:
         return True
-    if response_lower in no_responses:
+    if response_lower in NO_RESPONSES:
         return False
 
     # Default to yes for coding-related confirmations
@@ -705,6 +884,141 @@ def handle_clarification_response(response: str) -> bool:
 
     # Default to no for ambiguous responses
     return False
+
+
+@_dataclass
+class FollowUpResult:
+    """Result of analyzing a follow-up message after clarification."""
+    should_trigger_workflow: bool
+    task_to_execute: str  # Either original task or new/refined task
+    is_affirmative: bool  # True if user said "yes"
+    is_negative: bool     # True if user said "no"
+    is_new_task: bool     # True if this is a new coding command
+    is_refinement: bool   # True if this refines the original task
+    reasoning: str
+
+
+def analyze_clarification_followup(
+    session_id: str,
+    message: str,
+) -> FollowUpResult | None:
+    """Analyze a message that comes after a clarification was asked.
+
+    This is the "smarter" handler that:
+    1. Recognizes affirmative responses → triggers with original task
+    2. Recognizes negative responses → lets MO handle normally
+    3. Recognizes new imperative commands → re-classifies and triggers if appropriate
+    4. Recognizes task refinements → merges with original and triggers
+
+    Returns None if no pending clarification for this session.
+    """
+    pending = get_pending_clarification(session_id)
+    if not pending:
+        return None
+
+    message_lower = message.lower().strip()
+
+    # Check for affirmative response
+    if message_lower in YES_RESPONSES:
+        clear_pending_clarification(session_id)
+        return FollowUpResult(
+            should_trigger_workflow=True,
+            task_to_execute=pending.original_task,
+            is_affirmative=True,
+            is_negative=False,
+            is_new_task=False,
+            is_refinement=False,
+            reasoning="User confirmed with affirmative response",
+        )
+
+    # Check for negative response
+    if message_lower in NO_RESPONSES:
+        clear_pending_clarification(session_id)
+        return FollowUpResult(
+            should_trigger_workflow=False,
+            task_to_execute=message,
+            is_affirmative=False,
+            is_negative=True,
+            is_new_task=False,
+            is_refinement=False,
+            reasoning="User declined with negative response",
+        )
+
+    # Check if this is a new imperative command that should trigger workflow
+    is_imperative, verb, confidence = _is_imperative(message)
+    if is_imperative and confidence >= 0.7:
+        # This is a new strong command - classify it
+        new_classification = classify_by_keywords(message)
+        if new_classification.should_trigger_workflow:
+            clear_pending_clarification(session_id)
+            return FollowUpResult(
+                should_trigger_workflow=True,
+                task_to_execute=message,  # Use the new task
+                is_affirmative=False,
+                is_negative=False,
+                is_new_task=True,
+                is_refinement=False,
+                reasoning=f"New imperative command detected (verb: {verb}, confidence: {confidence:.2f})",
+            )
+
+    # Check if this looks like a refinement of the original task
+    # Refinements typically add context without negating the original
+    refinement_indicators = [
+        "also", "and also", "but also",
+        "with", "using", "for",
+        "include", "add", "make sure",
+        "specifically", "particularly",
+    ]
+    is_refinement = any(ind in message_lower for ind in refinement_indicators)
+
+    # Or if it continues the thought (short additions)
+    word_count = len(message.split())
+    if word_count < 15 and not is_refinement:
+        # Could be a refinement or short confirmation
+        # Check if it has coding context
+        has_coding_context = any(ctx in message_lower for ctx in CODING_CONTEXT_KEYWORDS)
+        if has_coding_context:
+            is_refinement = True
+
+    if is_refinement:
+        # Merge the refinement with the original task
+        merged_task = f"{pending.original_task}. Additional requirements: {message}"
+        clear_pending_clarification(session_id)
+        return FollowUpResult(
+            should_trigger_workflow=True,
+            task_to_execute=merged_task,
+            is_affirmative=False,
+            is_negative=False,
+            is_new_task=False,
+            is_refinement=True,
+            reasoning="Message appears to refine the original task",
+        )
+
+    # Check if it's a question - don't trigger, let MO handle
+    is_question, _ = _is_question(message)
+    if is_question:
+        clear_pending_clarification(session_id)
+        return FollowUpResult(
+            should_trigger_workflow=False,
+            task_to_execute=message,
+            is_affirmative=False,
+            is_negative=False,
+            is_new_task=False,
+            is_refinement=False,
+            reasoning="Follow-up is a question, letting MO handle",
+        )
+
+    # Default: unclear response, let MO handle but keep clarification pending
+    # (user might still respond)
+    return FollowUpResult(
+        should_trigger_workflow=False,
+        task_to_execute=message,
+        is_affirmative=False,
+        is_negative=False,
+        is_new_task=False,
+        is_refinement=False,
+        reasoning="Unclear follow-up, passing to MO",
+    )
 
 
 # =============================================================================

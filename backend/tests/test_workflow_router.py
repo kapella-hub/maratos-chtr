@@ -411,5 +411,294 @@ class TestRealWorldExamples:
         assert result.should_trigger_workflow is should_trigger, f"Message: '{message}' - Expected: {should_trigger}, Got: {result.should_trigger_workflow}"
 
 
+# =============================================================================
+# Smart Operations Detection Tests
+# =============================================================================
+
+from app.workflows.router import _is_operations_task
+
+
+class TestOperationsDetection:
+    """Test smart operations/devops intent detection."""
+
+    def test_spin_up_container(self):
+        """'spin it up in a container' should be detected as operations."""
+        is_ops, reason, confidence = _is_operations_task("spin it up in a container")
+        assert is_ops is True
+        assert confidence >= 0.8
+
+    def test_spin_up_alone(self):
+        """'spin it up' should be detected as operations."""
+        is_ops, reason, confidence = _is_operations_task("spin it up")
+        assert is_ops is True
+        assert confidence >= 0.8
+
+    def test_deploy_to_production(self):
+        """'deploy to production' should be detected as operations."""
+        is_ops, reason, confidence = _is_operations_task("deploy to production")
+        assert is_ops is True
+        assert confidence >= 0.85
+
+    def test_run_in_docker(self):
+        """'run it in docker' should be detected as operations."""
+        is_ops, reason, confidence = _is_operations_task("run it in docker")
+        assert is_ops is True
+        assert confidence >= 0.8
+
+    def test_containerize(self):
+        """'containerize the app' should be detected as operations."""
+        is_ops, reason, confidence = _is_operations_task("containerize the app")
+        assert is_ops is True
+        assert confidence >= 0.8
+
+    def test_dockerize(self):
+        """'dockerize this' should be detected as operations."""
+        is_ops, reason, confidence = _is_operations_task("dockerize this")
+        assert is_ops is True
+        assert confidence >= 0.8
+
+    def test_host_on_server(self):
+        """'host this on a server' should be detected as operations."""
+        is_ops, reason, confidence = _is_operations_task("host this on a server")
+        assert is_ops is True
+        assert confidence >= 0.7
+
+    def test_launch_the_app(self):
+        """'launch the app' should be detected as operations."""
+        is_ops, reason, confidence = _is_operations_task("launch the app")
+        assert is_ops is True
+        assert confidence >= 0.7
+
+    def test_get_it_running(self):
+        """'get it running' should be detected as operations."""
+        is_ops, reason, confidence = _is_operations_task("get it running")
+        assert is_ops is True
+        assert confidence >= 0.8
+
+    def test_make_it_live(self):
+        """'make it live' should be detected as operations."""
+        is_ops, reason, confidence = _is_operations_task("make it live")
+        assert is_ops is True
+        assert confidence >= 0.8
+
+    def test_put_in_kubernetes(self):
+        """'put it in kubernetes' should be detected as operations."""
+        is_ops, reason, confidence = _is_operations_task("put it in kubernetes")
+        assert is_ops is True
+        assert confidence >= 0.7
+
+    def test_create_function_not_operations(self):
+        """'create a function' should NOT be operations (it's coding)."""
+        is_ops, reason, confidence = _is_operations_task("create a function for login")
+        # Should either not detect or have low confidence
+        assert is_ops is False or confidence < 0.7
+
+    def test_implement_feature_not_operations(self):
+        """'implement a feature' should NOT be operations."""
+        is_ops, reason, confidence = _is_operations_task("implement user authentication")
+        assert is_ops is False or confidence < 0.5
+
+
+class TestOperationsClassification:
+    """Test that operations tasks are classified correctly."""
+
+    def test_spin_up_triggers_devops(self):
+        """Operations task should be classified as DEVOPS."""
+        result = classify_by_keywords("spin it up in a container")
+        assert result.task_type == TaskType.DEVOPS
+        assert result.confidence >= 0.8
+
+    def test_deploy_triggers_devops(self):
+        """Deploy task should be classified as DEVOPS."""
+        result = classify_by_keywords("deploy to production")
+        assert result.task_type == TaskType.DEVOPS
+        assert result.should_trigger_workflow is True
+
+    def test_containerize_triggers_devops(self):
+        """Containerize task should be classified as DEVOPS."""
+        result = classify_by_keywords("containerize the application")
+        assert result.task_type == TaskType.DEVOPS
+
+
+# =============================================================================
+# Clarification Follow-up Tests
+# =============================================================================
+
+from app.workflows.router import (
+    store_pending_clarification,
+    get_pending_clarification,
+    clear_pending_clarification,
+    analyze_clarification_followup,
+)
+
+
+class TestClarificationFollowup:
+    """Test the smart clarification follow-up handling."""
+
+    def setup_method(self):
+        """Clear any pending clarifications before each test."""
+        # Clear all pending clarifications
+        clear_pending_clarification("test-session-1")
+        clear_pending_clarification("test-session-2")
+
+    def test_store_and_retrieve_clarification(self):
+        """Test storing and retrieving pending clarifications."""
+        classification = ClassificationResult(
+            task_type=TaskType.CODING,
+            confidence=0.6,
+            should_trigger_workflow=False,
+            needs_clarification=True,
+            clarification_question="Should I implement this?",
+            matched_keywords=["add"],
+        )
+
+        store_pending_clarification("test-session-1", "add a login feature", classification)
+        pending = get_pending_clarification("test-session-1")
+
+        assert pending is not None
+        assert pending.original_task == "add a login feature"
+        assert pending.task_type == TaskType.CODING
+        assert pending.confidence == 0.6
+
+    def test_no_pending_clarification(self):
+        """Test when no pending clarification exists."""
+        result = analyze_clarification_followup("nonexistent-session", "yes")
+        assert result is None
+
+    def test_affirmative_response_yes(self):
+        """Test 'yes' triggers workflow with original task."""
+        classification = ClassificationResult(
+            task_type=TaskType.CODING,
+            confidence=0.6,
+            should_trigger_workflow=False,
+            needs_clarification=True,
+        )
+        store_pending_clarification("test-session-1", "add real market data", classification)
+
+        result = analyze_clarification_followup("test-session-1", "yes")
+
+        assert result is not None
+        assert result.should_trigger_workflow is True
+        assert result.is_affirmative is True
+        assert result.task_to_execute == "add real market data"
+
+    def test_affirmative_response_variations(self):
+        """Test various affirmative responses."""
+        for response in ["yes", "y", "yeah", "sure", "ok", "go", "proceed"]:
+            classification = ClassificationResult(
+                task_type=TaskType.CODING,
+                confidence=0.6,
+                should_trigger_workflow=False,
+                needs_clarification=True,
+            )
+            store_pending_clarification("test-session-1", "add feature", classification)
+
+            result = analyze_clarification_followup("test-session-1", response)
+
+            assert result is not None, f"Response '{response}' should be recognized"
+            assert result.should_trigger_workflow is True, f"Response '{response}' should trigger workflow"
+            assert result.is_affirmative is True
+
+    def test_negative_response(self):
+        """Test 'no' does not trigger workflow."""
+        classification = ClassificationResult(
+            task_type=TaskType.CODING,
+            confidence=0.6,
+            should_trigger_workflow=False,
+            needs_clarification=True,
+        )
+        store_pending_clarification("test-session-1", "add feature", classification)
+
+        result = analyze_clarification_followup("test-session-1", "no")
+
+        assert result is not None
+        assert result.should_trigger_workflow is False
+        assert result.is_negative is True
+
+    def test_negative_response_variations(self):
+        """Test various negative responses."""
+        for response in ["no", "n", "nope", "cancel", "nevermind"]:
+            classification = ClassificationResult(
+                task_type=TaskType.CODING,
+                confidence=0.6,
+                should_trigger_workflow=False,
+                needs_clarification=True,
+            )
+            store_pending_clarification("test-session-1", "add feature", classification)
+
+            result = analyze_clarification_followup("test-session-1", response)
+
+            assert result is not None, f"Response '{response}' should be recognized"
+            assert result.should_trigger_workflow is False
+            assert result.is_negative is True
+
+    def test_new_imperative_command(self):
+        """Test new imperative command triggers workflow with new task."""
+        classification = ClassificationResult(
+            task_type=TaskType.CODING,
+            confidence=0.6,
+            should_trigger_workflow=False,
+            needs_clarification=True,
+        )
+        store_pending_clarification("test-session-1", "add feature", classification)
+
+        result = analyze_clarification_followup("test-session-1", "create a login endpoint instead")
+
+        assert result is not None
+        assert result.should_trigger_workflow is True
+        assert result.is_new_task is True
+        assert "login endpoint" in result.task_to_execute
+
+    def test_refinement_with_also(self):
+        """Test refinement with 'also' keyword."""
+        classification = ClassificationResult(
+            task_type=TaskType.CODING,
+            confidence=0.6,
+            should_trigger_workflow=False,
+            needs_clarification=True,
+        )
+        store_pending_clarification("test-session-1", "add a login feature", classification)
+
+        result = analyze_clarification_followup("test-session-1", "also add password reset")
+
+        assert result is not None
+        assert result.should_trigger_workflow is True
+        assert result.is_refinement is True
+        assert "login feature" in result.task_to_execute
+        assert "password reset" in result.task_to_execute
+
+    def test_question_follow_up_no_trigger(self):
+        """Test question follow-up does not trigger workflow."""
+        classification = ClassificationResult(
+            task_type=TaskType.CODING,
+            confidence=0.6,
+            should_trigger_workflow=False,
+            needs_clarification=True,
+        )
+        store_pending_clarification("test-session-1", "add feature", classification)
+
+        result = analyze_clarification_followup("test-session-1", "what exactly should this feature do?")
+
+        assert result is not None
+        assert result.should_trigger_workflow is False
+
+    def test_clarification_cleared_after_yes(self):
+        """Test that clarification is cleared after processing."""
+        classification = ClassificationResult(
+            task_type=TaskType.CODING,
+            confidence=0.6,
+            should_trigger_workflow=False,
+            needs_clarification=True,
+        )
+        store_pending_clarification("test-session-1", "add feature", classification)
+
+        result = analyze_clarification_followup("test-session-1", "yes")
+        assert result is not None
+
+        # Should be cleared now
+        pending = get_pending_clarification("test-session-1")
+        assert pending is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

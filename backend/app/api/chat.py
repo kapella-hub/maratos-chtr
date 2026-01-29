@@ -46,6 +46,9 @@ from app.workflows.delivery_loop import (
 from app.workflows.router import (
     classify_message_sync,
     handle_clarification_response,
+    store_pending_clarification,
+    analyze_clarification_followup,
+    clear_pending_clarification,
     TaskType,
 )
 
@@ -132,25 +135,59 @@ def _workflow_event_to_progress(event_str: str) -> str | None:
         logger.debug(f"Could not parse workflow event for progress: {e}")
         return None
 
-# Auto-routing patterns - detect user intent and route to appropriate agent
-AUTO_ROUTE_PATTERNS = [
-    (re.compile(r'\b(analyze|review|audit|examine)\b.*\b(code|codebase|project|directory|file)', re.I), 'reviewer'),
-    (re.compile(r'\b(implement|build|create|fix|add|update)\b.*\b(feature|function|bug|code)', re.I), 'coder'),
-    (re.compile(r'\b(design|architect)\b.*\b(system|api|architecture)', re.I), 'architect'),
-    (re.compile(r'\b(write|generate|create)\b.*\b(test|tests|spec)', re.I), 'tester'),
-    (re.compile(r'\b(write|create|update)\b.*\b(doc|documentation|readme)', re.I), 'docs'),
-    (re.compile(r'\b(deploy|docker|ci|cd|pipeline|kubernetes|k8s)\b', re.I), 'devops'),
-]
-
-
 def detect_auto_route(message: str) -> tuple[str | None, str]:
     """Detect if message should be auto-routed to a specific agent.
 
+    Uses smart intent detection rather than hardcoded patterns.
     Returns (agent_id, task_description) or (None, "") if no match.
     """
-    for pattern, agent_id in AUTO_ROUTE_PATTERNS:
-        if pattern.search(message):
-            return agent_id, message
+    from app.workflows.router import (
+        _is_operations_task,
+        _is_question,
+        OPERATIONS_CONTEXT,
+        CODING_CONTEXT_KEYWORDS,
+    )
+
+    msg_lower = message.lower().strip()
+
+    # 1. Operations/DevOps detection
+    is_ops, _, ops_confidence = _is_operations_task(message)
+    if is_ops and ops_confidence >= 0.7:
+        return "devops", message
+
+    # 2. Review/Analysis detection - looking for analytical intent
+    review_verbs = ("analyze", "review", "audit", "examine", "check", "inspect", "look at", "evaluate")
+    for verb in review_verbs:
+        if verb in msg_lower:
+            # Check if it's about code/project (not a general question)
+            code_targets = ("code", "codebase", "project", "file", "function", "class", "module", "implementation")
+            if any(target in msg_lower for target in code_targets):
+                return "reviewer", message
+
+    # 3. Architecture/Design detection
+    design_verbs = ("design", "architect", "plan", "structure")
+    design_targets = ("system", "api", "architecture", "schema", "database", "service")
+    for verb in design_verbs:
+        if verb in msg_lower:
+            if any(target in msg_lower for target in design_targets):
+                return "architect", message
+
+    # 4. Testing detection
+    test_verbs = ("write", "generate", "create", "add", "run")
+    test_targets = ("test", "tests", "spec", "specs", "unit test", "integration test")
+    for verb in test_verbs:
+        if msg_lower.startswith(verb) or f" {verb} " in msg_lower:
+            if any(target in msg_lower for target in test_targets):
+                return "tester", message
+
+    # 5. Documentation detection
+    doc_verbs = ("write", "create", "update", "generate", "add")
+    doc_targets = ("doc", "docs", "documentation", "readme", "docstring", "comment")
+    for verb in doc_verbs:
+        if msg_lower.startswith(verb) or f" {verb} " in msg_lower:
+            if any(target in msg_lower for target in doc_targets):
+                return "docs", message
+
     return None, ""
 
 # Pattern to match [CANVAS:type attr="value"] content [/CANVAS]
@@ -774,6 +811,75 @@ async def chat(
                 yield "data: [DONE]\n\n"
                 return
 
+        # Check for pending clarification from previous message
+        followup_result = analyze_clarification_followup(session.id, actual_message)
+        if followup_result:
+            logger.info(f"Clarification follow-up: {followup_result.reasoning}")
+
+            if followup_result.should_trigger_workflow:
+                # User confirmed or provided a clear coding command
+                logger.info(f"Triggering workflow from clarification follow-up")
+                yield 'data: {"thinking": true}\n\n'
+
+                # Emit follow-up info for UI
+                followup_event = json.dumps({
+                    "workflow_followup": {
+                        "is_affirmative": followup_result.is_affirmative,
+                        "is_new_task": followup_result.is_new_task,
+                        "is_refinement": followup_result.is_refinement,
+                        "reasoning": followup_result.reasoning,
+                    }
+                })
+                yield f'data: {followup_event}\n\n'
+
+                # Minimal workflow indicator
+                start_msg = "`workflow` "
+                yield f'data: {{"content": "{start_msg}"}}\n\n'
+                yield 'data: {"thinking": false}\n\n'
+                yield 'data: {"orchestrating": true}\n\n'
+
+                workspace = chat_request.context.get("workspace", "") if chat_request.context else ""
+
+                async def save_followup_workflow_message(content: str) -> None:
+                    try:
+                        async with db.begin():
+                            wf_msg = DBMessage(
+                                id=str(uuid.uuid4()),
+                                session_id=session.id,
+                                role="assistant",
+                                content=content,
+                            )
+                            db.add(wf_msg)
+                    except Exception as e:
+                        logger.error(f"Failed to save workflow message: {e}")
+
+                try:
+                    async for workflow_event in run_delivery_workflow(
+                        session_id=session.id,
+                        task=followup_result.task_to_execute,
+                        workspace_path=workspace or None,
+                        context=chat_request.context,
+                        save_message_fn=save_followup_workflow_message,
+                    ):
+                        yield workflow_event
+                        progress_msg = _workflow_event_to_progress(workflow_event)
+                        if progress_msg:
+                            escaped_msg = progress_msg.replace('"', '\\"').replace('\n', '\\n')
+                            yield f'data: {{"content": "{escaped_msg}"}}\n\n'
+                except Exception as e:
+                    logger.error(f"Delivery workflow error: {e}", exc_info=True)
+                    escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
+                    yield f'data: {{"error": "Workflow failed: {escaped_err}"}}\n\n'
+
+                yield 'data: {"orchestrating": false}\n\n'
+                yield "data: [DONE]\n\n"
+                return
+
+            elif followup_result.is_negative:
+                # User said no - clear and continue to MO
+                logger.info("User declined workflow, passing to MO")
+                # Fall through to normal chat processing
+
         # Delivery workflow: classify message and run deterministic workflow if coding task
         classification = classify_message_sync(actual_message)
         logger.debug(f"Router classification: {classification.task_type.value}, confidence={classification.confidence:.2f}, trigger={classification.should_trigger_workflow}")
@@ -845,8 +951,13 @@ async def chat(
             logger.info(f"Router needs clarification for: {actual_message[:50]}...")
             yield 'data: {"thinking": false}\n\n'
 
-            # Store pending classification in session for next message
-            # (simplified - in production you'd persist this to DB)
+            # Store pending clarification for smart follow-up handling
+            store_pending_clarification(
+                session_id=session.id,
+                original_task=actual_message,
+                classification=classification,
+            )
+
             clarification_event = json.dumps({
                 "workflow_clarification": {
                     "question": classification.clarification_question,

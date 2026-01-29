@@ -21,6 +21,7 @@ from app.tools.orchestrate import OrchestrateTool
 from app.tools.sessions import SessionsTool
 from app.tools.canvas import CanvasTool
 from app.tools.routing import RoutingTool
+from app.tools.market_data import MarketDataTool, QuoteTool
 
 __all__ = [
     "Tool",
@@ -48,4 +49,6 @@ __all__ = [
     "SessionsTool",
     "CanvasTool",
     "RoutingTool",
+    "MarketDataTool",
+    "QuoteTool",
 ]
