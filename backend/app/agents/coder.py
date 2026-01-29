@@ -1,12 +1,83 @@
 """Coder Agent - Pure implementation focus via Kiro."""
 
+import re
 from typing import Any
 
 from app.agents.base import Agent, AgentConfig
 from app.agents.tool_contract import get_full_tool_section
 
 
+def validate_python_syntax(code: str) -> tuple[bool, str | None]:
+    """Validate Python code syntax. Returns (is_valid, error_message)."""
+    try:
+        compile(code, "<string>", "exec")
+        return True, None
+    except SyntaxError as e:
+        return False, f"Line {e.lineno}: {e.msg}"
+
+
+def validate_code_blocks(output: str) -> list[dict[str, Any]]:
+    """Extract and validate code blocks from agent output.
+
+    Returns list of {language, path, code, valid, error} dicts.
+    """
+    # Pattern for ```language:path or ```language
+    pattern = r'```(\w+)(?::([^\n]+))?\n(.*?)```'
+    blocks = []
+
+    for match in re.finditer(pattern, output, re.DOTALL):
+        lang = match.group(1)
+        path = match.group(2)
+        code = match.group(3).strip()
+
+        block = {
+            "language": lang,
+            "path": path,
+            "code": code[:200] + "..." if len(code) > 200 else code,
+            "valid": True,
+            "error": None,
+        }
+
+        # Validate based on language
+        if lang == "python":
+            valid, error = validate_python_syntax(code)
+            block["valid"] = valid
+            block["error"] = error
+        elif lang in ("javascript", "typescript", "tsx", "jsx"):
+            # Basic JS/TS validation - check for obvious issues
+            if code.count("{") != code.count("}"):
+                block["valid"] = False
+                block["error"] = "Mismatched braces"
+            elif code.count("(") != code.count(")"):
+                block["valid"] = False
+                block["error"] = "Mismatched parentheses"
+
+        blocks.append(block)
+
+    return blocks
+
+
 CODER_SYSTEM_PROMPT = """You are an expert software engineer. You write clean, correct, production-ready code.
+
+## CRITICAL: Self-Validation Before Returning
+
+**BEFORE returning your response, you MUST validate your own work:**
+
+1. **Syntax check** — Is the code syntactically valid? No missing brackets, quotes, colons?
+2. **Import check** — Are all imports present? No undefined names?
+3. **Logic check** — Does the code actually do what was asked?
+4. **Edge cases** — Will it handle empty inputs, None values, errors?
+
+**If you find an issue, FIX IT before returning.** Don't return broken code.
+
+**Self-validation example:**
+```
+Before returning, let me verify:
+✓ Syntax valid - all brackets matched
+✓ Imports present - added 'from datetime import datetime'
+✓ Logic correct - handles the edge case of empty list
+✓ Error handling - raises ValueError with clear message
+```
 
 ## Approach
 
@@ -153,3 +224,61 @@ class CoderAgent(Agent):
                 prompt += f"\n\n## Language\n{context['language']}\n"
 
         return prompt, matched_skills
+
+    def validate_output(self, output: str) -> dict[str, Any]:
+        """Validate coder output for common issues.
+
+        Returns:
+            {
+                "valid": bool,
+                "issues": list of issue descriptions,
+                "code_blocks": list of validated code blocks,
+                "suggestion": str or None - fix suggestion if issues found
+            }
+        """
+        issues = []
+        code_blocks = validate_code_blocks(output)
+
+        # Check for syntax errors in code blocks
+        for block in code_blocks:
+            if not block["valid"]:
+                issues.append(
+                    f"{block['language']} syntax error in {block['path'] or 'code block'}: {block['error']}"
+                )
+
+        # Check for common issues in output
+        if "TODO" in output and "implement" in output.lower():
+            issues.append("Contains unfinished TODO - implementation may be incomplete")
+
+        if "..." in output and "```" in output:
+            # Check if ... is inside a code block (truncated code)
+            if re.search(r'```\w+[^\`]*\.\.\.[^\`]*```', output, re.DOTALL):
+                issues.append("Code block appears truncated (contains ...)")
+
+        # Check for missing imports in Python
+        for block in code_blocks:
+            if block["language"] == "python" and block["valid"]:
+                code = block.get("code", "")
+                # Simple heuristic: if using common modules without importing
+                common_modules = ["json", "os", "sys", "re", "datetime", "pathlib"]
+                for mod in common_modules:
+                    if f"{mod}." in code and f"import {mod}" not in code:
+                        issues.append(f"Possibly missing 'import {mod}'")
+
+        return {
+            "valid": len(issues) == 0,
+            "issues": issues,
+            "code_blocks": code_blocks,
+            "suggestion": self._generate_fix_suggestion(issues) if issues else None,
+        }
+
+    def _generate_fix_suggestion(self, issues: list[str]) -> str:
+        """Generate a suggestion for fixing the issues."""
+        if not issues:
+            return ""
+
+        suggestions = ["Fix the following issues before proceeding:"]
+        for i, issue in enumerate(issues, 1):
+            suggestions.append(f"{i}. {issue}")
+
+        return "\n".join(suggestions)

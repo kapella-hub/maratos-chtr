@@ -889,6 +889,34 @@ class DeliveryLoopPolicy:
             f"error={result.error}, response_len={len(response)}"
         )
 
+        # Validate coder output for syntax errors and common issues
+        try:
+            from app.agents.coder import CoderAgent
+            coder_agent = CoderAgent()
+            validation = coder_agent.validate_output(response)
+
+            if not validation["valid"]:
+                logger.warning(
+                    f"Workflow {ctx.workflow_id}: Coder output validation failed - "
+                    f"issues: {validation['issues']}"
+                )
+                yield WorkflowEvent(
+                    type="validation_warning",
+                    workflow_id=ctx.workflow_id,
+                    data={
+                        "agent": "coder",
+                        "issues": validation["issues"],
+                        "suggestion": validation["suggestion"],
+                    },
+                )
+                # Mark result as having issues (but don't fail - let tests catch it)
+                if result.status == AgentOutcome.DONE:
+                    result.summary += f"\n\n⚠️ Validation warnings: {', '.join(validation['issues'])}"
+            else:
+                logger.info(f"Workflow {ctx.workflow_id}: Coder output validation passed")
+        except Exception as e:
+            logger.warning(f"Coder validation error (non-fatal): {e}")
+
         yield WorkflowEvent(
             type="agent_completed",
             workflow_id=ctx.workflow_id,
