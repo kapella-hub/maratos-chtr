@@ -1110,6 +1110,31 @@ class DeliveryLoopPolicy:
             data=ctx.artifact_report.to_dict(),
         )
 
+        # Emit file_preview events for each changed file
+        # This allows the frontend to show diff previews before commit
+        for file_path in result.files_changed:
+            yield WorkflowEvent(
+                type="file_preview",
+                workflow_id=ctx.workflow_id,
+                data={
+                    "file_path": file_path,
+                    "action": "modified",
+                    "diff_available": bool(result.diff_summary),
+                },
+            )
+
+        # If we have multiple files, emit a batch preview event
+        if len(result.files_changed) > 1:
+            yield WorkflowEvent(
+                type="file_preview_batch",
+                workflow_id=ctx.workflow_id,
+                data={
+                    "files": result.files_changed,
+                    "total_files": len(result.files_changed),
+                    "diff_summary": result.diff_summary[:500] if result.diff_summary else None,
+                },
+            )
+
         # === GATE: Ask user about COMMIT ===
         # First, show the diff for approval
         if result.diff_summary or result.files_changed:

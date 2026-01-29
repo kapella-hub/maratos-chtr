@@ -1,0 +1,134 @@
+# /commit - Git commit with auto-generated message
+# Stages changes, generates a conventional commit message, and commits
+
+id: commit
+name: Commit Changes
+description: Stage and commit changes with an auto-generated conventional commit message
+version: "1.0.0"
+author: MaratOS
+
+task_types:
+  - git_operations
+
+tags:
+  - git
+  - commit
+  - version-control
+
+triggers:
+  - /commit
+  - commit changes
+  - commit this
+  - commit my changes
+  - save changes
+
+inputs:
+  - name: workdir
+    type: path
+    description: Working directory (defaults to current workspace)
+    required: false
+
+  - name: message
+    type: string
+    description: Custom commit message (optional, auto-generated if not provided)
+    required: false
+
+  - name: files
+    type: string
+    description: Specific files to commit (defaults to all changed files)
+    required: false
+    default: "."
+
+outputs:
+  - name: commit_sha
+    type: string
+    description: The SHA of the created commit
+
+  - name: commit_message
+    type: string
+    description: The commit message used
+
+requires_tools:
+  - shell
+  - kiro
+
+system_context: |
+  You are committing code changes following conventional commits format.
+
+  Conventional Commits Format:
+  - feat: A new feature
+  - fix: A bug fix
+  - docs: Documentation only changes
+  - style: Code style changes (formatting, etc.)
+  - refactor: Code refactoring without feature/fix
+  - test: Adding or updating tests
+  - chore: Build process or auxiliary tool changes
+
+  Guidelines:
+  - Keep the first line under 72 characters
+  - Use imperative mood ("Add feature" not "Added feature")
+  - Be specific about what changed
+
+quality_checklist:
+  - Git status checked
+  - Changes staged appropriately
+  - Commit message follows conventional format
+  - Commit created successfully
+
+workflow:
+  - name: check_status
+    action: shell
+    description: Check git status to see what has changed
+    params:
+      command: "git status --porcelain"
+
+  - name: show_diff
+    action: shell
+    description: Show summary of changes
+    params:
+      command: "git diff --stat"
+
+  - name: generate_message
+    action: kiro_prompt
+    description: Generate a conventional commit message based on the changes
+    params:
+      task: |
+        Analyze the git diff and generate a conventional commit message.
+
+        Run: git diff --cached --stat && git diff --cached
+
+        Based on the changes, generate a commit message following this format:
+        <type>(<scope>): <description>
+
+        Where type is one of: feat, fix, docs, style, refactor, test, chore
+        Scope is optional and indicates the affected area.
+        Description is a brief summary in imperative mood.
+
+        Example outputs:
+        - feat(auth): add JWT token refresh endpoint
+        - fix(api): handle null values in user serialization
+        - docs: update README with installation instructions
+
+        Output ONLY the commit message, nothing else.
+
+  - name: stage_files
+    action: shell
+    description: Stage the files for commit
+    params:
+      command: "git add {{files}}"
+
+  - name: commit
+    action: shell
+    description: Create the commit with the generated message
+    params:
+      command: "git commit -m '{{message}}'"
+
+  - name: show_result
+    action: shell
+    description: Show the commit that was created
+    params:
+      command: "git log -1 --oneline"
+
+retry_policy:
+  max_attempts: 1
+  backoff_seconds: 0

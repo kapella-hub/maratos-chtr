@@ -700,5 +700,156 @@ class TestClarificationFollowup:
         assert pending is None
 
 
+# =============================================================================
+# Session State / Task Continuity Tests
+# =============================================================================
+
+from app.workflows.router import (
+    get_session_state,
+    update_session_state,
+    get_task_with_context,
+    _enhance_with_context,
+)
+
+
+class TestSessionState:
+    """Test session state tracking for task continuity."""
+
+    def setup_method(self):
+        """Clear session state before each test."""
+        # Access internal dict to clear
+        from app.workflows.router import _session_states
+        _session_states.clear()
+
+    def test_get_creates_new_state(self):
+        """Getting state for new session creates empty state."""
+        state = get_session_state("new-session")
+        assert state is not None
+        assert state.last_task is None
+        assert state.files_touched == []
+
+    def test_update_session_state(self):
+        """Updating session state persists data."""
+        update_session_state(
+            session_id="test-session",
+            task="add login feature",
+            task_type=TaskType.CODING,
+            files=["auth.py", "models.py"],
+            project_path="/app",
+        )
+
+        state = get_session_state("test-session")
+        assert state.last_task == "add login feature"
+        assert state.last_task_type == TaskType.CODING
+        assert "auth.py" in state.files_touched
+        assert state.project_path == "/app"
+
+    def test_context_summary(self):
+        """Context summary includes relevant info."""
+        update_session_state(
+            session_id="test-session",
+            task="implement auth",
+            task_type=TaskType.CODING,
+            files=["auth.py"],
+        )
+
+        state = get_session_state("test-session")
+        summary = state.get_context_summary()
+        assert "implement auth" in summary
+        assert "auth.py" in summary
+
+
+class TestContextAwareClassification:
+    """Test context-aware classification."""
+
+    def setup_method(self):
+        from app.workflows.router import _session_states
+        _session_states.clear()
+
+    def test_deploy_it_after_coding(self):
+        """'deploy it' after coding should be high confidence devops."""
+        # First, simulate a coding workflow
+        update_session_state(
+            session_id="test-session",
+            task="create backtest app",
+            task_type=TaskType.CODING,
+            files=["main.py", "backtest.py"],
+        )
+
+        # Now classify "deploy it"
+        result = classify_message_sync("deploy it", session_id="test-session")
+
+        assert result.task_type == TaskType.DEVOPS
+        assert result.confidence >= 0.8
+        assert result.should_trigger_workflow is True
+
+    def test_test_it_after_coding(self):
+        """'run tests' after coding should understand context."""
+        update_session_state(
+            session_id="test-session",
+            task="add authentication",
+            task_type=TaskType.CODING,
+            files=["auth.py"],
+        )
+
+        result = classify_message_sync("now test it", session_id="test-session")
+
+        assert result.task_type == TaskType.TESTING
+        assert result.confidence >= 0.8
+
+    def test_no_boost_without_context(self):
+        """Vague message without context shouldn't get boosted."""
+        # No prior context
+        result = classify_message_sync("deploy it", session_id="empty-session")
+
+        # Should still detect as devops but may need clarification
+        assert result.task_type == TaskType.DEVOPS
+
+
+class TestTaskContextExpansion:
+    """Test expanding vague tasks with context."""
+
+    def setup_method(self):
+        from app.workflows.router import _session_states
+        _session_states.clear()
+
+    def test_expand_vague_task(self):
+        """Vague task gets expanded with context."""
+        update_session_state(
+            session_id="test-session",
+            task="create backtest app with yfinance",
+            task_type=TaskType.CODING,
+            files=["backend/app/main.py", "backend/app/backtest.py"],
+            project_path="/projects/backtest-app",
+        )
+
+        expanded = get_task_with_context("deploy it", "test-session")
+
+        assert "deploy it" in expanded
+        assert "Context from previous workflow" in expanded
+        assert "backtest" in expanded.lower()
+
+    def test_no_expansion_for_specific_task(self):
+        """Specific task doesn't get expanded."""
+        update_session_state(
+            session_id="test-session",
+            task="create auth",
+            task_type=TaskType.CODING,
+        )
+
+        # Specific task without vague references
+        expanded = get_task_with_context("create a new login page", "test-session")
+
+        # Should not add context since it's not vague
+        assert "Context from previous" not in expanded
+
+    def test_no_expansion_without_prior_context(self):
+        """No expansion when there's no prior context."""
+        expanded = get_task_with_context("deploy it", "empty-session")
+
+        # No context to add
+        assert expanded == "deploy it"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

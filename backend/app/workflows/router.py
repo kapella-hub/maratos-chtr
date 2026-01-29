@@ -101,8 +101,10 @@ class ClassificationResult:
 # =============================================================================
 
 # Strong indicators of coding tasks (high confidence)
+# NOTE: Only include phrases with explicit coding context.
+# Generic phrases like "build a" are handled by smart imperative detection.
 STRONG_CODING_KEYWORDS = {
-    # Implementation verbs
+    # Implementation with explicit code context
     "implement": 0.9,
     "create a function": 0.9,
     "create a class": 0.9,
@@ -114,8 +116,9 @@ STRONG_CODING_KEYWORDS = {
     "write code": 0.9,
     "write a function": 0.9,
     "write a class": 0.9,
-    "build a": 0.85,
-    "develop a": 0.85,
+    "build an api": 0.9,
+    "build a component": 0.9,
+    "build an endpoint": 0.9,
 
     # Bug fixing
     "fix the bug": 0.95,
@@ -127,8 +130,8 @@ STRONG_CODING_KEYWORDS = {
 
     # Refactoring
     "refactor": 0.9,
-    "restructure": 0.85,
-    "rewrite": 0.8,
+    "restructure the code": 0.85,
+    "rewrite the code": 0.85,
     "optimize the code": 0.85,
     "clean up the code": 0.8,
 
@@ -261,11 +264,16 @@ QUESTION_STARTERS = (
     "have", "has", "will", "did", "was", "were",
 )
 
-# Strong imperative verbs (high confidence - clear coding intent)
-STRONG_IMPERATIVE_VERBS = (
-    "create", "build", "implement", "write", "develop",
-    "fix", "repair", "resolve", "debug", "patch",
-    "refactor", "rewrite",
+# Code-specific imperative verbs (high confidence without context needed)
+CODE_SPECIFIC_VERBS = (
+    "implement", "refactor", "rewrite", "debug", "patch",
+    "fix",  # "fix" almost always means code in dev context
+)
+
+# General imperative verbs (need coding context for high confidence)
+GENERAL_IMPERATIVE_VERBS = (
+    "create", "build", "write", "develop", "make",
+    "repair", "resolve",
 )
 
 # Weaker imperative verbs (need context for high confidence)
@@ -343,11 +351,26 @@ def _is_question(message: str) -> tuple[bool, str]:
     return False, ""
 
 
+def _has_coding_context(message: str) -> bool:
+    """Check if message contains coding-related context words.
+
+    Uses word boundary matching to avoid false positives like 'ui' in 'build'.
+    """
+    msg_lower = message.lower()
+    for ctx in CODING_CONTEXT_KEYWORDS:
+        # Use word boundary regex for accurate matching
+        if re.search(rf'\b{re.escape(ctx)}\b', msg_lower):
+            return True
+    return False
+
+
 def _is_imperative(message: str) -> tuple[bool, str, float]:
-    """Detect if message is an imperative command.
+    """Detect if message is an imperative coding command.
 
     Returns (is_imperative, matched_verb, confidence).
-    Strong verbs get high confidence, weak verbs get lower confidence.
+
+    Code-specific verbs (implement, refactor, debug) get high confidence.
+    General verbs (create, build, write) need coding context for high confidence.
     """
     msg_lower = message.lower().strip()
     words = msg_lower.split()
@@ -356,26 +379,34 @@ def _is_imperative(message: str) -> tuple[bool, str, float]:
         return False, "", 0.0
 
     first_word = words[0]
+    has_coding_context = _has_coding_context(message)
 
-    # Direct imperative: starts with strong action verb
-    if first_word in STRONG_IMPERATIVE_VERBS:
+    # Code-specific verbs: high confidence even without explicit context
+    if first_word in CODE_SPECIFIC_VERBS:
         return True, first_word, 0.9
 
-    # Direct imperative: starts with weak verb (needs context)
+    # General imperative verbs: need coding context for high confidence
+    if first_word in GENERAL_IMPERATIVE_VERBS:
+        if has_coding_context:
+            return True, first_word, 0.85
+        else:
+            # Low confidence without coding context - might not be a coding task
+            return True, first_word, 0.4
+
+    # Weak imperative verbs (add, update, etc.)
     if first_word in WEAK_IMPERATIVE_VERBS:
-        # Check if there's coding context
-        has_context = any(ctx in msg_lower for ctx in CODING_CONTEXT_KEYWORDS)
-        confidence = 0.75 if has_context else 0.5
+        confidence = 0.75 if has_coding_context else 0.5
         return True, first_word, confidence
 
     # "Please" + verb
     if first_word == "please" and len(words) > 1:
         verb = words[1]
-        if verb in STRONG_IMPERATIVE_VERBS:
+        if verb in CODE_SPECIFIC_VERBS:
             return True, verb, 0.85
+        if verb in GENERAL_IMPERATIVE_VERBS:
+            return True, verb, 0.8 if has_coding_context else 0.35
         if verb in WEAK_IMPERATIVE_VERBS:
-            has_context = any(ctx in msg_lower for ctx in CODING_CONTEXT_KEYWORDS)
-            return True, verb, 0.7 if has_context else 0.45
+            return True, verb, 0.7 if has_coding_context else 0.45
 
     # "I want/need you to" + verb
     want_patterns = [
@@ -386,8 +417,10 @@ def _is_imperative(message: str) -> tuple[bool, str, float]:
         match = re.match(pattern, msg_lower)
         if match:
             verb = match.group(1)
-            if verb in STRONG_IMPERATIVE_VERBS:
+            if verb in CODE_SPECIFIC_VERBS:
                 return True, verb, 0.8
+            if verb in GENERAL_IMPERATIVE_VERBS:
+                return True, verb, 0.75 if has_coding_context else 0.35
             if verb in WEAK_IMPERATIVE_VERBS:
                 return True, verb, 0.6
 
@@ -569,8 +602,11 @@ def classify_by_keywords(message: str) -> ClassificationResult:
     if base_confidence < 0.7:
         for keyword, weight in MEDIUM_CODING_KEYWORDS.items():
             if re.search(rf'\b{keyword}\b', message_lower):
-                # Check for context boost
-                context_matches = sum(1 for ctx in CODING_CONTEXT_KEYWORDS if ctx in message_lower)
+                # Check for context boost (use word boundary matching)
+                context_matches = sum(
+                    1 for ctx in CODING_CONTEXT_KEYWORDS
+                    if re.search(rf'\b{re.escape(ctx)}\b', message_lower)
+                )
                 boosted_weight = min(weight + (context_matches * 0.1), 0.9)
 
                 if boosted_weight > base_confidence:
@@ -773,8 +809,11 @@ async def classify_message(message: str) -> ClassificationResult:
     return keyword_result
 
 
-def classify_message_sync(message: str) -> ClassificationResult:
-    """Synchronous wrapper for classify_message (skips LLM)."""
+def classify_message_sync(message: str, session_id: str | None = None) -> ClassificationResult:
+    """Synchronous wrapper for classify_message (skips LLM).
+
+    If session_id is provided, uses session context to enhance classification.
+    """
     if not router_config.enabled:
         return ClassificationResult(
             task_type=TaskType.UNKNOWN,
@@ -784,16 +823,249 @@ def classify_message_sync(message: str) -> ClassificationResult:
             reasoning="Workflow router disabled",
         )
 
-    return classify_by_keywords(message)
+    # Get base classification
+    result = classify_by_keywords(message)
+
+    # Enhance with session context if available
+    if session_id:
+        result = _enhance_with_context(result, message, session_id)
+
+    return result
+
+
+def _enhance_with_context(
+    result: ClassificationResult,
+    message: str,
+    session_id: str,
+) -> ClassificationResult:
+    """Enhance classification result using session context.
+
+    This enables smart follow-ups like:
+    - "deploy it" after coding → knows what to deploy
+    - "add tests" after coding → knows what to test
+    - "spin it up" after creating app → knows what to run
+    """
+    state = get_session_state(session_id)
+
+    # No context to use
+    if not state.last_task:
+        return result
+
+    msg_lower = message.lower().strip()
+
+    # Detect pronoun references that indicate follow-up
+    pronoun_patterns = [
+        r"\b(it|this|that|these|those)\b",
+        r"\b(the app|the code|the feature|the changes)\b",
+        r"\bnow\s+\w+",  # "now deploy", "now test"
+    ]
+    has_reference = any(re.search(p, msg_lower) for p in pronoun_patterns)
+
+    if not has_reference:
+        return result
+
+    # Check for follow-up actions that should inherit context
+    follow_up_actions = {
+        # Testing follow-ups
+        ("test", "run tests", "add tests", "write tests"): TaskType.TESTING,
+        # DevOps follow-ups
+        ("deploy", "spin up", "containerize", "dockerize", "run it", "start it", "launch"): TaskType.DEVOPS,
+        # Documentation follow-ups
+        ("document", "add docs", "write docs", "readme"): TaskType.DOCUMENTATION,
+        # More coding
+        ("refactor", "improve", "optimize", "fix", "update"): TaskType.CODING,
+    }
+
+    for keywords, follow_up_type in follow_up_actions.items():
+        if any(kw in msg_lower for kw in keywords):
+            # This is a follow-up action referencing previous work
+            # Context makes intent clear - use high confidence
+            context_confidence = 0.85
+
+            return ClassificationResult(
+                task_type=follow_up_type,
+                confidence=context_confidence,
+                should_trigger_workflow=True,  # Context makes it clear
+                needs_clarification=False,
+                matched_keywords=result.matched_keywords + ["context:follow_up"],
+                reasoning=f"Follow-up to: {state.last_task[:50]}",
+            )
+
+    return result
+
+
+def get_task_with_context(message: str, session_id: str) -> str:
+    """Expand a message with session context for better agent understanding.
+
+    Transforms vague follow-ups into specific tasks:
+    - "deploy it" → "deploy the backtest app (files: backend/app/main.py, ...)"
+    - "add tests" → "add tests for the market data feature (components: MarketDataFetcher)"
+    """
+    state = get_session_state(session_id)
+
+    if not state.last_task:
+        return message
+
+    msg_lower = message.lower().strip()
+
+    # Check if message has vague references
+    vague_refs = ["it", "this", "that", "the app", "the code", "the feature"]
+    has_vague_ref = any(ref in msg_lower for ref in vague_refs)
+
+    if not has_vague_ref:
+        return message
+
+    # Build context suffix
+    context_parts = []
+    if state.last_task:
+        context_parts.append(f"Previous task: {state.last_task}")
+    if state.last_result_summary:
+        context_parts.append(f"What was done: {state.last_result_summary}")
+    if state.files_touched:
+        context_parts.append(f"Files: {', '.join(state.files_touched[:5])}")
+    if state.components_created:
+        context_parts.append(f"Components: {', '.join(state.components_created[:5])}")
+    if state.project_path:
+        context_parts.append(f"Project path: {state.project_path}")
+
+    if context_parts:
+        context_str = " | ".join(context_parts)
+        return f"{message}\n\n[Context from previous workflow: {context_str}]"
+
+    return message
+
+
+# =============================================================================
+# Session State Tracking (Task Continuity)
+# =============================================================================
+
+from dataclasses import dataclass as _dataclass, field as _field
+from datetime import datetime as _datetime
+from typing import Dict, List, Optional
+
+
+@_dataclass
+class SessionState:
+    """Tracks workflow context for a session to enable smart follow-ups."""
+
+    # What was just done
+    last_task: Optional[str] = None  # "add real market data"
+    last_task_type: Optional[TaskType] = None
+    last_result_summary: Optional[str] = None  # "Created backtest.py with yfinance integration"
+
+    # What was created/modified
+    files_touched: List[str] = _field(default_factory=list)
+    components_created: List[str] = _field(default_factory=list)  # ["BacktestEngine", "MarketDataFetcher"]
+
+    # Context for follow-ups
+    project_path: Optional[str] = None  # Working directory
+    tech_stack: List[str] = _field(default_factory=list)  # ["fastapi", "yfinance", "pandas"]
+
+    # Suggestions made but not yet acted on
+    pending_suggestions: List[str] = _field(default_factory=list)
+
+    # Timestamps
+    last_updated: _datetime = _field(default_factory=_datetime.now)
+
+    def update_from_workflow(
+        self,
+        task: str,
+        task_type: TaskType,
+        result_summary: str | None = None,
+        files: list[str] | None = None,
+        components: list[str] | None = None,
+        project_path: str | None = None,
+    ) -> None:
+        """Update state after a workflow completes."""
+        self.last_task = task
+        self.last_task_type = task_type
+        self.last_result_summary = result_summary
+        self.last_updated = _datetime.now()
+
+        if files:
+            # Keep last 20 files, most recent first
+            self.files_touched = files[:10] + [f for f in self.files_touched if f not in files][:10]
+        if components:
+            self.components_created = components[:10] + [c for c in self.components_created if c not in components][:10]
+        if project_path:
+            self.project_path = project_path
+
+    def add_suggestion(self, suggestion: str) -> None:
+        """Track a suggestion made by an agent."""
+        if suggestion not in self.pending_suggestions:
+            self.pending_suggestions.append(suggestion)
+            # Keep last 5
+            self.pending_suggestions = self.pending_suggestions[-5:]
+
+    def clear_suggestion(self, suggestion: str) -> None:
+        """Remove a suggestion when acted upon."""
+        self.pending_suggestions = [s for s in self.pending_suggestions if s != suggestion]
+
+    def get_context_summary(self) -> str:
+        """Get a summary of recent context for agents."""
+        parts = []
+        if self.last_task:
+            parts.append(f"Last task: {self.last_task}")
+        if self.last_result_summary:
+            parts.append(f"Result: {self.last_result_summary}")
+        if self.files_touched:
+            parts.append(f"Files: {', '.join(self.files_touched[:5])}")
+        if self.components_created:
+            parts.append(f"Components: {', '.join(self.components_created[:5])}")
+        if self.project_path:
+            parts.append(f"Project: {self.project_path}")
+        return " | ".join(parts) if parts else ""
+
+
+# In-memory store for session state
+_session_states: Dict[str, SessionState] = {}
+
+# How long state is valid (30 minutes)
+SESSION_STATE_TIMEOUT_SECONDS = 1800
+
+
+def get_session_state(session_id: str) -> SessionState:
+    """Get or create session state."""
+    if session_id not in _session_states:
+        _session_states[session_id] = SessionState()
+
+    state = _session_states[session_id]
+
+    # Check if expired
+    elapsed = (_datetime.now() - state.last_updated).total_seconds()
+    if elapsed > SESSION_STATE_TIMEOUT_SECONDS:
+        # Reset stale state
+        _session_states[session_id] = SessionState()
+        return _session_states[session_id]
+
+    return state
+
+
+def update_session_state(
+    session_id: str,
+    task: str,
+    task_type: TaskType,
+    result_summary: str | None = None,
+    files: list[str] | None = None,
+    components: list[str] | None = None,
+    project_path: str | None = None,
+) -> None:
+    """Update session state after workflow completion."""
+    state = get_session_state(session_id)
+    state.update_from_workflow(
+        task=task,
+        task_type=task_type,
+        result_summary=result_summary,
+        files=files,
+        components=components,
+        project_path=project_path,
+    )
+    logger.debug(f"Updated session state for {session_id[:8]}: {state.get_context_summary()[:100]}")
 
 
 # =============================================================================
 # Pending Clarification Tracking
 # =============================================================================
-
-from dataclasses import dataclass as _dataclass
-from datetime import datetime as _datetime
-from typing import Dict
 
 
 @_dataclass
@@ -976,8 +1248,7 @@ def analyze_clarification_followup(
     if word_count < 15 and not is_refinement:
         # Could be a refinement or short confirmation
         # Check if it has coding context
-        has_coding_context = any(ctx in message_lower for ctx in CODING_CONTEXT_KEYWORDS)
-        if has_coding_context:
+        if _has_coding_context(message):
             is_refinement = True
 
     if is_refinement:

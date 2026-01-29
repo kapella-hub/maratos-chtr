@@ -49,6 +49,9 @@ from app.workflows.router import (
     store_pending_clarification,
     analyze_clarification_followup,
     clear_pending_clarification,
+    get_session_state,
+    update_session_state,
+    get_task_with_context,
     TaskType,
 )
 
@@ -57,17 +60,24 @@ logger = logging.getLogger(__name__)
 # Pattern to match [SPAWN:agent_id] task description
 SPAWN_PATTERN = re.compile(r'\[SPAWN:(\w+)\]\s*(.+?)(?=\[SPAWN:|\Z)', re.DOTALL)
 
+# Pattern to match [WORKFLOW:workflow_name] task description
+# MO uses this to explicitly trigger workflows (e.g., [WORKFLOW:delivery] implement X)
+WORKFLOW_PATTERN = re.compile(r'\[WORKFLOW:(\w+)\]\s*(.+?)(?=\[WORKFLOW:|\[SPAWN:|\Z)', re.DOTALL)
+
 
 def _workflow_event_to_progress(event_str: str) -> str | None:
-    """Convert a workflow SSE event to a user-friendly progress message.
+    """Convert a workflow SSE event to a clean, structured progress message.
 
-    Shows minimal progress as a clean status line.
+    Output is designed to be minimal and scannable:
+    - Phase changes on new lines with arrows
+    - Status indicators (✓/✗)
+    - File lists (not verbose summaries)
 
     Args:
         event_str: The raw SSE event string (e.g., 'data: {...}\n\n')
 
     Returns:
-        A user-friendly progress message, or None if no message needed.
+        A clean progress message, or None if no message needed.
     """
     try:
         # Parse the SSE data
@@ -80,54 +90,72 @@ def _workflow_event_to_progress(event_str: str) -> str | None:
         data = json.loads(data_str)
         event_type = data.get("type")
 
-        # Show workflow phase changes inline with dots
+        # Show workflow phase changes - clean format
         if event_type == "workflow_state":
             state = data.get("state", "")
             fix_cycle = data.get('fix_cycles', 0) + 1
-            phase_info = {
+            phase_map = {
                 "coding": "coding",
-                "testing": " · testing",
-                "fixing": f" · fixing ({fix_cycle}/3)",
-                "escalating": " · architect",
-                "deploying": " · devops",
-                "documenting": " · docs",
+                "testing": "testing",
+                "fixing": f"fix #{fix_cycle}",
+                "escalating": "architect",
+                "deploying": "devops",
+                "documenting": "docs",
             }
-            if state in phase_info:
-                return phase_info[state]
+            if state in phase_map:
+                return f"  → {phase_map[state]}"
+            return None
 
-        # Show test results inline
+        # Show agent completed - just status and files
+        elif event_type == "agent_completed":
+            status = data.get("status", "")
+            artifacts = data.get("artifacts", [])
+
+            # Status indicator
+            indicator = "✓" if status == "done" else "✗" if status in ("error", "blocked") else ""
+
+            # Show files if available (clean, no verbose summaries)
+            if artifacts:
+                # Just show filenames, not full paths
+                filenames = [a.split("/")[-1] for a in artifacts[:4]]
+                file_str = ", ".join(filenames)
+                if len(artifacts) > 4:
+                    file_str += f" +{len(artifacts) - 4}"
+                return f" {indicator} `{file_str}`"
+
+            return f" {indicator}" if indicator else None
+
+        # Show test results - concise
         elif event_type == "gate_result":
-            gate = data.get("gate", "gate")
+            gate = data.get("gate", "")
             passed = data.get("passed", False)
             tests_run = data.get("tests_run", 0)
             tests_passed = data.get("tests_passed", 0)
-            tests_failed = data.get("tests_failed", 0)
             no_tests = data.get("no_tests_found", False)
 
             if gate == "tester":
                 if no_tests:
-                    return " _(new)_"
+                    return " ✓ _(new)_"
                 elif passed:
-                    if tests_run > 0:
-                        return f" ✓{tests_passed}/{tests_run}"
-                    return " ✓"
+                    return f" ✓ {tests_passed}/{tests_run}" if tests_run else " ✓"
                 else:
-                    if tests_failed > 0:
-                        return f" ✗{tests_failed}"
-                    return " ✗"
+                    return f" ✗ {tests_passed}/{tests_run}"
+            return None
 
-        # Show user decision on new line
+        # Show user decision - on new line
         elif event_type == "user_decision_requested":
-            question = data.get("question", "")
-            return f"\\n\\n{question}"
+            question = data.get("question", data.get("message", ""))
+            if question:
+                return f"\\n\\n{question}"
+            return None
 
-        # Show completion on new line
+        # Show completion
         elif event_type == "workflow_completed":
-            return " ✓"
+            return "\\n  **done**"
 
         elif event_type == "workflow_failed":
-            error = data.get("error", "Unknown error")
-            return f" ✗ {error}"
+            error = data.get("error", "Unknown error")[:50]
+            return f"\\n  **failed:** {error}"
 
         return None
 
@@ -138,56 +166,13 @@ def _workflow_event_to_progress(event_str: str) -> str | None:
 def detect_auto_route(message: str) -> tuple[str | None, str]:
     """Detect if message should be auto-routed to a specific agent.
 
-    Uses smart intent detection rather than hardcoded patterns.
-    Returns (agent_id, task_description) or (None, "") if no match.
+    NOTE: Auto-routing is DISABLED. MO is the single orchestrator.
+    MO decides when to spawn agents using [SPAWN:agent] or trigger
+    workflows using [WORKFLOW:delivery].
+
+    This function now always returns (None, "") to let MO handle routing.
     """
-    from app.workflows.router import (
-        _is_operations_task,
-        _is_question,
-        OPERATIONS_CONTEXT,
-        CODING_CONTEXT_KEYWORDS,
-    )
-
-    msg_lower = message.lower().strip()
-
-    # 1. Operations/DevOps detection
-    is_ops, _, ops_confidence = _is_operations_task(message)
-    if is_ops and ops_confidence >= 0.7:
-        return "devops", message
-
-    # 2. Review/Analysis detection - looking for analytical intent
-    review_verbs = ("analyze", "review", "audit", "examine", "check", "inspect", "look at", "evaluate")
-    for verb in review_verbs:
-        if verb in msg_lower:
-            # Check if it's about code/project (not a general question)
-            code_targets = ("code", "codebase", "project", "file", "function", "class", "module", "implementation")
-            if any(target in msg_lower for target in code_targets):
-                return "reviewer", message
-
-    # 3. Architecture/Design detection
-    design_verbs = ("design", "architect", "plan", "structure")
-    design_targets = ("system", "api", "architecture", "schema", "database", "service")
-    for verb in design_verbs:
-        if verb in msg_lower:
-            if any(target in msg_lower for target in design_targets):
-                return "architect", message
-
-    # 4. Testing detection
-    test_verbs = ("write", "generate", "create", "add", "run")
-    test_targets = ("test", "tests", "spec", "specs", "unit test", "integration test")
-    for verb in test_verbs:
-        if msg_lower.startswith(verb) or f" {verb} " in msg_lower:
-            if any(target in msg_lower for target in test_targets):
-                return "tester", message
-
-    # 5. Documentation detection
-    doc_verbs = ("write", "create", "update", "generate", "add")
-    doc_targets = ("doc", "docs", "documentation", "readme", "docstring", "comment")
-    for verb in doc_verbs:
-        if msg_lower.startswith(verb) or f" {verb} " in msg_lower:
-            if any(target in msg_lower for target in doc_targets):
-                return "docs", message
-
+    # Auto-routing disabled - MO is the orchestrator
     return None, ""
 
 # Pattern to match [CANVAS:type attr="value"] content [/CANVAS]
@@ -335,7 +320,10 @@ async def process_mermaid_blocks(
 
 
 def clean_cli_output(text: str) -> str:
-    """Remove CLI artifacts like ASCII banners, spinners, and verbose log lines."""
+    """Remove CLI artifacts like ASCII banners, spinners, and verbose log lines.
+
+    Also collapses long sequences of numbered lines (file content) into summaries.
+    """
     if not text:
         return text
 
@@ -343,7 +331,14 @@ def clean_cli_output(text: str) -> str:
     cleaned = []
     skip_until_empty = False
 
-    for line in lines:
+    # Track numbered line sequences to collapse them
+    numbered_line_pattern = re.compile(r'^\s*(?:[•\-\*]\s*)?(\d+)(?:,\s*\d+)?\s*:\s?(.*)$')
+    in_numbered_sequence = False
+    numbered_count = 0
+    numbered_first_line = ""
+    current_file_path = None
+
+    for i, line in enumerate(lines):
         # Skip ASCII art banner lines (contain lots of Unicode box/block chars)
         special_count = sum(1 for c in line if c in '⠀▀▄█░▒▓│╭╮╯╰─┌┐└┘├┤┬┴┼⣴⣶⣦⣿⢰⢸⠈⠙⠁⠀')
         if special_count > len(line) * 0.3 and len(line) > 10:
@@ -372,7 +367,45 @@ def clean_cli_output(text: str) -> str:
         if re.match(r'^\s*\d+\s*operations?\s+processed', line):
             continue
 
+        # Track file paths being created/modified
+        file_match = re.match(r'^(?:Creating|Modifying|Writing|Updating):\s*(.+)$', line)
+        if file_match:
+            current_file_path = file_match.group(1).strip()
+            cleaned.append(line)
+            continue
+
+        # Collapse numbered line sequences (file content display)
+        numbered_match = numbered_line_pattern.match(line)
+        if numbered_match:
+            if not in_numbered_sequence:
+                in_numbered_sequence = True
+                numbered_count = 1
+                numbered_first_line = numbered_match.group(2)[:50]
+            else:
+                numbered_count += 1
+            continue
+        else:
+            # End of numbered sequence - emit summary if it was long
+            if in_numbered_sequence:
+                if numbered_count > 5:
+                    # Collapse to summary
+                    file_name = current_file_path.split('/')[-1] if current_file_path else "file"
+                    cleaned.append(f"```\n... ({numbered_count} lines)\n```")
+                elif numbered_count > 0:
+                    # Short sequence - still show collapsed
+                    cleaned.append(f"```\n{numbered_first_line}...\n({numbered_count} lines)\n```")
+                in_numbered_sequence = False
+                numbered_count = 0
+                current_file_path = None
+
         cleaned.append(line)
+
+    # Handle trailing numbered sequence
+    if in_numbered_sequence and numbered_count > 0:
+        if numbered_count > 5:
+            cleaned.append(f"```\n... ({numbered_count} lines)\n```")
+        else:
+            cleaned.append(f"```\n{numbered_first_line}...\n({numbered_count} lines)\n```")
 
     # Remove leading/trailing empty lines and collapse multiple empty lines
     result = '\n'.join(cleaned)
@@ -833,7 +866,7 @@ async def chat(
                 yield f'data: {followup_event}\n\n'
 
                 # Minimal workflow indicator
-                start_msg = "`workflow` "
+                start_msg = "**workflow**\\n"
                 yield f'data: {{"content": "{start_msg}"}}\n\n'
                 yield 'data: {"thinking": false}\n\n'
                 yield 'data: {"orchestrating": true}\n\n'
@@ -853,19 +886,47 @@ async def chat(
                     except Exception as e:
                         logger.error(f"Failed to save workflow message: {e}")
 
+                # Expand task with context for better agent understanding
+                task_with_context = get_task_with_context(followup_result.task_to_execute, session.id)
+                followup_files: list[str] = []
+                followup_completed = False
+
                 try:
                     async for workflow_event in run_delivery_workflow(
                         session_id=session.id,
-                        task=followup_result.task_to_execute,
+                        task=task_with_context,
                         workspace_path=workspace or None,
                         context=chat_request.context,
                         save_message_fn=save_followup_workflow_message,
                     ):
                         yield workflow_event
+
+                        # Track files for session state
+                        try:
+                            if workflow_event.startswith("data: "):
+                                event_data = json.loads(workflow_event[6:].strip())
+                                if event_data.get("type") == "file_changed":
+                                    followup_files.append(event_data.get("file", ""))
+                                if event_data.get("type") == "workflow_completed":
+                                    followup_completed = True
+                        except (json.JSONDecodeError, KeyError):
+                            pass
+
                         progress_msg = _workflow_event_to_progress(workflow_event)
                         if progress_msg:
                             escaped_msg = progress_msg.replace('"', '\\"').replace('\n', '\\n')
                             yield f'data: {{"content": "{escaped_msg}"}}\n\n'
+
+                    # Update session state
+                    if followup_completed or followup_files:
+                        update_session_state(
+                            session_id=session.id,
+                            task=followup_result.task_to_execute,
+                            task_type=TaskType.CODING,  # Default for follow-ups
+                            files=followup_files if followup_files else None,
+                            project_path=workspace or None,
+                        )
+
                 except Exception as e:
                     logger.error(f"Delivery workflow error: {e}", exc_info=True)
                     escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
@@ -880,71 +941,13 @@ async def chat(
                 logger.info("User declined workflow, passing to MO")
                 # Fall through to normal chat processing
 
-        # Delivery workflow: classify message and run deterministic workflow if coding task
-        classification = classify_message_sync(actual_message)
-        logger.debug(f"Router classification: {classification.task_type.value}, confidence={classification.confidence:.2f}, trigger={classification.should_trigger_workflow}")
-
-        if classification.should_trigger_workflow and agent_id == "mo":
-            task_type_label = classification.task_type.value
-            logger.info(f"Detected {task_type_label} task (confidence={classification.confidence:.2f}), starting delivery workflow: {actual_message[:50]}...")
-            yield 'data: {"thinking": true}\n\n'
-
-            # Emit classification info for UI
-            classification_event = json.dumps({
-                "workflow_classification": {
-                    "task_type": task_type_label,
-                    "confidence": round(classification.confidence, 2),
-                    "matched_keywords": classification.matched_keywords,
-                    "matched_command": classification.matched_command,
-                }
-            })
-            yield f'data: {classification_event}\n\n'
-
-            # Minimal workflow indicator
-            start_msg = "`workflow` "
-            yield f'data: {{"content": "{start_msg}"}}\n\n'
-            yield 'data: {"thinking": false}\n\n'
-            yield 'data: {"orchestrating": true}\n\n'
-
-            workspace = chat_request.context.get("workspace", "") if chat_request.context else ""
-
-            async def save_workflow_message(content: str) -> None:
-                try:
-                    async with db.begin():
-                        wf_msg = DBMessage(
-                            id=str(uuid.uuid4()),
-                            session_id=session.id,
-                            role="assistant",
-                            content=content,
-                        )
-                        db.add(wf_msg)
-                except Exception as e:
-                    logger.error(f"Failed to save workflow message: {e}")
-
-            try:
-                async for workflow_event in run_delivery_workflow(
-                    session_id=session.id,
-                    task=actual_message,
-                    workspace_path=workspace or None,
-                    context=chat_request.context,
-                    save_message_fn=save_workflow_message,
-                ):
-                    # Yield the raw event for frontend state tracking
-                    yield workflow_event
-
-                    # Also emit user-friendly progress messages
-                    progress_msg = _workflow_event_to_progress(workflow_event)
-                    if progress_msg:
-                        escaped_msg = progress_msg.replace('"', '\\"').replace('\n', '\\n')
-                        yield f'data: {{"content": "{escaped_msg}"}}\n\n'
-            except Exception as e:
-                logger.error(f"Delivery workflow error: {e}", exc_info=True)
-                escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
-                yield f'data: {{"error": "Workflow failed: {escaped_err}"}}\n\n'
-
-            yield 'data: {"orchestrating": false}\n\n'
-            yield "data: [DONE]\n\n"
-            return
+        # NOTE: Auto-detection of coding tasks is DISABLED
+        # MO now explicitly triggers workflows via [WORKFLOW:delivery] marker
+        # This gives MO full control over orchestration decisions
+        #
+        # The classification is still logged for debugging but doesn't auto-trigger
+        classification = classify_message_sync(actual_message, session_id=session.id)
+        logger.debug(f"Router classification (info only): {classification.task_type.value}, confidence={classification.confidence:.2f}")
 
         # Handle clarification needed (confidence between thresholds)
         if classification.needs_clarification and agent_id == "mo" and classification.clarification_question:
@@ -1130,6 +1133,13 @@ async def chat(
                     try:
                         tool_data = json.loads(chunk.split(":", 1)[1])
                         yield f'data: {{"tool_call": {json.dumps(tool_data)}}}\n\n'
+                        # Emit activity_tool_start event
+                        activity_event = {
+                            "type": "activity_tool_start",
+                            "tool": tool_data.get("name", "unknown"),
+                            "params": tool_data.get("arguments", {}),
+                        }
+                        yield f'data: {json.dumps(activity_event)}\n\n'
                     except json.JSONDecodeError:
                         pass
                     continue
@@ -1137,6 +1147,27 @@ async def chat(
                     try:
                         result_data = json.loads(chunk.split(":", 1)[1])
                         yield f'data: {{"tool_result": {json.dumps(result_data)}}}\n\n'
+                        # Emit activity_tool_complete event
+                        activity_event = {
+                            "type": "activity_tool_complete",
+                            "tool": result_data.get("tool", "unknown"),
+                            "success": result_data.get("success", True),
+                        }
+                        yield f'data: {json.dumps(activity_event)}\n\n'
+                    except json.JSONDecodeError:
+                        pass
+                    continue
+                elif chunk.startswith("__TOOL_OUTPUT__:"):
+                    # Handle streaming tool output (line by line)
+                    try:
+                        output_data = json.loads(chunk.split(":", 1)[1])
+                        activity_event = {
+                            "type": "activity_tool_output",
+                            "tool": output_data.get("tool", "shell"),
+                            "line": output_data.get("line", ""),
+                            "stream": output_data.get("stream", "stdout"),
+                        }
+                        yield f'data: {json.dumps(activity_event)}\n\n'
                     except json.JSONDecodeError:
                         pass
                     continue
@@ -1144,6 +1175,14 @@ async def chat(
                     try:
                         error_data = json.loads(chunk.split(":", 1)[1])
                         yield f'data: {{"tool_error": {json.dumps(error_data)}}}\n\n'
+                        # Emit activity_tool_complete with error
+                        activity_event = {
+                            "type": "activity_tool_complete",
+                            "tool": error_data.get("tool", "unknown"),
+                            "success": False,
+                            "error": error_data.get("error", "Unknown error"),
+                        }
+                        yield f'data: {json.dumps(activity_event)}\n\n'
                     except json.JSONDecodeError:
                         pass
                     if in_tool_execution:
@@ -1306,10 +1345,89 @@ async def chat(
         except Exception as e:
             logger.error(f"Unexpected memory storage error: {e}", exc_info=True)
 
+        # Check for [WORKFLOW:name] markers - MO explicitly triggering workflows
+        workflow_matches = WORKFLOW_PATTERN.findall(full_response)
+        if workflow_matches:
+            logger.info(f"Workflow triggers found: {len(workflow_matches)}")
+            yield 'data: {"orchestrating": true}\n\n'
+
+            workspace = chat_request.context.get("workspace", "") if chat_request.context else ""
+
+            async def save_workflow_message(content: str) -> None:
+                try:
+                    async with db.begin():
+                        wf_msg = DBMessage(
+                            id=str(uuid.uuid4()),
+                            session_id=session.id,
+                            role="assistant",
+                            content=content,
+                        )
+                        db.add(wf_msg)
+                except Exception as e:
+                    logger.error(f"Failed to save workflow message: {e}")
+
+            for workflow_name, task_desc in workflow_matches:
+                task_desc = task_desc.strip()
+                if not task_desc:
+                    continue
+
+                logger.info(f"MO triggered workflow: {workflow_name} for task: {task_desc[:50]}...")
+
+                if workflow_name == "delivery":
+                    # Run the delivery workflow (coder → tester → devops)
+                    workflow_files: list[str] = []
+                    workflow_completed = False
+
+                    try:
+                        async for workflow_event in run_delivery_workflow(
+                            session_id=session.id,
+                            task=task_desc,
+                            workspace_path=workspace or None,
+                            context=chat_request.context,
+                            save_message_fn=save_workflow_message,
+                        ):
+                            yield workflow_event
+
+                            try:
+                                if workflow_event.startswith("data: "):
+                                    event_data = json.loads(workflow_event[6:].strip())
+                                    if event_data.get("type") == "file_changed":
+                                        workflow_files.append(event_data.get("file", ""))
+                                    if event_data.get("type") == "workflow_completed":
+                                        workflow_completed = True
+                            except (json.JSONDecodeError, KeyError):
+                                pass
+
+                            progress_msg = _workflow_event_to_progress(workflow_event)
+                            if progress_msg:
+                                escaped_msg = progress_msg.replace('"', '\\"').replace('\n', '\\n')
+                                yield f'data: {{"content": "{escaped_msg}"}}\n\n'
+
+                        if workflow_completed or workflow_files:
+                            update_session_state(
+                                session_id=session.id,
+                                task=task_desc,
+                                task_type=TaskType.CODING,
+                                files=workflow_files if workflow_files else None,
+                                project_path=workspace or None,
+                            )
+
+                    except Exception as e:
+                        logger.error(f"Delivery workflow error: {e}", exc_info=True)
+                        escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
+                        yield f'data: {{"error": "Workflow failed: {escaped_err}"}}\n\n'
+                else:
+                    logger.warning(f"Unknown workflow: {workflow_name}")
+                    yield f'data: {{"error": "Unknown workflow: {workflow_name}"}}\n\n'
+
+            yield 'data: {"orchestrating": false}\n\n'
+            yield "data: [DONE]\n\n"
+            return
+
         # Check for [SPAWN:agent] markers and auto-orchestrate
         spawn_matches = SPAWN_PATTERN.findall(full_response)
         logger.info(f"Spawn matches found: {len(spawn_matches)}")
-        
+
         if spawn_matches:
             yield 'data: {"orchestrating": true}\n\n'
             

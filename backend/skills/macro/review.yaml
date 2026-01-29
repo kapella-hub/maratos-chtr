@@ -1,0 +1,179 @@
+# /review - Code review with severity levels
+# Performs code review analysis with categorized findings
+
+id: review
+name: Code Review
+description: Perform code review with severity-based findings and suggestions
+version: "1.0.0"
+author: MaratOS
+
+task_types:
+  - code_review
+
+tags:
+  - review
+  - code-quality
+  - linting
+  - best-practices
+
+triggers:
+  - /review
+  - review code
+  - code review
+  - review this
+  - review changes
+
+inputs:
+  - name: workdir
+    type: path
+    description: Working directory (defaults to current workspace)
+    required: false
+
+  - name: files
+    type: string
+    description: Specific files to review (optional, reviews recent changes if not specified)
+    required: false
+
+  - name: focus
+    type: string
+    description: Review focus area (security, performance, style, all)
+    default: all
+
+outputs:
+  - name: findings
+    type: array
+    description: List of review findings
+
+  - name: severity_counts
+    type: object
+    description: Count of findings by severity
+
+  - name: approval_status
+    type: string
+    description: Overall review status (approved, needs_changes, blocked)
+
+requires_tools:
+  - shell
+  - kiro
+
+system_context: |
+  You are performing a thorough code review.
+
+  Severity Levels:
+  - CRITICAL: Security vulnerabilities, data loss risks, production blockers
+  - HIGH: Bugs, significant logic errors, major performance issues
+  - MEDIUM: Code quality issues, maintainability concerns, minor bugs
+  - LOW: Style issues, documentation gaps, minor improvements
+  - INFO: Suggestions, best practices, optional enhancements
+
+  Review Focus Areas:
+  - Security: Input validation, authentication, authorization, data exposure
+  - Performance: N+1 queries, inefficient algorithms, memory leaks
+  - Style: Naming conventions, code organization, readability
+  - Logic: Edge cases, error handling, race conditions
+  - Testing: Test coverage, test quality, missing tests
+
+  Output format:
+  Each finding should include:
+  - Severity level
+  - File and line number
+  - Description of the issue
+  - Suggested fix (if applicable)
+
+quality_checklist:
+  - All files reviewed
+  - Security issues identified
+  - Performance concerns noted
+  - Code style evaluated
+  - Actionable feedback provided
+
+workflow:
+  - name: get_changes
+    action: shell
+    description: Get the files to review
+    params:
+      command: |
+        if [ -n "{{files}}" ]; then
+          echo "{{files}}"
+        else
+          # Get recently changed files
+          git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only --staged 2>/dev/null || find . -type f -name "*.py" -o -name "*.js" -o -name "*.ts" | head -20
+        fi
+
+  - name: run_linters
+    action: shell
+    description: Run available linters for static analysis
+    params:
+      command: |
+        # Python linting
+        if [ -f "pyproject.toml" ] || [ -f "requirements.txt" ]; then
+          ruff check . 2>/dev/null || python -m flake8 . 2>/dev/null || echo "No Python linter available"
+        fi
+
+        # JavaScript/TypeScript linting
+        if [ -f "package.json" ]; then
+          npx eslint . --max-warnings=0 2>/dev/null || echo "No JS linter available"
+        fi
+
+  - name: analyze_code
+    action: kiro_validate
+    description: Deep code analysis with kiro
+    params:
+      task: |
+        Perform a comprehensive code review on the following files:
+        {{files}}
+
+        Focus: {{focus}}
+
+        For each file, analyze:
+        1. Security vulnerabilities (input validation, injection, auth issues)
+        2. Bug potential (null checks, edge cases, error handling)
+        3. Performance issues (inefficient patterns, memory concerns)
+        4. Code quality (readability, maintainability, DRY violations)
+        5. Test coverage gaps
+
+        Format findings as:
+
+        ## [SEVERITY] File:Line - Brief Title
+        **Issue:** Description of the problem
+        **Impact:** Why this matters
+        **Fix:** Suggested remediation
+
+        At the end, provide:
+        - Summary statistics (findings by severity)
+        - Overall recommendation (APPROVE, NEEDS_CHANGES, BLOCKED)
+      files: "{{files}}"
+      workdir: "{{workdir}}"
+
+  - name: generate_report
+    action: kiro_prompt
+    description: Generate final review report
+    params:
+      task: |
+        Based on the analysis, generate a code review report.
+
+        ## Code Review Report
+
+        ### Summary
+        - Files Reviewed: <count>
+        - Critical Issues: <count>
+        - High Issues: <count>
+        - Medium Issues: <count>
+        - Low Issues: <count>
+
+        ### Critical/High Findings
+        <List each with file, line, issue, and suggested fix>
+
+        ### Medium/Low Findings
+        <Summarized list>
+
+        ### Recommendations
+        <Overall suggestions for improvement>
+
+        ### Verdict
+        **Status:** APPROVE / NEEDS_CHANGES / BLOCKED
+        **Reason:** <brief explanation>
+
+retry_policy:
+  max_attempts: 1
+  backoff_seconds: 0

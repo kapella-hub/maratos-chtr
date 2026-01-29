@@ -378,6 +378,160 @@ async def approval_events_stream(
     )
 
 
+class BatchApproveRequest(BaseModel):
+    """Request to approve multiple actions at once."""
+
+    approval_ids: list[str]
+    approved_by: str = "user"
+    note: str | None = None
+
+
+class BatchApprovalActionResponse(BaseModel):
+    """Response after batch approve/deny action."""
+
+    success: bool
+    total: int
+    approved: int
+    failed: int
+    results: list[dict[str, Any]]
+
+
+@router.post("/batch/approve", response_model=BatchApprovalActionResponse)
+async def batch_approve_requests(
+    request: BatchApproveRequest,
+) -> BatchApprovalActionResponse:
+    """Approve multiple pending actions at once.
+
+    Useful for approving all file changes in a workflow.
+    """
+    results = []
+    approved_count = 0
+    failed_count = 0
+
+    for approval_id in request.approval_ids:
+        approval = diff_approval_manager.get_approval(approval_id)
+        if not approval:
+            results.append({
+                "approval_id": approval_id,
+                "success": False,
+                "error": "Not found",
+            })
+            failed_count += 1
+            continue
+
+        if approval.status != ApprovalStatus.PENDING:
+            results.append({
+                "approval_id": approval_id,
+                "success": False,
+                "error": f"Not pending (status: {approval.status.value})",
+            })
+            failed_count += 1
+            continue
+
+        success = diff_approval_manager.approve(
+            approval_id,
+            approved_by=request.approved_by,
+            note=request.note,
+        )
+
+        if success:
+            results.append({
+                "approval_id": approval_id,
+                "success": True,
+                "new_status": ApprovalStatus.APPROVED.value,
+            })
+            approved_count += 1
+        else:
+            results.append({
+                "approval_id": approval_id,
+                "success": False,
+                "error": "Failed to approve",
+            })
+            failed_count += 1
+
+    logger.info(f"Batch approval: {approved_count}/{len(request.approval_ids)} approved by {request.approved_by}")
+
+    return BatchApprovalActionResponse(
+        success=failed_count == 0,
+        total=len(request.approval_ids),
+        approved=approved_count,
+        failed=failed_count,
+        results=results,
+    )
+
+
+class BatchDenyRequest(BaseModel):
+    """Request to deny multiple actions at once."""
+
+    approval_ids: list[str]
+    denied_by: str = "user"
+    reason: str | None = None
+
+
+@router.post("/batch/deny", response_model=BatchApprovalActionResponse)
+async def batch_deny_requests(
+    request: BatchDenyRequest,
+) -> BatchApprovalActionResponse:
+    """Deny multiple pending actions at once.
+
+    Useful for rejecting all file changes in a workflow.
+    """
+    results = []
+    denied_count = 0
+    failed_count = 0
+
+    for approval_id in request.approval_ids:
+        approval = diff_approval_manager.get_approval(approval_id)
+        if not approval:
+            results.append({
+                "approval_id": approval_id,
+                "success": False,
+                "error": "Not found",
+            })
+            failed_count += 1
+            continue
+
+        if approval.status != ApprovalStatus.PENDING:
+            results.append({
+                "approval_id": approval_id,
+                "success": False,
+                "error": f"Not pending (status: {approval.status.value})",
+            })
+            failed_count += 1
+            continue
+
+        success = diff_approval_manager.reject(
+            approval_id,
+            rejected_by=request.denied_by,
+            reason=request.reason,
+        )
+
+        if success:
+            results.append({
+                "approval_id": approval_id,
+                "success": True,
+                "new_status": ApprovalStatus.REJECTED.value,
+            })
+            denied_count += 1
+        else:
+            results.append({
+                "approval_id": approval_id,
+                "success": False,
+                "error": "Failed to deny",
+            })
+            failed_count += 1
+
+    logger.info(f"Batch denial: {denied_count}/{len(request.approval_ids)} denied by {request.denied_by}")
+
+    return BatchApprovalActionResponse(
+        success=failed_count == 0,
+        total=len(request.approval_ids),
+        approved=denied_count,  # Reusing field for count
+        failed=failed_count,
+        results=results,
+    )
+
+
 @router.post("/cleanup")
 async def cleanup_expired() -> dict[str, Any]:
     """Clean up expired approval requests.

@@ -1,0 +1,199 @@
+# /test - Run tests with auto-detected framework
+# Detects the test framework and runs tests with appropriate configuration
+
+id: test
+name: Run Tests
+description: Auto-detect test framework and run tests with coverage
+version: "1.0.0"
+author: MaratOS
+
+task_types:
+  - testing
+
+tags:
+  - test
+  - pytest
+  - jest
+  - unittest
+  - coverage
+
+triggers:
+  - /test
+  - run tests
+  - run the tests
+  - test this
+  - execute tests
+
+inputs:
+  - name: workdir
+    type: path
+    description: Working directory (defaults to current workspace)
+    required: false
+
+  - name: pattern
+    type: string
+    description: Test file or pattern to run (optional)
+    required: false
+
+  - name: verbose
+    type: boolean
+    description: Run tests in verbose mode
+    default: true
+
+  - name: coverage
+    type: boolean
+    description: Generate coverage report
+    default: false
+
+outputs:
+  - name: passed
+    type: boolean
+    description: Whether all tests passed
+
+  - name: tests_run
+    type: number
+    description: Total number of tests run
+
+  - name: tests_passed
+    type: number
+    description: Number of tests that passed
+
+  - name: tests_failed
+    type: number
+    description: Number of tests that failed
+
+  - name: coverage_percent
+    type: number
+    description: Code coverage percentage (if enabled)
+
+requires_tools:
+  - shell
+
+system_context: |
+  You are running tests for a software project.
+
+  Auto-detect the test framework:
+  - Python: pytest (preferred), unittest, nose
+  - JavaScript/TypeScript: jest, vitest, mocha
+  - Go: go test
+  - Rust: cargo test
+
+  Always provide clear output showing:
+  - Which tests ran
+  - Pass/fail status
+  - Any error messages for failures
+
+quality_checklist:
+  - Test framework detected
+  - Tests executed successfully
+  - Results reported clearly
+  - Failures explained if any
+
+workflow:
+  - name: detect_framework
+    action: shell
+    description: Detect the test framework used in the project
+    params:
+      command: |
+        if [ -f "pytest.ini" ] || [ -f "pyproject.toml" ] || [ -f "setup.cfg" ]; then
+          echo "FRAMEWORK=pytest"
+        elif [ -f "package.json" ]; then
+          if grep -q '"jest"' package.json 2>/dev/null; then
+            echo "FRAMEWORK=jest"
+          elif grep -q '"vitest"' package.json 2>/dev/null; then
+            echo "FRAMEWORK=vitest"
+          elif grep -q '"mocha"' package.json 2>/dev/null; then
+            echo "FRAMEWORK=mocha"
+          else
+            echo "FRAMEWORK=npm_test"
+          fi
+        elif [ -f "go.mod" ]; then
+          echo "FRAMEWORK=go"
+        elif [ -f "Cargo.toml" ]; then
+          echo "FRAMEWORK=cargo"
+        elif ls test_*.py 2>/dev/null || ls *_test.py 2>/dev/null || [ -d "tests" ]; then
+          echo "FRAMEWORK=pytest"
+        else
+          echo "FRAMEWORK=unknown"
+        fi
+
+  - name: run_python_tests
+    action: shell
+    condition: "framework == 'pytest'"
+    description: Run pytest tests
+    params:
+      command: |
+        if [ "{{coverage}}" = "true" ]; then
+          python -m pytest {{pattern}} -v --tb=short --cov --cov-report=term-missing 2>&1 | head -100
+        else
+          python -m pytest {{pattern}} -v --tb=short 2>&1 | head -100
+        fi
+
+  - name: run_js_jest_tests
+    action: shell
+    condition: "framework == 'jest'"
+    description: Run Jest tests
+    params:
+      command: |
+        if [ "{{coverage}}" = "true" ]; then
+          npx jest {{pattern}} --verbose --coverage 2>&1 | head -100
+        else
+          npx jest {{pattern}} --verbose 2>&1 | head -100
+        fi
+
+  - name: run_js_vitest_tests
+    action: shell
+    condition: "framework == 'vitest'"
+    description: Run Vitest tests
+    params:
+      command: |
+        if [ "{{coverage}}" = "true" ]; then
+          npx vitest run {{pattern}} --coverage 2>&1 | head -100
+        else
+          npx vitest run {{pattern}} 2>&1 | head -100
+        fi
+
+  - name: run_npm_tests
+    action: shell
+    condition: "framework == 'npm_test'"
+    description: Run npm test
+    params:
+      command: "npm test 2>&1 | head -100"
+
+  - name: run_go_tests
+    action: shell
+    condition: "framework == 'go'"
+    description: Run Go tests
+    params:
+      command: |
+        if [ "{{coverage}}" = "true" ]; then
+          go test -v -cover ./... 2>&1 | head -100
+        else
+          go test -v ./... 2>&1 | head -100
+        fi
+
+  - name: run_rust_tests
+    action: shell
+    condition: "framework == 'cargo'"
+    description: Run Cargo tests
+    params:
+      command: "cargo test 2>&1 | head -100"
+
+  - name: summarize_results
+    action: kiro_prompt
+    description: Summarize test results
+    params:
+      task: |
+        Analyze the test output and provide a summary:
+
+        ## Test Results
+        - **Status:** PASS or FAIL
+        - **Tests run:** <number>
+        - **Tests passed:** <number>
+        - **Tests failed:** <number>
+
+        If there are failures, list them with brief explanations.
+
+retry_policy:
+  max_attempts: 1
+  backoff_seconds: 0

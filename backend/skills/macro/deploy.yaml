@@ -1,0 +1,250 @@
+# /deploy - Deploy with auto-detected method
+# Detects deployment configuration and deploys to the appropriate environment
+
+id: deploy
+name: Deploy
+description: Auto-detect deployment method and deploy to environment
+version: "1.0.0"
+author: MaratOS
+
+task_types:
+  - deployment
+  - devops
+
+tags:
+  - deploy
+  - ci-cd
+  - docker
+  - kubernetes
+
+triggers:
+  - /deploy
+  - deploy this
+  - deploy to staging
+  - deploy to production
+  - ship it
+
+inputs:
+  - name: workdir
+    type: path
+    description: Working directory (defaults to current workspace)
+    required: false
+
+  - name: environment
+    type: string
+    description: Target environment (staging, production)
+    default: staging
+
+  - name: dry_run
+    type: boolean
+    description: Preview deployment without executing
+    default: false
+
+  - name: skip_tests
+    type: boolean
+    description: Skip running tests before deployment
+    default: false
+
+outputs:
+  - name: deployment_url
+    type: string
+    description: URL of the deployed application
+
+  - name: deployment_status
+    type: string
+    description: Status of the deployment
+
+  - name: deployment_method
+    type: string
+    description: Method used for deployment
+
+requires_tools:
+  - shell
+  - kiro
+
+system_context: |
+  You are deploying an application to the target environment.
+
+  Deployment Methods (auto-detected):
+  - Docker Compose: docker-compose.yml present
+  - Kubernetes: k8s/ directory or *.yaml with kind: Deployment
+  - Vercel: vercel.json present
+  - Netlify: netlify.toml present
+  - GitHub Actions: .github/workflows/*.yml (trigger via workflow_dispatch)
+  - Heroku: Procfile present
+  - Custom: deploy.sh or Makefile with deploy target
+
+  Safety Checks:
+  - Verify tests pass (unless skip_tests)
+  - Check for uncommitted changes
+  - Validate environment configuration
+  - Confirm production deployments
+
+  Always report:
+  - Deployment method detected
+  - Pre-deployment checks status
+  - Deployment progress
+  - Final status and URL
+
+quality_checklist:
+  - Deployment method detected
+  - Pre-flight checks passed
+  - Environment validated
+  - Deployment executed
+  - Status verified
+
+workflow:
+  - name: check_uncommitted
+    action: shell
+    description: Check for uncommitted changes
+    params:
+      command: |
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "WARNING: Uncommitted changes detected"
+          git status --short
+        else
+          echo "OK: Working directory clean"
+        fi
+
+  - name: detect_method
+    action: shell
+    description: Detect the deployment method
+    params:
+      command: |
+        if [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ]; then
+          echo "METHOD=docker-compose"
+        elif [ -d "k8s" ] || ls *.yaml 2>/dev/null | xargs grep -l "kind: Deployment" 2>/dev/null; then
+          echo "METHOD=kubernetes"
+        elif [ -f "vercel.json" ]; then
+          echo "METHOD=vercel"
+        elif [ -f "netlify.toml" ]; then
+          echo "METHOD=netlify"
+        elif [ -d ".github/workflows" ]; then
+          echo "METHOD=github-actions"
+        elif [ -f "Procfile" ]; then
+          echo "METHOD=heroku"
+        elif [ -f "deploy.sh" ]; then
+          echo "METHOD=custom-script"
+        elif [ -f "Makefile" ] && grep -q "deploy:" Makefile 2>/dev/null; then
+          echo "METHOD=makefile"
+        else
+          echo "METHOD=unknown"
+        fi
+
+  - name: run_tests
+    action: shell
+    condition: "skip_tests != true"
+    description: Run tests before deployment
+    params:
+      command: |
+        echo "Running pre-deployment tests..."
+        if [ -f "pyproject.toml" ] || [ -f "pytest.ini" ]; then
+          python -m pytest -x -q 2>&1 | tail -20
+        elif [ -f "package.json" ]; then
+          npm test 2>&1 | tail -20
+        fi
+
+  - name: deploy_docker_compose
+    action: shell
+    condition: "method == 'docker-compose'"
+    description: Deploy using Docker Compose
+    params:
+      command: |
+        if [ "{{dry_run}}" = "true" ]; then
+          echo "DRY RUN: Would execute docker-compose up -d"
+          docker-compose config
+        else
+          docker-compose pull
+          docker-compose up -d --build
+          docker-compose ps
+        fi
+
+  - name: deploy_vercel
+    action: shell
+    condition: "method == 'vercel'"
+    description: Deploy to Vercel
+    params:
+      command: |
+        if [ "{{environment}}" = "production" ]; then
+          if [ "{{dry_run}}" = "true" ]; then
+            echo "DRY RUN: Would execute vercel --prod"
+          else
+            vercel --prod
+          fi
+        else
+          if [ "{{dry_run}}" = "true" ]; then
+            echo "DRY RUN: Would execute vercel"
+          else
+            vercel
+          fi
+        fi
+
+  - name: deploy_netlify
+    action: shell
+    condition: "method == 'netlify'"
+    description: Deploy to Netlify
+    params:
+      command: |
+        if [ "{{environment}}" = "production" ]; then
+          if [ "{{dry_run}}" = "true" ]; then
+            echo "DRY RUN: Would execute netlify deploy --prod"
+          else
+            netlify deploy --prod
+          fi
+        else
+          if [ "{{dry_run}}" = "true" ]; then
+            echo "DRY RUN: Would execute netlify deploy"
+          else
+            netlify deploy
+          fi
+        fi
+
+  - name: deploy_custom
+    action: shell
+    condition: "method == 'custom-script'"
+    description: Deploy using custom script
+    params:
+      command: |
+        if [ "{{dry_run}}" = "true" ]; then
+          echo "DRY RUN: Would execute ./deploy.sh {{environment}}"
+          cat deploy.sh
+        else
+          chmod +x deploy.sh
+          ./deploy.sh {{environment}}
+        fi
+
+  - name: deploy_makefile
+    action: shell
+    condition: "method == 'makefile'"
+    description: Deploy using Makefile
+    params:
+      command: |
+        if [ "{{dry_run}}" = "true" ]; then
+          echo "DRY RUN: Would execute make deploy ENV={{environment}}"
+          grep -A 10 "^deploy:" Makefile
+        else
+          make deploy ENV={{environment}}
+        fi
+
+  - name: summarize_deployment
+    action: kiro_prompt
+    description: Summarize deployment results
+    params:
+      task: |
+        Summarize the deployment:
+
+        ## Deployment Summary
+        - **Method:** <detected method>
+        - **Environment:** {{environment}}
+        - **Status:** SUCCESS or FAILED
+        - **URL:** <if available>
+
+        ### What was deployed
+        <Brief description of changes deployed>
+
+        ### Next steps
+        <Any post-deployment tasks or verification steps>
+
+retry_policy:
+  max_attempts: 2
+  backoff_seconds: 10.0
