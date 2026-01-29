@@ -115,33 +115,56 @@ def get_project_context_for_session(
 ) -> tuple[str | None, str | None, bool]:
     """Determine which project context to use for a session.
 
+    Uses hybrid RAG: always includes core docs + retrieves relevant docs based on query.
+
     Priority:
     1. Explicit project from /project command
     2. Session's active project
-    3. Auto-detected mention in message
 
     Args:
         session_active_project: The session's currently set active project
-        message: The user's message
+        message: The user's message (used for semantic doc retrieval)
         explicit_project: Project set explicitly via /project command
 
     Returns:
         Tuple of (project_name, project_context, is_auto_detected)
     """
     from app.projects import project_registry, load_context_pack
+    from app.projects.docs_store import get_docs_for_context, docs_exist
+
+    def _build_context_with_rag(project_name: str, project) -> str:
+        """Build project context with RAG-based doc retrieval."""
+        # Get base context (from context pack or basic info)
+        base_context = project.get_context()
+
+        # If project has docs, do RAG retrieval based on user's message
+        if docs_exist(project_name):
+            # Get docs using hybrid approach: core + semantically relevant
+            docs_context = get_docs_for_context(
+                project_name,
+                query=message,  # Use user's message for semantic search
+                max_relevant_docs=5,
+            )
+            if docs_context:
+                # Append docs to base context
+                base_context = f"{base_context}\n\n{docs_context}"
+
+        return base_context
 
     # Priority 1: Explicit /project command
     if explicit_project:
         project = project_registry.get(explicit_project)
         if project:
-            return explicit_project, project.get_context(), False
+            context = _build_context_with_rag(explicit_project, project)
+            return explicit_project, context, False
         return None, None, False
 
     # Priority 2: Session's active project
     if session_active_project:
         project = project_registry.get(session_active_project)
         if project:
-            return session_active_project, project.get_context(), False
+            context = _build_context_with_rag(session_active_project, project)
+            return session_active_project, context, False
         # Project no longer exists, clear it
         logger.warning(f"Session's active project '{session_active_project}' no longer exists")
 

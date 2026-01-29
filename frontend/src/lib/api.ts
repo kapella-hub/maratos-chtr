@@ -624,17 +624,21 @@ export interface ProjectDoc {
   title: string
   content: string
   tags: string[]
+  is_core: boolean  // Core docs are always included in context
   created_at: string
   updated_at: string
+  has_embedding: boolean  // Whether semantic search is available for this doc
 }
 
 export interface ProjectDocListItem {
   id: string
   title: string
   tags: string[]
+  is_core: boolean
   created_at: string
   updated_at: string
   content_length: number
+  has_embedding: boolean
 }
 
 export async function fetchProjectDocs(projectName: string): Promise<ProjectDocListItem[]> {
@@ -651,7 +655,7 @@ export async function fetchProjectDoc(projectName: string, docId: string): Promi
 
 export async function createProjectDoc(
   projectName: string,
-  data: { title: string; content: string; tags?: string[] }
+  data: { title: string; content: string; tags?: string[]; is_core?: boolean }
 ): Promise<ProjectDoc> {
   const res = await fetch(`${API_BASE}/projects/${encodeURIComponent(projectName)}/docs`, {
     method: 'POST',
@@ -668,7 +672,7 @@ export async function createProjectDoc(
 export async function updateProjectDoc(
   projectName: string,
   docId: string,
-  data: { title?: string; content?: string; tags?: string[] }
+  data: { title?: string; content?: string; tags?: string[]; is_core?: boolean }
 ): Promise<ProjectDoc> {
   const res = await fetch(`${API_BASE}/projects/${encodeURIComponent(projectName)}/docs/${docId}`, {
     method: 'PUT',

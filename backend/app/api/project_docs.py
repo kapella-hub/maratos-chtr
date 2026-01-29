@@ -25,6 +25,7 @@ class DocCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     content: str = Field(..., min_length=1)
     tags: list[str] = Field(default_factory=list)
+    is_core: bool = Field(default=False, description="Core docs are always included in context")
 
 
 class DocUpdate(BaseModel):
@@ -32,6 +33,7 @@ class DocUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     content: str | None = None
     tags: list[str] | None = None
+    is_core: bool | None = Field(default=None, description="Core docs are always included in context")
 
 
 class DocResponse(BaseModel):
@@ -40,8 +42,10 @@ class DocResponse(BaseModel):
     title: str
     content: str
     tags: list[str]
+    is_core: bool = False
     created_at: str
     updated_at: str
+    has_embedding: bool = False
 
 
 class DocListItem(BaseModel):
@@ -49,9 +53,11 @@ class DocListItem(BaseModel):
     id: str
     title: str
     tags: list[str]
+    is_core: bool = False
     created_at: str
     updated_at: str
     content_length: int
+    has_embedding: bool = False
 
 
 def _regenerate_context_pack(project_name: str) -> None:
@@ -93,12 +99,29 @@ async def get_project_doc(name: str, doc_id: str) -> DocResponse:
     if not doc:
         raise HTTPException(status_code=404, detail=f"Doc not found: {doc_id}")
 
-    return DocResponse(**doc.to_dict())
+    return _doc_to_response(doc)
+
+
+def _doc_to_response(doc) -> DocResponse:
+    """Convert a ProjectDoc to a DocResponse."""
+    return DocResponse(
+        id=doc.id,
+        title=doc.title,
+        content=doc.content,
+        tags=doc.tags,
+        is_core=doc.is_core,
+        created_at=doc.created_at,
+        updated_at=doc.updated_at,
+        has_embedding=doc.embedding is not None,
+    )
 
 
 @router.post("/{name}/docs", response_model=DocResponse)
 async def create_project_doc(name: str, data: DocCreate) -> DocResponse:
     """Create a new doc for a project.
+
+    Core docs (is_core=True) are always included in context.
+    Non-core docs are retrieved via semantic search based on the user's message.
 
     Automatically regenerates the context pack after creation.
     """
@@ -111,12 +134,13 @@ async def create_project_doc(name: str, data: DocCreate) -> DocResponse:
         title=data.title,
         content=data.content,
         tags=data.tags,
+        is_core=data.is_core,
     )
 
     # Regenerate context pack
     _regenerate_context_pack(name)
 
-    return DocResponse(**doc.to_dict())
+    return _doc_to_response(doc)
 
 
 @router.put("/{name}/docs/{doc_id}", response_model=DocResponse)
@@ -135,6 +159,7 @@ async def update_project_doc(name: str, doc_id: str, data: DocUpdate) -> DocResp
         title=data.title,
         content=data.content,
         tags=data.tags,
+        is_core=data.is_core,
     )
 
     if not doc:
@@ -143,7 +168,7 @@ async def update_project_doc(name: str, doc_id: str, data: DocUpdate) -> DocResp
     # Regenerate context pack
     _regenerate_context_pack(name)
 
-    return DocResponse(**doc.to_dict())
+    return _doc_to_response(doc)
 
 
 @router.delete("/{name}/docs/{doc_id}")

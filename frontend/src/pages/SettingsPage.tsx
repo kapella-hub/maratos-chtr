@@ -42,7 +42,7 @@ export default function SettingsPage() {
   const [removingDir, setRemovingDir] = useState<string | null>(null)
   // Documentation state
   const [showDocsPanel, setShowDocsPanel] = useState(false)
-  const [editingDoc, setEditingDoc] = useState<{ title: string; content: string; tags: string; id?: string } | null>(null)
+  const [editingDoc, setEditingDoc] = useState<{ title: string; content: string; tags: string; is_core: boolean; id?: string } | null>(null)
   const [docError, setDocError] = useState<string | null>(null)
 
   const { data: config, isLoading } = useQuery({
@@ -94,7 +94,7 @@ export default function SettingsPage() {
   })
 
   const createDocMutation = useMutation({
-    mutationFn: ({ projectName, data }: { projectName: string; data: { title: string; content: string; tags?: string[] } }) =>
+    mutationFn: ({ projectName, data }: { projectName: string; data: { title: string; content: string; tags?: string[]; is_core?: boolean } }) =>
       createProjectDoc(projectName, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['project-docs', editingProject?.name] })
@@ -105,7 +105,7 @@ export default function SettingsPage() {
   })
 
   const updateDocMutation = useMutation({
-    mutationFn: ({ projectName, docId, data }: { projectName: string; docId: string; data: { title?: string; content?: string; tags?: string[] } }) =>
+    mutationFn: ({ projectName, docId, data }: { projectName: string; docId: string; data: { title?: string; content?: string; tags?: string[]; is_core?: boolean } }) =>
       updateProjectDoc(projectName, docId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['project-docs', editingProject?.name] })
@@ -390,39 +390,51 @@ export default function SettingsPage() {
                                   onChange={(e) => setEditingDoc({ ...editingDoc, tags: e.target.value })}
                                   className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-input focus:outline-none focus:ring-2 focus:ring-ring"
                                 />
-                                <div className="flex justify-end gap-2">
-                                  <button
-                                    onClick={() => { setEditingDoc(null); setDocError(null) }}
-                                    className="px-3 py-1.5 rounded text-xs hover:bg-muted"
-                                  >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      if (!editingDoc.title.trim() || !editingDoc.content.trim()) {
-                                        setDocError('Title and content are required')
-                                        return
-                                      }
-                                      const tags = editingDoc.tags.split(',').map(t => t.trim()).filter(Boolean)
-                                      if (editingDoc.id) {
-                                        updateDocMutation.mutate({
-                                          projectName: editingProject.name,
-                                          docId: editingDoc.id,
-                                          data: { title: editingDoc.title, content: editingDoc.content, tags }
-                                        })
-                                      } else {
-                                        createDocMutation.mutate({
-                                          projectName: editingProject.name,
-                                          data: { title: editingDoc.title, content: editingDoc.content, tags }
-                                        })
-                                      }
-                                    }}
-                                    disabled={createDocMutation.isPending || updateDocMutation.isPending}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
-                                  >
-                                    {(createDocMutation.isPending || updateDocMutation.isPending) && <Loader2 className="w-3 h-3 animate-spin" />}
-                                    {editingDoc.id ? 'Update' : 'Add'}
-                                  </button>
+                                <div className="flex items-center justify-between">
+                                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={editingDoc.is_core}
+                                      onChange={(e) => setEditingDoc({ ...editingDoc, is_core: e.target.checked })}
+                                      className="rounded border-input"
+                                    />
+                                    <span className="text-muted-foreground">Core doc</span>
+                                    <span className="text-[10px] text-muted-foreground/70">(always included in context)</span>
+                                  </label>
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => { setEditingDoc(null); setDocError(null) }}
+                                      className="px-3 py-1.5 rounded text-xs hover:bg-muted"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        if (!editingDoc.title.trim() || !editingDoc.content.trim()) {
+                                          setDocError('Title and content are required')
+                                          return
+                                        }
+                                        const tags = editingDoc.tags.split(',').map(t => t.trim()).filter(Boolean)
+                                        if (editingDoc.id) {
+                                          updateDocMutation.mutate({
+                                            projectName: editingProject.name,
+                                            docId: editingDoc.id,
+                                            data: { title: editingDoc.title, content: editingDoc.content, tags, is_core: editingDoc.is_core }
+                                          })
+                                        } else {
+                                          createDocMutation.mutate({
+                                            projectName: editingProject.name,
+                                            data: { title: editingDoc.title, content: editingDoc.content, tags, is_core: editingDoc.is_core }
+                                          })
+                                        }
+                                      }}
+                                      disabled={createDocMutation.isPending || updateDocMutation.isPending}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+                                    >
+                                      {(createDocMutation.isPending || updateDocMutation.isPending) && <Loader2 className="w-3 h-3 animate-spin" />}
+                                      {editingDoc.id ? 'Update' : 'Add'}
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             )}
@@ -430,7 +442,7 @@ export default function SettingsPage() {
                             {/* Add Doc Button */}
                             {!editingDoc && (
                               <button
-                                onClick={() => setEditingDoc({ title: '', content: '', tags: '' })}
+                                onClick={() => setEditingDoc({ title: '', content: '', tags: '', is_core: false })}
                                 className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
                               >
                                 <Plus className="w-3.5 h-3.5" />
@@ -452,11 +464,22 @@ export default function SettingsPage() {
                                 {projectDocs.map((doc) => (
                                   <div
                                     key={doc.id}
-                                    className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 group"
+                                    className={cn(
+                                      "flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 group",
+                                      doc.is_core && "border-l-2 border-violet-500 pl-3"
+                                    )}
                                   >
-                                    <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                                    <FileText className={cn("w-3.5 h-3.5", doc.is_core ? "text-violet-500" : "text-muted-foreground")} />
                                     <div className="flex-1 min-w-0">
-                                      <div className="text-sm font-medium truncate">{doc.title}</div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-medium truncate">{doc.title}</span>
+                                        {doc.is_core && (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-400">core</span>
+                                        )}
+                                        {doc.has_embedding && (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400" title="Semantic search enabled">RAG</span>
+                                        )}
+                                      </div>
                                       {doc.tags.length > 0 && (
                                         <div className="flex gap-1 mt-0.5">
                                           {doc.tags.slice(0, 3).map(tag => (
@@ -470,7 +493,7 @@ export default function SettingsPage() {
                                         onClick={async () => {
                                           try {
                                             const fullDoc = await fetchProjectDoc(editingProject.name, doc.id)
-                                            setEditingDoc({ id: doc.id, title: fullDoc.title, content: fullDoc.content, tags: fullDoc.tags.join(', ') })
+                                            setEditingDoc({ id: doc.id, title: fullDoc.title, content: fullDoc.content, tags: fullDoc.tags.join(', '), is_core: fullDoc.is_core })
                                           } catch (e) {
                                             setDocError('Failed to load doc')
                                           }
