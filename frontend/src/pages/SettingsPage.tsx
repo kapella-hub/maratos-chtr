@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings, Save, Loader2, FolderOpen, Plus, Trash2, Edit3, X, Check, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch, FileText, ChevronDown, ChevronRight } from 'lucide-react'
+import { Settings, Save, Loader2, FolderOpen, Plus, Trash2, Edit3, X, Check, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch, FileText, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
 import { fetchConfig, updateConfig, type Config, fetchProjects, createProject, updateProject, deleteProject, analyzeProject, removeAllowedDirectory, addAllowedDirectory, type Project, fetchProjectDocs, createProjectDoc, updateProjectDoc, deleteProjectDoc, fetchProjectDoc } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useState, useEffect } from 'react'
@@ -35,6 +35,7 @@ export default function SettingsPage() {
   const [isAddingProject, setIsAddingProject] = useState(false)
   const [projectError, setProjectError] = useState<string | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [reanalyzingProject, setReanalyzingProject] = useState<string | null>(null)
   const [newAllowedDir, setNewAllowedDir] = useState('')
   const [showFolderBrowser, setShowFolderBrowser] = useState(false)
   const [folderBrowserTarget, setFolderBrowserTarget] = useState<'project' | 'allowedDir'>('project')
@@ -150,6 +151,30 @@ export default function SettingsPage() {
       setProjectError(e instanceof Error ? e.message : 'Failed to analyze project')
     } finally {
       setIsAnalyzing(false)
+    }
+  }
+
+  const handleReanalyzeProject = async (project: Project) => {
+    setReanalyzingProject(project.name)
+    try {
+      const analysis = await analyzeProject(project.path)
+      // Update the project with new analysis
+      await updateProjectMutation.mutateAsync({
+        name: project.name,
+        project: {
+          ...project,
+          description: analysis.description || project.description,
+          tech_stack: analysis.tech_stack.length > 0 ? analysis.tech_stack : project.tech_stack,
+          conventions: analysis.conventions.length > 0 ? analysis.conventions : project.conventions,
+          patterns: analysis.patterns.length > 0 ? analysis.patterns : project.patterns,
+          dependencies: analysis.dependencies.length > 0 ? analysis.dependencies : project.dependencies,
+          notes: analysis.notes || project.notes,
+        },
+      })
+    } catch (e) {
+      console.error('Failed to re-analyze project:', e)
+    } finally {
+      setReanalyzingProject(null)
     }
   }
 
@@ -534,14 +559,28 @@ export default function SettingsPage() {
                       )}
                       <div className="flex gap-1">
                         <button
+                          onClick={() => handleReanalyzeProject(project)}
+                          disabled={reanalyzingProject === project.name}
+                          className="p-1.5 rounded hover:bg-violet-500/10 disabled:opacity-50"
+                          title="Re-analyze project"
+                        >
+                          {reanalyzingProject === project.name ? (
+                            <Loader2 className="w-3.5 h-3.5 text-violet-400 animate-spin" />
+                          ) : (
+                            <RefreshCw className="w-3.5 h-3.5 text-violet-400" />
+                          )}
+                        </button>
+                        <button
                           onClick={() => { setEditingProject({ ...project, auto_add_filesystem: true }); setIsAddingProject(false); setProjectError(null) }}
                           className="p-1.5 rounded hover:bg-muted"
+                          title="Edit project"
                         >
                           <Edit3 className="w-3.5 h-3.5 text-muted-foreground" />
                         </button>
                         <button
                           onClick={() => { if (confirm(`Delete "${project.name}"?`)) deleteProjectMutation.mutate(project.name) }}
                           className="p-1.5 rounded hover:bg-red-500/10"
+                          title="Delete project"
                         >
                           <Trash2 className="w-3.5 h-3.5 text-red-400" />
                         </button>

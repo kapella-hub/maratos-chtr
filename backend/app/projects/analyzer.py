@@ -413,58 +413,269 @@ def _extract_dependencies(path: Path, analysis: ProjectAnalysis) -> None:
             pass
 
 
+def _extract_readme_summary(path: Path) -> str | None:
+    """Extract a summary from README file."""
+    readme_files = ["README.md", "README.rst", "README.txt", "README"]
+
+    for readme in readme_files:
+        readme_path = path / readme
+        if readme_path.exists():
+            try:
+                content = readme_path.read_text(errors="ignore")[:5000]  # First 5KB
+                lines = content.split("\n")
+
+                # Skip badges, empty lines, and find first substantial content
+                summary_lines = []
+                in_content = False
+
+                for line in lines:
+                    stripped = line.strip()
+
+                    # Skip badges and images
+                    if stripped.startswith("![") or stripped.startswith("[!["):
+                        continue
+                    # Skip HTML comments
+                    if stripped.startswith("<!--"):
+                        continue
+                    # Skip empty lines at start
+                    if not in_content and not stripped:
+                        continue
+                    # Skip main title (usually first # heading)
+                    if not in_content and stripped.startswith("# "):
+                        in_content = True
+                        continue
+
+                    in_content = True
+
+                    # Stop at sections like Installation, Usage, etc.
+                    if stripped.startswith("## ") and any(
+                        kw in stripped.lower() for kw in
+                        ["install", "usage", "getting started", "quick start",
+                         "requirements", "setup", "development", "contributing",
+                         "license", "api", "documentation"]
+                    ):
+                        break
+
+                    summary_lines.append(line)
+
+                    # Limit to ~10 lines of content
+                    if len(summary_lines) >= 10:
+                        break
+
+                if summary_lines:
+                    return "\n".join(summary_lines).strip()
+
+            except IOError:
+                pass
+
+    return None
+
+
+def _extract_api_endpoints(path: Path) -> list[str]:
+    """Extract API endpoints from route files."""
+    endpoints = []
+
+    # FastAPI/Flask patterns
+    route_patterns = [
+        (r'@(?:app|router|api)\.(?:get|post|put|delete|patch)\s*\(\s*["\']([^"\']+)["\']', "Python"),
+        (r'@(?:Get|Post|Put|Delete|Patch)\s*\(\s*["\']([^"\']+)["\']', "NestJS"),
+        (r'(?:router|app)\.(?:get|post|put|delete|patch)\s*\(\s*["\']([^"\']+)["\']', "Express"),
+    ]
+
+    # Look in common locations
+    search_dirs = [
+        path / "app" / "api",
+        path / "app" / "routers",
+        path / "app" / "routes",
+        path / "src" / "api",
+        path / "src" / "routes",
+        path / "src" / "controllers",
+        path / "routes",
+        path / "api",
+    ]
+
+    import re
+
+    for search_dir in search_dirs:
+        if not search_dir.is_dir():
+            continue
+
+        for file in search_dir.rglob("*.py"):
+            try:
+                content = file.read_text(errors="ignore")
+                for pattern, _ in route_patterns[:1]:  # Python patterns
+                    matches = re.findall(pattern, content)
+                    endpoints.extend(matches)
+            except IOError:
+                pass
+
+        for file in search_dir.rglob("*.ts"):
+            try:
+                content = file.read_text(errors="ignore")
+                for pattern, _ in route_patterns[1:]:  # JS/TS patterns
+                    matches = re.findall(pattern, content)
+                    endpoints.extend(matches)
+            except IOError:
+                pass
+
+    # Dedupe and limit
+    seen = set()
+    unique = []
+    for ep in endpoints:
+        if ep not in seen:
+            seen.add(ep)
+            unique.append(ep)
+
+    return unique[:20]  # Top 20 endpoints
+
+
+def _extract_main_features(path: Path, analysis: ProjectAnalysis) -> list[str]:
+    """Extract main features/functionality from codebase."""
+    features = []
+
+    # Check for common feature directories
+    feature_dirs = {
+        "auth": "User authentication",
+        "authentication": "User authentication",
+        "users": "User management",
+        "payments": "Payment processing",
+        "billing": "Billing system",
+        "notifications": "Notifications",
+        "messaging": "Messaging system",
+        "chat": "Chat functionality",
+        "search": "Search functionality",
+        "analytics": "Analytics/reporting",
+        "reports": "Report generation",
+        "admin": "Admin panel",
+        "dashboard": "Dashboard",
+        "api": "REST API",
+        "graphql": "GraphQL API",
+        "websocket": "WebSocket support",
+        "ws": "WebSocket support",
+        "uploads": "File uploads",
+        "media": "Media handling",
+        "email": "Email system",
+        "tasks": "Background tasks",
+        "jobs": "Job processing",
+        "queue": "Queue processing",
+        "cache": "Caching layer",
+        "i18n": "Internationalization",
+        "locales": "Multi-language support",
+    }
+
+    # Check src/, app/, and root level
+    for base in [path / "src", path / "app", path]:
+        if not base.is_dir():
+            continue
+        for dir_name, feature in feature_dirs.items():
+            if (base / dir_name).is_dir():
+                if feature not in features:
+                    features.append(feature)
+
+    # Check for specific files that indicate features
+    feature_files = {
+        "auth.py": "User authentication",
+        "auth.ts": "User authentication",
+        "stripe.py": "Stripe payments",
+        "stripe.ts": "Stripe payments",
+        "oauth.py": "OAuth integration",
+        "oauth.ts": "OAuth integration",
+        "websocket.py": "WebSocket support",
+        "socket.ts": "WebSocket support",
+        "celery.py": "Celery task queue",
+        "redis.py": "Redis integration",
+        "elasticsearch.py": "Elasticsearch search",
+        "s3.py": "AWS S3 storage",
+        "upload.py": "File uploads",
+    }
+
+    for file_name, feature in feature_files.items():
+        if list(path.rglob(file_name)):
+            if feature not in features:
+                features.append(feature)
+
+    return features[:15]  # Limit to 15 features
+
+
 def _generate_description(path: Path, analysis: ProjectAnalysis) -> None:
-    """Generate a description based on detected tech stack."""
+    """Generate a description based on detected tech stack and codebase analysis."""
+
+    # Try to get description from README first
+    readme_summary = _extract_readme_summary(path)
 
     # Try to read from package.json description
+    pkg_description = None
     package_json = path / "package.json"
     if package_json.exists():
         try:
             with open(package_json) as f:
                 pkg = json.load(f)
-            if pkg.get("description"):
-                analysis.description = pkg["description"]
-                return
+            pkg_description = pkg.get("description")
         except (json.JSONDecodeError, IOError):
             pass
 
     # Try to read from pyproject.toml
+    pyproject_description = None
     pyproject = path / "pyproject.toml"
     if pyproject.exists():
         try:
             content = pyproject.read_text()
             for line in content.split("\n"):
                 if line.strip().startswith("description"):
-                    desc = line.split("=", 1)[1].strip().strip('"\'')
-                    if desc:
-                        analysis.description = desc
-                        return
+                    pyproject_description = line.split("=", 1)[1].strip().strip('"\'')
+                    break
         except IOError:
             pass
 
-    # Generate from tech stack
-    if analysis.tech_stack:
+    # Use the best available description
+    if readme_summary and len(readme_summary) > 50:
+        analysis.description = readme_summary
+    elif pkg_description:
+        analysis.description = pkg_description
+    elif pyproject_description:
+        analysis.description = pyproject_description
+    elif analysis.tech_stack:
         primary_tech = analysis.tech_stack[:3]
         analysis.description = f"Project using {', '.join(primary_tech)}"
     else:
         analysis.description = f"Project at {path.name}"
 
-    # Add notes about structure
+    # Extract features and endpoints
+    features = _extract_main_features(path, analysis)
+    endpoints = _extract_api_endpoints(path)
+
+    # Build notes
     notes = []
+
+    # Add features section
+    if features:
+        notes.append("**Main Features:**")
+        for feature in features:
+            notes.append(f"- {feature}")
+        notes.append("")
+
+    # Add API endpoints section
+    if endpoints:
+        notes.append("**API Endpoints:**")
+        for endpoint in endpoints[:10]:  # Show top 10
+            notes.append(f"- {endpoint}")
+        if len(endpoints) > 10:
+            notes.append(f"- ... and {len(endpoints) - 10} more")
+        notes.append("")
 
     # Check for README
     readme_files = ["README.md", "README.rst", "README.txt", "README"]
     for readme in readme_files:
         if (path / readme).exists():
-            notes.append(f"Has {readme} - read for detailed documentation")
+            notes.append(f"📄 Has {readme} - read for detailed documentation")
             break
 
     # Check for docs
     if (path / "docs").is_dir():
-        notes.append("Has /docs directory with documentation")
+        notes.append("📁 Has /docs directory with documentation")
 
     # Check for examples
     if (path / "examples").is_dir():
-        notes.append("Has /examples directory with usage examples")
+        notes.append("📁 Has /examples directory with usage examples")
 
     analysis.notes = "\n".join(notes)
