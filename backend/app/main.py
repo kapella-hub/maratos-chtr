@@ -226,13 +226,8 @@ app.include_router(api_router)
 app.include_router(channels_router, prefix="/api", tags=["channels"])
 
 
-@app.get("/health", response_model=HealthResponse, tags=["health"])
-async def health() -> HealthResponse:
-    """Health check endpoint.
-
-    Returns the current status of the MaratOS system including
-    active channels, loaded skills, stored memories, and running tasks.
-    """
+async def _get_health_response() -> HealthResponse:
+    """Get health check data."""
     from app.skills.base import skill_registry
     from app.memory.manager import memory_manager
     from app.subagents.manager import subagent_manager
@@ -248,20 +243,41 @@ async def health() -> HealthResponse:
     )
 
 
-# Serve frontend static files if they exist
+@app.get("/health", response_model=HealthResponse, tags=["health"])
+async def health() -> HealthResponse:
+    """Health check endpoint.
+
+    Returns the current status of the MaratOS system including
+    active channels, loaded skills, stored memories, and running tasks.
+    """
+    return await _get_health_response()
+
+
+@app.get("/api/health", response_model=HealthResponse, tags=["health"])
+async def api_health() -> HealthResponse:
+    """Health check endpoint (API prefix alias).
+
+    Same as /health but accessible at /api/health for frontend convenience.
+    """
+    return await _get_health_response()
+
+
+# Serve frontend static files in production (not debug mode)
+# In debug mode, the Vite dev server serves the frontend and handles HMR WebSockets
 frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
-if frontend_dist.exists():
+if frontend_dist.exists() and not settings.debug:
     app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
 else:
     @app.get("/")
     async def root():
-        """Root endpoint when frontend not built."""
+        """Root endpoint when frontend not built or in debug mode."""
         return {
             "name": "MaratOS",
             "agent": "MO",
             "docs": "/docs",
             "api": "/api",
             "features": ["skills", "memory", "subagents", "channels"],
+            "note": "Use frontend dev server at http://localhost:5173 during development",
         }
 
 
