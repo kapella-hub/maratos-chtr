@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings, Save, Loader2, FolderOpen, Plus, Trash2, Edit3, X, Check, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch, FileText, ChevronDown, ChevronRight, RefreshCw, Scale } from 'lucide-react'
+import { Settings, Save, Loader2, FolderOpen, Plus, Trash2, Edit3, X, Check, Sparkles, Shield, ShieldCheck, FolderSearch, GitBranch, FileText, ChevronDown, ChevronRight, RefreshCw, Scale, ArrowLeft } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { fetchConfig, updateConfig, type Config, fetchProjects, createProject, updateProject, deleteProject, analyzeProject, removeAllowedDirectory, addAllowedDirectory, type Project, fetchProjectDocs, createProjectDoc, updateProjectDoc, deleteProjectDoc, fetchProjectDoc, fetchRules, fetchRule, createRule, updateRule, deleteRule, createExampleRules } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useState, useEffect } from 'react'
@@ -29,6 +30,7 @@ const emptyProject: Project = {
 }
 
 export default function SettingsPage() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [localConfig, setLocalConfig] = useState<Partial<Config & ChannelConfig>>({})
   const [editingProject, setEditingProject] = useState<Project | null>(null)
@@ -232,6 +234,13 @@ export default function SettingsPage() {
       {/* Header */}
       <header className="px-6 py-4 border-b border-border flex items-center justify-between bg-background/95 backdrop-blur sticky top-0 z-10">
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/')}
+            className="p-1.5 rounded-lg hover:bg-muted transition-colors"
+            title="Back to chat"
+          >
+            <ArrowLeft className="w-5 h-5 text-muted-foreground" />
+          </button>
           <Settings className="w-5 h-5 text-muted-foreground" />
           <h1 className="text-lg font-semibold">Settings</h1>
         </div>

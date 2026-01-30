@@ -31,6 +31,7 @@ from app.subagents.runner import subagent_runner
 from app.subagents.manager import subagent_manager, TaskStatus
 from app.audit import audit_logger
 from app.projects.mention_detector import get_project_context_for_session
+from app.projects.registry import project_registry
 from app.workflows.handler import (
     run_delivery_workflow,
     get_active_workflow_for_session,
@@ -425,6 +426,34 @@ def _extract_title_heuristic(user_message: str) -> str:
     return first_line or "New Chat"
 
 
+def _get_workspace_for_project(
+    project_name: str | None,
+    session_active_project: str | None,
+    context: dict[str, Any] | None,
+) -> str:
+    """Get the workspace path for a project.
+
+    Priority:
+    1. Explicitly selected project from UI (project_name)
+    2. Session's active project (session_active_project)
+    3. Workspace from context dict
+    4. Empty string (no workspace)
+    """
+    # Try explicitly selected project first
+    name_to_use = project_name or session_active_project
+    if name_to_use:
+        project = project_registry.get(name_to_use)
+        if project and project.path:
+            logger.debug(f"Using project path as workspace: {project.path}")
+            return project.path
+
+    # Fall back to context workspace
+    if context and context.get("workspace"):
+        return context["workspace"]
+
+    return ""
+
+
 async def generate_title(user_message: str, assistant_response: str) -> str:
     """Generate a concise title for the chat session using kiro-cli."""
     try:
@@ -785,8 +814,12 @@ async def chat(
             from app.autonomous.inline_orchestrator import InlineOrchestrator
             from app.autonomous.models import ProjectConfig
 
-            # Get workspace from context or use default
-            workspace = chat_request.context.get("workspace", "") if chat_request.context else ""
+            # Get workspace from selected project or context
+            workspace = _get_workspace_for_project(
+                chat_request.project_name,
+                session.active_project_name,
+                chat_request.context,
+            )
 
             orchestrator = InlineOrchestrator(session.id, workspace)
 
@@ -898,7 +931,12 @@ async def chat(
                 yield 'data: {"thinking": false}\n\n'
                 yield 'data: {"orchestrating": true}\n\n'
 
-                workspace = chat_request.context.get("workspace", "") if chat_request.context else ""
+                # Get workspace from selected project or context
+                workspace = _get_workspace_for_project(
+                    chat_request.project_name,
+                    session.active_project_name,
+                    chat_request.context,
+                )
 
                 async def save_followup_workflow_message(content: str) -> None:
                     try:
@@ -1391,7 +1429,12 @@ async def chat(
             logger.info(f"Workflow triggers found: {len(workflow_matches)}")
             yield 'data: {"orchestrating": true}\n\n'
 
-            workspace = chat_request.context.get("workspace", "") if chat_request.context else ""
+            # Get workspace from selected project or context
+            workspace = _get_workspace_for_project(
+                chat_request.project_name,
+                session.active_project_name,
+                chat_request.context,
+            )
 
             async def save_workflow_message(content: str) -> None:
                 try:
