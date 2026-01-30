@@ -5,7 +5,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -260,6 +260,14 @@ async def api_health() -> HealthResponse:
     Same as /health but accessible at /api/health for frontend convenience.
     """
     return await _get_health_response()
+
+
+# Catch-all WebSocket handler to prevent StaticFiles from erroring on WebSocket connections
+# This handles cases where frontend dev server HMR or other WebSocket clients connect
+@app.websocket("/{path:path}")
+async def websocket_catch_all(websocket: WebSocket, path: str):
+    """Reject WebSocket connections that don't match any specific route."""
+    await websocket.close(code=4004, reason="No WebSocket handler at this path")
 
 
 # Serve frontend static files in production (not debug mode)
