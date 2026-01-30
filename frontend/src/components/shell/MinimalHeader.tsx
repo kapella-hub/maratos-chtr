@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Sparkles, ChevronDown, Menu, Settings, History, Command, Plus, Cpu, Brain, Check, ShieldCheck } from 'lucide-react'
+import { Sparkles, ChevronDown, Menu, Settings, History, Command, Plus, Cpu, Brain, Check, ShieldCheck, Sun, Moon, Monitor, Volume2, VolumeX } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { fetchConfig, updateConfig } from '@/lib/api'
 import { useChatStore } from '@/stores/chat'
 import { useApprovalsStore } from '@/stores/approvals'
+import { useTheme } from '@/hooks/useTheme'
+import { getSoundEnabled, setSoundEnabled, playClick } from '@/lib/sounds'
 
 interface MinimalHeaderProps {
   onToggleHistory: () => void
@@ -38,10 +40,26 @@ export default function MinimalHeader({ onToggleHistory, onToggleCommand }: Mini
   const [showMenu, setShowMenu] = useState(false)
   const [showModelDropdown, setShowModelDropdown] = useState(false)
   const [showThinkingDropdown, setShowThinkingDropdown] = useState(false)
+  const [soundEnabled, setSoundEnabledState] = useState(getSoundEnabled)
   const modelRef = useRef<HTMLDivElement>(null)
   const thinkingRef = useRef<HTMLDivElement>(null)
   const { clearMessages, setSessionId, isStreaming } = useChatStore()
   const { pendingCount, togglePanel: toggleApprovalsPanel } = useApprovalsStore()
+  const { theme, setTheme } = useTheme()
+
+  const toggleSound = () => {
+    const newValue = !soundEnabled
+    setSoundEnabledState(newValue)
+    setSoundEnabled(newValue)
+    if (newValue) playClick()
+  }
+
+  const cycleTheme = () => {
+    playClick()
+    const themes: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system']
+    const idx = themes.indexOf(theme)
+    setTheme(themes[(idx + 1) % 3])
+  }
 
   const { data: config } = useQuery({
     queryKey: ['config'],
@@ -229,6 +247,35 @@ export default function MinimalHeader({ onToggleHistory, onToggleCommand }: Mini
 
       {/* Right: Actions */}
       <div className="flex items-center gap-1">
+        {/* Theme toggle */}
+        <button
+          onClick={cycleTheme}
+          className={cn(
+            'p-2 rounded-lg text-muted-foreground',
+            'hover:bg-muted/50 hover:text-foreground',
+            'transition-colors'
+          )}
+          title={`Theme: ${theme}`}
+        >
+          {theme === 'light' ? <Sun className="w-4 h-4" /> : 
+           theme === 'dark' ? <Moon className="w-4 h-4" /> : 
+           <Monitor className="w-4 h-4" />}
+        </button>
+
+        {/* Sound toggle */}
+        <button
+          onClick={toggleSound}
+          className={cn(
+            'p-2 rounded-lg',
+            soundEnabled ? 'text-muted-foreground' : 'text-muted-foreground/50',
+            'hover:bg-muted/50 hover:text-foreground',
+            'transition-colors'
+          )}
+          title={soundEnabled ? 'Sound on' : 'Sound off'}
+        >
+          {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+        </button>
+
         {/* Approvals toggle */}
         <button
           onClick={toggleApprovalsPanel}

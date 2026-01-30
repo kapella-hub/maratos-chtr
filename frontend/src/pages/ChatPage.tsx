@@ -10,6 +10,7 @@ import { useToastStore } from '@/stores/toast'
 import { useCanvasStore } from '@/stores/canvas'
 import { streamChat, streamChatWithProjectAction, fetchConfig, fetchProjects, fetchRules, ThinkingBlock } from '@/lib/api'
 import { saveChatSession, getChatSession } from '@/lib/chatHistory'
+import { playMessageComplete } from '@/lib/sounds'
 
 export default function ChatPage() {
   const processingRef = useRef(false)
@@ -94,6 +95,15 @@ export default function ChatPage() {
       saveChatSession(sessionId, messages)
     }
   }, [sessionId, messages, isStreaming])
+
+  // Play sound when streaming completes
+  const prevStreamingRef = useRef(isStreaming)
+  useEffect(() => {
+    if (prevStreamingRef.current && !isStreaming && messages.length > 0) {
+      playMessageComplete()
+    }
+    prevStreamingRef.current = isStreaming
+  }, [isStreaming, messages.length])
 
   // Keep ref in sync
   useEffect(() => {

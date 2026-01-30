@@ -7,6 +7,7 @@ import { User, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Brain } fro
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import CodeBlock, { InlineCode } from '@/components/CodeBlock'
+import MessageReactions from './MessageReactions'
 import type { ChatMessage } from '@/stores/chat'
 import type { ThinkingBlock, ThinkingStep } from '@/lib/api'
 
@@ -505,6 +506,9 @@ export default function MessageBubble({ message, isThinking, showTimestamp = tru
               text={message.content}
               className={cn('copy-button', !showCopy && 'opacity-0 group-hover:opacity-100')}
             />
+          )}
+          {!isUser && !isThinking && (
+            <MessageReactions messageId={message.id} />
           )}
         </div>
 

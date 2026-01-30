@@ -1,10 +1,11 @@
-import { useRef, useEffect, forwardRef } from 'react'
+import { useRef, useEffect, forwardRef, useState, useCallback } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import MessageBubble from './MessageBubble'
 import AgentCard from './AgentCard'
 import StatusPill from './StatusPill'
+import ScrollToBottom from './ScrollToBottom'
 import type { ChatMessage, SubagentTask } from '@/stores/chat'
 
 interface ChatStreamProps {
@@ -29,11 +30,26 @@ const ChatStream = forwardRef<HTMLDivElement, ChatStreamProps>(({
   className,
 }, ref) => {
   const bottomRef = useRef<HTMLDivElement>(null)
+  const internalRef = useRef<HTMLDivElement>(null)
+  const [showScrollButton, setShowScrollButton] = useState(false)
+
+  // Check scroll position
+  const handleScroll = useCallback(() => {
+    const container = internalRef.current
+    if (!container) return
+    const { scrollTop, scrollHeight, clientHeight } = container
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100
+    setShowScrollButton(!isNearBottom && messages.length > 0)
+  }, [messages.length])
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, activeSubagents])
+
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
 
   const status = isOrchestrating ? 'orchestrating' : isThinking ? 'thinking' : isStreaming ? 'streaming' : 'idle'
 
@@ -101,7 +117,15 @@ const ChatStream = forwardRef<HTMLDivElement, ChatStreamProps>(({
   }
 
   return (
-    <div ref={ref} className={cn('chat-stream overflow-y-auto', className)}>
+    <div 
+      ref={(node) => {
+        (internalRef as React.MutableRefObject<HTMLDivElement | null>).current = node
+        if (typeof ref === 'function') ref(node)
+        else if (ref) (ref as React.MutableRefObject<HTMLDivElement | null>).current = node
+      }}
+      className={cn('chat-stream overflow-y-auto relative', className)}
+      onScroll={handleScroll}
+    >
       <div className="max-w-3xl mx-auto py-4">
         {/* Messages */}
         {messages.map((message, index) => (
@@ -139,6 +163,13 @@ const ChatStream = forwardRef<HTMLDivElement, ChatStreamProps>(({
         {/* Scroll anchor */}
         <div ref={bottomRef} className="h-8" />
       </div>
+
+      {/* Scroll to bottom button */}
+      <ScrollToBottom 
+        visible={showScrollButton} 
+        onClick={scrollToBottom}
+        className="bottom-4 left-1/2 -translate-x-1/2"
+      />
     </div>
   )
 })
