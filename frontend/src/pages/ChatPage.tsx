@@ -397,21 +397,29 @@ export default function ChatPage() {
     <div className="flex flex-col h-full relative">
       {/* Progress bar */}
       {(isThinking || isModelThinking || isStreaming) && (
-        <div className="absolute top-0 left-0 right-0 h-0.5 bg-muted overflow-hidden z-50">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-muted/30 overflow-hidden z-50">
           <div
-            className="h-full bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500"
-            style={{ animation: 'progress 1.5s ease-in-out infinite', width: '100%' }}
+            className="h-full bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 rounded-full"
+            style={{ 
+              animation: 'progress 2s ease-in-out infinite',
+              width: '40%',
+              boxShadow: '0 0 20px rgba(139, 92, 246, 0.5)'
+            }}
           />
         </div>
       )}
 
       {/* Active Project Context Indicator */}
       {(activeProjectContext || selectedProjectName) && (
-        <div className="max-w-3xl mx-auto w-full px-4 pt-2">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-sm">
-            <FolderCode className="w-4 h-4 text-primary" />
-            <span className="text-muted-foreground">Project:</span>
-            <span className="font-medium text-foreground">{activeProjectContext?.name || selectedProjectName}</span>
+        <div className="max-w-3xl mx-auto w-full px-4 pt-3">
+          <div className="flex items-center gap-2.5 px-4 py-2 rounded-xl bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 text-sm shadow-sm">
+            <div className="p-1.5 rounded-lg bg-primary/20">
+              <FolderCode className="w-4 h-4 text-primary" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs text-muted-foreground">Working in</span>
+              <span className="font-medium text-foreground">{activeProjectContext?.name || selectedProjectName}</span>
+            </div>
           </div>
         </div>
       )}
@@ -452,12 +460,24 @@ export default function ChatPage() {
 
       {/* Project status indicator for detecting/planning */}
       {(inlineProject.status === 'detecting' || inlineProject.status === 'planning') && (
-        <div className="max-w-3xl mx-auto w-full px-4 pb-2">
-          <div className="bg-muted/30 border border-border/30 rounded-xl p-4 flex items-center gap-3">
-            <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm text-muted-foreground">
-              {inlineProject.status === 'detecting' ? 'Analyzing request complexity...' : 'Creating project plan...'}
-            </span>
+        <div className="max-w-3xl mx-auto w-full px-4 pb-3">
+          <div className="bg-gradient-to-r from-violet-500/10 to-purple-500/10 border border-violet-500/20 rounded-2xl p-4 flex items-center gap-4 shadow-lg shadow-violet-500/5">
+            <div className="relative">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              </div>
+              <div className="absolute inset-0 rounded-xl bg-violet-500/30 blur-lg animate-pulse" />
+            </div>
+            <div>
+              <span className="text-sm font-medium text-foreground">
+                {inlineProject.status === 'detecting' ? 'Analyzing request...' : 'Creating project plan...'}
+              </span>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {inlineProject.status === 'detecting' 
+                  ? 'Determining the best approach for your request'
+                  : 'Breaking down tasks and estimating effort'}
+              </p>
+            </div>
           </div>
         </div>
       )}
@@ -488,11 +508,11 @@ export default function ChatPage() {
       {canvasArtifacts.length > 0 && !panelVisible && (
         <button
           onClick={togglePanel}
-          className="fixed right-4 bottom-32 z-30 flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground shadow-lg hover:shadow-xl transition-all"
+          className="fixed right-4 bottom-32 z-30 flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-xl shadow-violet-500/30 hover:shadow-2xl hover:shadow-violet-500/40 hover:-translate-y-0.5 transition-all duration-200"
         >
           <Layers className="w-4 h-4" />
           <span className="text-sm font-medium">Canvas</span>
-          <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary-foreground/20">
+          <span className="text-xs px-2 py-0.5 rounded-full bg-white/20 font-semibold">
             {canvasArtifacts.length}
           </span>
         </button>

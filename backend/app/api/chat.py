@@ -809,46 +809,67 @@ async def chat(
             # User is responding to a workflow decision (commit, pr, deploy, docs)
             pending_decision = active_workflow.pending_decision
             if pending_decision:
-                logger.info(f"Workflow awaiting {pending_decision.value} decision, parsing user response")
-
-                # Parse the user's message into a structured decision
-                decision = parse_user_decision_from_message(
-                    message=actual_message,
-                    pending_decision=pending_decision,
-                    context=chat_request.context,
+                # Check if this looks like a NEW task rather than a decision response
+                # Decision responses are typically short (yes/no/skip) or contain decision keywords
+                message_lower = actual_message.lower().strip()
+                decision_keywords = {
+                    "yes", "y", "yeah", "yep", "sure", "ok", "okay", "go", "proceed",
+                    "no", "n", "nope", "nah", "cancel", "stop", "skip", "don't", "dont",
+                    "commit", "deploy", "pr", "doc", "docs", "documentation",
+                }
+                looks_like_decision = (
+                    len(actual_message.split()) <= 5 or  # Short messages are likely decisions
+                    message_lower in decision_keywords or
+                    any(kw in message_lower for kw in decision_keywords)
                 )
 
-                yield 'data: {"workflow_resuming": true}\n\n'
-                yield f'data: {{"pending_decision": "{pending_decision.value}", "user_approved": {str(decision.approved).lower()}}}\n\n'
+                if not looks_like_decision:
+                    # This looks like a new task - clear the workflow and process as normal
+                    logger.info(f"Message looks like new task, clearing pending workflow decision")
+                    from app.workflows.handler import delivery_loop_policy
+                    delivery_loop_policy.cleanup_workflow(active_workflow.workflow_id)
+                    # Fall through to normal message processing
+                else:
+                    logger.info(f"Workflow awaiting {pending_decision.value} decision, parsing user response")
 
-                async def save_workflow_msg(content: str) -> None:
-                    try:
-                        async with db.begin():
-                            wf_msg = DBMessage(
-                                id=str(uuid.uuid4()),
-                                session_id=session.id,
-                                role="assistant",
-                                content=content,
-                            )
-                            db.add(wf_msg)
-                    except Exception as e:
-                        logger.error(f"Failed to save workflow message: {e}")
+                    # Parse the user's message into a structured decision
+                    decision = parse_user_decision_from_message(
+                        message=actual_message,
+                        pending_decision=pending_decision,
+                        context=chat_request.context,
+                    )
 
-                async for workflow_event in resume_workflow_with_decision(
-                    workflow_id=active_workflow.workflow_id,
-                    decision=decision,
-                    context=chat_request.context,
-                    save_message_fn=save_workflow_msg,
-                ):
-                    yield workflow_event
-                    # Also emit progress messages
-                    progress_msg = _workflow_event_to_progress(workflow_event)
-                    if progress_msg:
-                        escaped_msg = progress_msg.replace('"', '\\"').replace('\n', '\\n')
-                        yield f'data: {{"content": "{escaped_msg}"}}\n\n'
+                    yield 'data: {"workflow_resuming": true}\n\n'
+                    yield f'data: {{"pending_decision": "{pending_decision.value}", "user_approved": {str(decision.approved).lower()}}}\n\n'
 
-                yield "data: [DONE]\n\n"
-                return
+                    async def save_workflow_msg(content: str) -> None:
+                        try:
+                            async with db.begin():
+                                wf_msg = DBMessage(
+                                    id=str(uuid.uuid4()),
+                                    session_id=session.id,
+                                    role="assistant",
+                                    content=content,
+                                )
+                                db.add(wf_msg)
+                        except Exception as e:
+                            logger.error(f"Failed to save workflow message: {e}")
+
+                    async for workflow_event in resume_workflow_with_decision(
+                        workflow_id=active_workflow.workflow_id,
+                        decision=decision,
+                        context=chat_request.context,
+                        save_message_fn=save_workflow_msg,
+                    ):
+                        yield workflow_event
+                        # Also emit progress messages
+                        progress_msg = _workflow_event_to_progress(workflow_event)
+                        if progress_msg:
+                            escaped_msg = progress_msg.replace('"', '\\"').replace('\n', '\\n')
+                            yield f'data: {{"content": "{escaped_msg}"}}\n\n'
+
+                    yield "data: [DONE]\n\n"
+                    return
 
         # Check for pending clarification from previous message
         followup_result = analyze_clarification_followup(session.id, actual_message)

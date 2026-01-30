@@ -255,16 +255,23 @@ export default function ChatInput({
                       {selectedProject ? (
                         <>
                           <span className="max-w-[100px] truncate">{selectedProject}</span>
-                          <button
-                            type="button"
+                          <span
+                            role="button"
+                            tabIndex={0}
                             onClick={(e) => {
                               e.stopPropagation()
                               onProjectSelect(null)
                             }}
-                            className="p-0.5 hover:bg-primary/20 rounded"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.stopPropagation()
+                                onProjectSelect(null)
+                              }
+                            }}
+                            className="p-0.5 hover:bg-primary/20 rounded cursor-pointer"
                           >
                             <X className="w-3 h-3" />
-                          </button>
+                          </span>
                         </>
                       ) : (
                         <ChevronDown className="w-3.5 h-3.5" />
@@ -382,16 +389,23 @@ export default function ChatInput({
                       {selectedRules.length > 0 ? (
                         <>
                           <span className="font-medium">{selectedRules.length}</span>
-                          <button
-                            type="button"
+                          <span
+                            role="button"
+                            tabIndex={0}
                             onClick={(e) => {
                               e.stopPropagation()
                               onRulesChange([])
                             }}
-                            className="p-0.5 hover:bg-emerald-500/20 rounded"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.stopPropagation()
+                                onRulesChange([])
+                              }
+                            }}
+                            className="p-0.5 hover:bg-emerald-500/20 rounded cursor-pointer"
                           >
                             <X className="w-3 h-3" />
-                          </button>
+                          </span>
                         </>
                       ) : (
                         <ChevronDown className="w-3.5 h-3.5" />

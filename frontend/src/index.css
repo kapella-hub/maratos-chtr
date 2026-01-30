@@ -929,3 +929,115 @@ button:focus-visible {
   @apply border-indigo-500/20;
   @apply shadow-lg shadow-indigo-500/5;
 }
+
+/* Spin slow animation for icons */
+.animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
+}
+
+/* Enhanced focus states */
+.focus-visible-ring:focus-visible {
+  @apply outline-none ring-2 ring-primary/50 ring-offset-2 ring-offset-background;
+}
+
+/* Smooth hover lift effect */
+.hover-lift {
+  @apply transition-all duration-200;
+}
+.hover-lift:hover {
+  @apply -translate-y-0.5 shadow-lg;
+}
+
+/* Glow effects */
+.glow-primary {
+  box-shadow: 0 0 20px hsl(var(--primary) / 0.3), 0 0 40px hsl(var(--primary) / 0.1);
+}
+
+.glow-success {
+  box-shadow: 0 0 20px hsl(142 76% 36% / 0.3), 0 0 40px hsl(142 76% 36% / 0.1);
+}
+
+/* Better kbd styling */
+kbd, .kbd {
+  @apply inline-flex items-center justify-center;
+  @apply px-1.5 py-0.5 min-w-[1.5rem];
+  @apply bg-muted/80 border border-border/60 rounded;
+  @apply text-[10px] font-mono text-muted-foreground;
+  @apply shadow-sm;
+}
+
+/* Message container improvements */
+.message-container {
+  @apply px-4 py-3;
+}
+
+.message-container:hover {
+  @apply bg-muted/20;
+}
+
+/* Typing indicator */
+.typing-indicator {
+  @apply flex items-center gap-1.5 px-4 py-2;
+}
+
+.typing-indicator span {
+  @apply w-2 h-2 rounded-full bg-primary/60;
+  animation: typing 1.4s infinite ease-in-out;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-indicator span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Better scrollbar for chat */
+.chat-stream::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-stream::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-stream::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.1);
+  border-radius: 4px;
+}
+
+.chat-stream::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.2);
+}
+
+/* Subtle entrance animation for messages */
+@keyframes message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-enter {
+  animation: message-enter 0.3s ease-out;
+}
+
+/* Quick prompt button hover state */
+.quick-prompt-btn {
+  @apply relative overflow-hidden;
+}
+
+.quick-prompt-btn::before {
+  content: '';
+  @apply absolute inset-0 bg-gradient-to-r from-primary/0 via-primary/5 to-primary/0;
+  @apply translate-x-[-100%] transition-transform duration-500;
+}
+
+.quick-prompt-btn:hover::before {
+  @apply translate-x-[100%];
+}

@@ -30,8 +30,8 @@ class RouterConfig:
     enabled: bool = True
 
     # Confidence thresholds (0.0 - 1.0)
-    auto_trigger_threshold: float = 0.8  # Above this: auto-trigger workflow
-    clarify_threshold: float = 0.5       # Between clarify and auto: ask user
+    auto_trigger_threshold: float = 0.65  # Above this: auto-trigger workflow
+    clarify_threshold: float = 0.4        # Between clarify and auto: ask user
     # Below clarify_threshold: don't trigger, handle normally
 
     # LLM classifier settings
@@ -120,6 +120,18 @@ STRONG_CODING_KEYWORDS = {
     "build a component": 0.9,
     "build an endpoint": 0.9,
 
+    # UI/UX improvements
+    "improve the ui": 0.85,
+    "improve the ux": 0.85,
+    "improve ui": 0.85,
+    "improve ux": 0.85,
+    "update the ui": 0.85,
+    "redesign the": 0.85,
+    "modernize the": 0.85,
+    "make it look": 0.8,
+    "style the": 0.8,
+    "add styling": 0.85,
+
     # Bug fixing
     "fix the bug": 0.95,
     "fix this bug": 0.95,
@@ -173,8 +185,8 @@ MEDIUM_CODING_KEYWORDS = {
     "modify": 0.6,
     "update": 0.5,
     "fix": 0.6,
-    "improve": 0.5,
-    "enhance": 0.5,
+    "improve": 0.6,
+    "enhance": 0.6,
     "extend": 0.6,
     "integrate": 0.6,
     "connect": 0.5,
@@ -187,7 +199,7 @@ CODING_CONTEXT_KEYWORDS = {
     "function", "method", "class", "module", "component",
     "api", "endpoint", "route", "handler", "controller",
     "service", "model", "schema", "database", "table",
-    "frontend", "backend", "ui", "interface", "button",
+    "frontend", "backend", "ui", "ux", "interface", "button", "design", "layout", "styling",
     "form", "page", "view", "template", "hook",
     "test", "spec", "unit test", "integration test",
     "file", "code", "script", "logic", "algorithm",

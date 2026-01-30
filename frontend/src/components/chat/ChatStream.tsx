@@ -41,48 +41,60 @@ const ChatStream = forwardRef<HTMLDivElement, ChatStreamProps>(({
   if (messages.length === 0) {
     return (
       <div ref={ref} className={cn('flex items-center justify-center h-full', className)}>
-        <div className="text-center max-w-md px-4 animate-in fade-in-up duration-700">
-          {/* Hero */}
-          <div className="relative mb-8">
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500 via-violet-600 to-purple-600 flex items-center justify-center text-white text-2xl font-bold mx-auto shadow-2xl shadow-indigo-500/40 transition-shadow hover:shadow-indigo-500/60">
+        <div className="text-center max-w-lg px-6">
+          {/* Animated Hero */}
+          <div className="relative mb-10 inline-block">
+            {/* Glow ring */}
+            <div className="absolute inset-0 w-24 h-24 rounded-3xl bg-gradient-to-br from-indigo-500/30 via-violet-500/30 to-purple-500/30 blur-xl animate-pulse" />
+            <div className="relative w-24 h-24 rounded-3xl bg-gradient-to-br from-indigo-500 via-violet-600 to-purple-600 flex items-center justify-center text-white text-3xl font-bold shadow-2xl shadow-violet-500/40 transform hover:scale-105 transition-transform duration-300">
               MO
             </div>
-            <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-500 flex items-center justify-center shadow-lg animate-pulse">
-              <Sparkles className="w-3.5 h-3.5 text-white" />
+            <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-lg ring-4 ring-background">
+              <Sparkles className="w-4 h-4 text-white animate-spin-slow" style={{ animationDuration: '3s' }} />
             </div>
           </div>
 
-          <h2 className="text-2xl font-semibold mb-2 bg-gradient-to-r from-indigo-400 via-violet-400 to-purple-400 bg-clip-text text-transparent">
-            Hey, I'm MO
+          <h2 className="text-3xl font-bold mb-3 bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text text-transparent">
+            What can I help you build?
           </h2>
-          <p className="text-muted-foreground mb-8 leading-relaxed text-sm">
-            Your capable AI partner for coding, analysis, and creative tasks
+          <p className="text-muted-foreground mb-10 leading-relaxed">
+            I'm your AI dev partner — ready to code, debug, review, and ship with you.
           </p>
 
-          {/* Quick prompts */}
+          {/* Quick prompts - 2 column grid */}
           {onSendQuickPrompt && (
-            <div className="grid gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {[
-                'Help me review my code for security issues',
-                'Explain how this codebase is structured',
-                'Help me write tests for my functions',
-              ].map((prompt, index) => (
+                { icon: '🔍', text: 'Review my code for issues' },
+                { icon: '🏗️', text: 'Explain this codebase' },
+                { icon: '🧪', text: 'Write tests for my code' },
+                { icon: '🚀', text: 'Help me deploy this app' },
+              ].map((item, index) => (
                 <button
                   key={index}
-                  onClick={() => onSendQuickPrompt(prompt)}
+                  onClick={() => onSendQuickPrompt(item.text)}
                   className={cn(
-                    'group text-left px-4 py-3 rounded-xl',
-                    'border border-border/50 hover:border-primary/40',
-                    'hover:bg-muted/30 transition-all duration-300',
-                    'text-sm text-muted-foreground hover:text-foreground',
-                    'hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5'
+                    'group flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left',
+                    'bg-muted/30 border border-border/40',
+                    'hover:bg-muted/60 hover:border-primary/30',
+                    'hover:shadow-lg hover:shadow-primary/5',
+                    'transform hover:-translate-y-0.5',
+                    'transition-all duration-200'
                   )}
                 >
-                  <span className="group-hover:text-primary transition-colors">{prompt}</span>
+                  <span className="text-lg">{item.icon}</span>
+                  <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                    {item.text}
+                  </span>
                 </button>
               ))}
             </div>
           )}
+
+          {/* Keyboard hint */}
+          <p className="mt-8 text-xs text-muted-foreground/60">
+            Press <kbd className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono text-[10px]">⌘K</kbd> for commands
+          </p>
         </div>
       </div>
     )
