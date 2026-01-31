@@ -387,6 +387,7 @@ export async function* streamChat(
                 type: 'task_completed',
                 projectId: parsed.project_id,
                 taskId: parsed.task_id,
+                agentId: parsed.agent_id,
                 task: parsed.task,
               }
             } else if (parsed.type === 'task_failed') {
@@ -394,6 +395,7 @@ export async function* streamChat(
                 type: 'task_failed',
                 projectId: parsed.project_id,
                 taskId: parsed.task_id,
+                agentId: parsed.agent_id,
                 error: parsed.error,
               }
             } else if (parsed.type === 'project_paused') {

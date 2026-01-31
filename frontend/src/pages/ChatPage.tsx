@@ -258,6 +258,7 @@ export default function ChatPage() {
 
           updateSubagent({
             id: event.taskId,
+            ...((event as any).agentId ? { agent: (event as any).agentId } : {}),
             status: 'completed',
             progress: 100
           })
@@ -267,6 +268,7 @@ export default function ChatPage() {
 
           updateSubagent({
             id: event.taskId,
+            ...((event as any).agentId ? { agent: (event as any).agentId } : {}),
             status: 'failed',
             error: event.error
           })

@@ -746,6 +746,7 @@ class OrchestrationEngine:
                             ctx,
                             EngineEventType.TASK_COMPLETED,
                             task_id=task_id,
+                            agent_id=node.task.agent_id,
                             result=result,
                             artifacts=node.artifacts,
                         )
