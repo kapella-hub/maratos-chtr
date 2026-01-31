@@ -767,6 +767,7 @@ class OrchestrationEngine:
                     if ctx.graph.can_retry(task_id):
                         ctx.graph.retry_task(task_id)
                         await queue.put(
+                            self._emit(
                                 ctx,
                                 EngineEventType.TASK_RETRYING,
                                 task_id=task_id,
