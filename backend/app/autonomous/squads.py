@@ -51,11 +51,79 @@ class SquadFactory:
         return any(k in prompt_lower for k in complex_keywords) and len(prompt.split()) > 10
 
     @staticmethod
-    def assemble_squad(prompt: str) -> List[SpecialistAgent]:
-        """Select appropriate specialists for the task."""
-        # For V1, we use a standard "Full Stack Squad" if complexity is high.
-        # Future: Use LLM to pick roles dynamically.
+    async def assemble_squad(prompt: str) -> List[SpecialistAgent]:
+        """Select appropriate specialists for the task using Generative Hiring."""
+        from app.agents.registry import agent_registry
+        import json
+        import re
+
+        logger.info(f"Hiring Manager (Mo) assembling squad for: {prompt[:50]}...")
         
+        # Get the hiring manager (Architect acting as Mo)
+        mo_agent = agent_registry.get("architect")
+        if not mo_agent:
+            logger.warning("Hiring Manager not found, falling back to static squad.")
+            return SquadFactory._static_fallback(prompt)
+
+        hiring_prompt = f"""You are **Mo, the Engineering Manager**.
+Your goal is to assemble the perfect "Tiger Team" or "Squad" to build the user's request.
+
+REQUEST: "{prompt}"
+
+Think about the specific technologies and architectural domains involved.
+Do not just pick generic roles. Be specific.
+Examples:
+- If "Rust Game": hire "rust_physics_expert" and "wgpu_graphics_specialist".
+- If "SaaS App": hire "nextjs_architect" and "postgres_db_admin".
+
+Define 2-4 specialist agents.
+
+Output strictly JSON in this format:
+[
+    {{
+        "role": "agent_role_snake_case",
+        "description": "2 sentence personality and expertise description",
+        "focus_area": "Specific domain focus (e.g. 'WGPU Shaders' or 'Database Schema')"
+    }}
+]
+"""
+        
+        try:
+            response_text = ""
+            async for chunk in mo_agent.chat(
+                messages=[{"role": "user", "content": hiring_prompt}],
+                context={},
+            ):
+                response_text += chunk
+                
+            # Parse JSON
+            json_str = response_text
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0]
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0]
+            
+            # Clean potential trailing commas or comments if needed (simple json.loads usually enough for LLM json)
+            data = json.loads(json_str.strip())
+            
+            squad = []
+            for agent_def in data:
+                squad.append(SpecialistAgent(
+                    role=agent_def["role"],
+                    description=agent_def["description"],
+                    focus_area=agent_def["focus_area"]
+                ))
+            
+            logger.info(f"Mo hired {len(squad)} agents: {[a.role for a in squad]}")
+            return squad
+
+        except Exception as e:
+            logger.error(f"Hiring failed: {e}. Using fallback.")
+            return SquadFactory._static_fallback(prompt)
+
+    @staticmethod
+    def _static_fallback(prompt: str) -> List[SpecialistAgent]:
+        """Classic keyword matchmaking (fallback)."""
         squad = []
 
         # Frontend Specialist
@@ -96,8 +164,32 @@ class SquadFactory:
                     focus_area="Backend & Data"
                 )
             ]
-
         return squad
+
+
+class SquadVisualizer:
+    """Generates Mermaid diagrams for the squad."""
+
+    @staticmethod
+    def to_markdown(squad: List[SpecialistAgent]) -> str:
+        """Generate a Markdown table representation of the squad."""
+        md = ["| Role | Focus Area | Description |"]
+        md.append("| :--- | :--- | :--- |")
+        
+        for agent in squad:
+            role = agent.role.replace("_", " ").title()
+            # Agent Icon based on role
+            icon = "🤖" 
+            if "frontend" in agent.role: icon = "🎨"
+            elif "backend" in agent.role: icon = "⚙️"
+            elif "data" in agent.role: icon = "📊"
+            elif "devops" in agent.role: icon = "🚀"
+            elif "security" in agent.role: icon = "🔒"
+            elif "mobile" in agent.role: icon = "📱"
+
+            md.append(f"| {icon} **{role}** | {agent.focus_area} | {agent.description} |")
+            
+        return "\n".join(md)
 
 
 class BrainstormingSession:
@@ -113,7 +205,7 @@ class BrainstormingSession:
         """Execute the brainstorming session."""
         
         # 1. Assemble Squad
-        squad = SquadFactory.assemble_squad(self.prompt)
+        squad = await SquadFactory.assemble_squad(self.prompt)
         if not squad:
             logger.info("Task too simple for swarm. Skipping.")
             return
@@ -123,6 +215,17 @@ class BrainstormingSession:
             run_id=self.run_id,
             data={"squad_size": len(squad), "roles": [a.role for a in squad]}
         )
+        
+        # 1.5 Visualize the Squad
+        try:
+            diagram = SquadVisualizer.to_markdown(squad)
+            yield EngineEvent(
+                type=EngineEventType.BRAINSTORMING_VISUALIZATION,
+                run_id=self.run_id,
+                data={"markdown": diagram}
+            )
+        except Exception as e:
+            logger.warning(f"Failed to visualize squad: {e}")
 
         # 2. Parallel Execution
         # We use the generic 'architect' agent but with different system prompts per role

@@ -34,7 +34,6 @@ const typeColors: Record<string, string> = {
   table: 'text-pink-400 bg-pink-500/10 border-pink-500/20',
   diff: 'text-orange-400 bg-orange-500/10 border-orange-500/20',
   terminal: 'text-gray-400 bg-gray-500/10 border-gray-500/20',
-  terminal: 'text-gray-400 bg-gray-500/10 border-gray-500/20',
   markdown: 'text-violet-400 bg-violet-500/10 border-violet-500/20',
   task_graph: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
 }

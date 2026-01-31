@@ -111,8 +111,8 @@ export default function MinimalHeader({ onToggleHistory, onToggleCommand }: Mini
           onClick={() => navigate('/')}
           className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
         >
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
-            <Sparkles className="w-4 h-4 text-white" />
+          <div className="w-8 h-8 rounded-lg bg-black/20 overflow-hidden flex items-center justify-center border border-white/10">
+            <img src="/assets/maratos_logo.png" alt="MaratOS" className="w-full h-full object-cover" />
           </div>
           <span className="font-semibold text-base tracking-tight">MaratOS</span>
         </button>
@@ -257,9 +257,9 @@ export default function MinimalHeader({ onToggleHistory, onToggleCommand }: Mini
           )}
           title={`Theme: ${theme}`}
         >
-          {theme === 'light' ? <Sun className="w-4 h-4" /> : 
-           theme === 'dark' ? <Moon className="w-4 h-4" /> : 
-           <Monitor className="w-4 h-4" />}
+          {theme === 'light' ? <Sun className="w-4 h-4" /> :
+            theme === 'dark' ? <Moon className="w-4 h-4" /> :
+              <Monitor className="w-4 h-4" />}
         </button>
 
         {/* Sound toggle */}

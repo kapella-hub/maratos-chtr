@@ -47,8 +47,8 @@ export type DiagramType = typeof SUPPORTED_DIAGRAM_TYPES[number]
 function sanitizeSvg(svg: string): string {
   return DOMPurify.sanitize(svg, {
     USE_PROFILES: { svg: true, svgFilters: true },
-    // Block scripting in SVG
-    FORBID_TAGS: ['script', 'foreignObject', 'animate', 'animateMotion', 'animateTransform', 'set'],
+    // Block scripting in SVG (allow foreignObject for Mermaid HTML labels)
+    FORBID_TAGS: ['script', 'animate', 'animateMotion', 'animateTransform', 'set'],
     FORBID_ATTR: [
       'onload', 'onerror', 'onclick', 'onmouseover', 'onmouseout',
       'onfocus', 'onblur', 'onkeydown', 'onkeyup', 'onkeypress',
@@ -60,9 +60,8 @@ function sanitizeSvg(svg: string): string {
 mermaid.initialize({
   startOnLoad: false,
   theme: 'dark',
-  // Use strict security level to prevent XSS
-  // Note: This disables click events in diagrams, which is the safe default
-  securityLevel: 'strict',
+  // Use loose security level to allow HTML labels (needed for emojis/rich text)
+  securityLevel: 'loose',
   themeVariables: {
     primaryColor: '#8b5cf6',
     primaryTextColor: '#e2e8f0',
@@ -80,7 +79,7 @@ mermaid.initialize({
     nodeTextColor: '#e2e8f0',
   },
   flowchart: {
-    htmlLabels: false, // Disabled for security with strict mode
+    htmlLabels: true, // Enabled for better rendering (emojis, etc.)
     curve: 'basis',
     rankSpacing: 50,
     nodeSpacing: 30,

@@ -48,11 +48,24 @@ def clean_agent_response(text: str) -> str:
             if not line.strip():
                 skip_until_empty = False
             continue
+            
+        # Skip UI artifacts from copy buttons
+        stripped = line.strip()
+        if stripped in ["Code", "1 line", "Copy"]:
+            continue
 
         cleaned.append(line)
 
     result = '\n'.join(cleaned)
     result = re.sub(r'\n{3,}', '\n\n', result)
+    
+    # improved formatting for numbered lines (diffs)
+    try:
+        result = convert_numbered_lines_to_codeblock(result)
+    except Exception as e:
+        # Fallback if formatting fails
+        logger.warning(f"Failed to format numbered lines: {e}")
+    
     return result.strip()
 
 
@@ -197,8 +210,56 @@ async def run_delivery_workflow(
             }
             yield f"data: {json.dumps(payload)}\n\n"
             
+        # Handle Brainstorming Visualization
+        elif event.type == EngineEventType.BRAINSTORMING_VISUALIZATION:
+            markdown = event.data.get("markdown", "")
+            if markdown:
+                payload = {
+                    "type": "message",
+                    "content": f"**The Council is Assembled** 🧙‍♂️\n\n{markdown}",
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+
         # Default: yield engine event (supported by TaskGraph)
         else:
+            # Also yield chat messages for key events to provide immediate feedback
+            if event.type == EngineEventType.TASK_STARTED:
+                task_title = event.data.get("title", "Task")
+                agent_id = event.data.get("agent_id", "system").replace("_", " ").title()
+                payload = {
+                    "type": "message",
+                    "content": f"\n\n🚀 **{agent_id}:** Starting Task - {task_title}\n",
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+            
+            elif event.type == EngineEventType.TASK_RETRYING:
+                task_title = event.data.get("title", "Task") # Note: title might need to be looked up if not in event data, but let's assume it's similar context or generic
+                reason = event.data.get("reason", "Verification failed")
+                attempt = event.data.get("next_attempt", 2)
+                payload = {
+                    "type": "message",
+                    "content": f"🔄 **Retrying Task:** (Attempt {attempt})\n*Reason: {reason}*\n",
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+
+            elif event.type == EngineEventType.TASK_FAILED:
+                task_title = event.data.get("title", "Task")
+                error = event.data.get("error", "Unknown error")
+                payload = {
+                    "type": "message",
+                    "content": f"❌ **Task Failed:** {task_title}\n\nError: {error}",
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+
+            elif event.type == EngineEventType.RUN_ERROR:
+                error = event.data.get("error", "Unknown error")
+                payload = {
+                    "type": "message",
+                    "content": f"⚠️ **Workflow Error:** {error}",
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+            
+            # Always yield the raw event for the UI components
             yield event.to_sse()
 
         # Save important messages to DB

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
@@ -88,14 +88,17 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
     letter-spacing: -0.01em;
   }
 
-  code, pre, .font-mono {
+  code,
+  pre,
+  .font-mono {
     font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
     font-feature-settings: "liga" 1, "calt" 1;
   }
@@ -135,11 +138,9 @@
 }
 
 .glass-card {
-  background: linear-gradient(
-    135deg,
-    hsl(var(--card) / 0.95) 0%,
-    hsl(var(--card) / 0.85) 100%
-  );
+  background: linear-gradient(135deg,
+      hsl(var(--card) / 0.95) 0%,
+      hsl(var(--card) / 0.85) 100%);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
   border: 1px solid hsl(var(--border) / 0.4);
@@ -169,15 +170,26 @@ button:focus-visible {
 
 /* Animations */
 @keyframes progress {
-  0% { transform: translateX(-100%); }
-  50% { transform: translateX(0%); }
-  100% { transform: translateX(100%); }
+  0% {
+    transform: translateX(-100%);
+  }
+
+  50% {
+    transform: translateX(0%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 @keyframes pulse-glow {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 20px hsl(239 84% 67% / 0.4);
   }
+
   50% {
     box-shadow: 0 0 40px hsl(239 84% 67% / 0.7);
   }
@@ -187,69 +199,127 @@ button:focus-visible {
   0% {
     background-position: -200% 0;
   }
+
   100% {
     background-position: 200% 0;
   }
 }
 
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes fade-in-up {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes scale-in {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @keyframes slide-in-right {
-  from { opacity: 0; transform: translateX(20px); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 @keyframes spin-slow {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes bounce-subtle {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-4px);
+  }
 }
 
 @keyframes typing {
-  0%, 60%, 100% { opacity: 0.2; }
-  30% { opacity: 1; }
+
+  0%,
+  60%,
+  100% {
+    opacity: 0.2;
+  }
+
+  30% {
+    opacity: 1;
+  }
 }
 
 @keyframes spawn-glow {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 5px hsl(239 84% 67% / 0.4);
   }
+
   50% {
     box-shadow: 0 0 25px hsl(239 84% 67% / 0.7);
   }
 }
 
 @keyframes gradient-shift {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
 }
 
 /* Animation utilities */
 .shimmer {
-  background: linear-gradient(
-    90deg,
-    hsl(var(--muted)) 0%,
-    hsl(var(--muted-foreground) / 0.15) 50%,
-    hsl(var(--muted)) 100%
-  );
+  background: linear-gradient(90deg,
+      hsl(var(--muted)) 0%,
+      hsl(var(--muted-foreground) / 0.15) 50%,
+      hsl(var(--muted)) 100%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
@@ -564,7 +634,7 @@ button:focus-visible {
 
 /* Improved prose for chat messages */
 .prose {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
   font-size: 15px;
   line-height: 1.7;
   color: hsl(var(--foreground) / 0.95);
@@ -618,12 +688,12 @@ button:focus-visible {
   list-style: none;
 }
 
-.prose ul > li {
+.prose ul>li {
   @apply relative pl-6;
   line-height: 1.65;
 }
 
-.prose ul > li::before {
+.prose ul>li::before {
   content: '•';
   @apply absolute left-0 text-primary font-bold text-lg;
   top: -1px;
@@ -635,19 +705,22 @@ button:focus-visible {
   counter-reset: list-counter;
 }
 
-.prose ol > li {
+.prose ol>li {
   @apply relative pl-8;
   line-height: 1.65;
   counter-increment: list-counter;
 }
 
-.prose ol > li::before {
+.prose ol>li::before {
   content: counter(list-counter) ".";
   @apply absolute left-0 font-semibold text-primary;
 }
 
 /* Nested lists */
-.prose ul ul, .prose ol ol, .prose ul ol, .prose ol ul {
+.prose ul ul,
+.prose ol ol,
+.prose ul ol,
+.prose ol ul {
   @apply mt-2 mb-0 ml-2;
 }
 
@@ -755,21 +828,61 @@ button:focus-visible {
 }
 
 /* Agent colors */
-.agent-architect { @apply text-blue-500; }
-.agent-coder { @apply text-emerald-500; }
-.agent-reviewer { @apply text-amber-500; }
-.agent-tester { @apply text-pink-500; }
-.agent-docs { @apply text-cyan-500; }
-.agent-devops { @apply text-orange-500; }
-.agent-mo { @apply text-violet-500; }
+.agent-architect {
+  @apply text-blue-500;
+}
 
-.agent-bg-architect { @apply bg-blue-500/10; }
-.agent-bg-coder { @apply bg-emerald-500/10; }
-.agent-bg-reviewer { @apply bg-amber-500/10; }
-.agent-bg-tester { @apply bg-pink-500/10; }
-.agent-bg-docs { @apply bg-cyan-500/10; }
-.agent-bg-devops { @apply bg-orange-500/10; }
-.agent-bg-mo { @apply bg-violet-500/10; }
+.agent-coder {
+  @apply text-emerald-500;
+}
+
+.agent-reviewer {
+  @apply text-amber-500;
+}
+
+.agent-tester {
+  @apply text-pink-500;
+}
+
+.agent-docs {
+  @apply text-cyan-500;
+}
+
+.agent-devops {
+  @apply text-orange-500;
+}
+
+.agent-mo {
+  @apply text-violet-500;
+}
+
+.agent-bg-architect {
+  @apply bg-blue-500/10;
+}
+
+.agent-bg-coder {
+  @apply bg-emerald-500/10;
+}
+
+.agent-bg-reviewer {
+  @apply bg-amber-500/10;
+}
+
+.agent-bg-tester {
+  @apply bg-pink-500/10;
+}
+
+.agent-bg-docs {
+  @apply bg-cyan-500/10;
+}
+
+.agent-bg-devops {
+  @apply bg-orange-500/10;
+}
+
+.agent-bg-mo {
+  @apply bg-violet-500/10;
+}
 
 /* File tree */
 .file-tree {
@@ -860,18 +973,39 @@ button:focus-visible {
 
 /* New UI slide animations */
 @keyframes slide-in-left {
-  from { opacity: 0; transform: translateX(-100%); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 @keyframes slide-in-bottom {
-  from { opacity: 0; transform: translateY(100%); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes slide-out-left {
-  from { opacity: 1; transform: translateX(0); }
-  to { opacity: 0; transform: translateX(-100%); }
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
 }
 
 .slide-in-left {
@@ -893,7 +1027,8 @@ button:focus-visible {
 /* Chat stream container */
 .chat-stream {
   @apply flex-1 overflow-y-auto;
-  @apply pb-32; /* Space for floating input */
+  @apply pb-32;
+  /* Space for floating input */
 }
 
 /* Minimal header style */
@@ -944,6 +1079,7 @@ button:focus-visible {
 .hover-lift {
   @apply transition-all duration-200;
 }
+
 .hover-lift:hover {
   @apply -translate-y-0.5 shadow-lg;
 }
@@ -958,7 +1094,8 @@ button:focus-visible {
 }
 
 /* Better kbd styling */
-kbd, .kbd {
+kbd,
+.kbd {
   @apply inline-flex items-center justify-center;
   @apply px-1.5 py-0.5 min-w-[1.5rem];
   @apply bg-muted/80 border border-border/60 rounded;
@@ -1017,6 +1154,7 @@ kbd, .kbd {
     opacity: 0;
     transform: translateY(8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);

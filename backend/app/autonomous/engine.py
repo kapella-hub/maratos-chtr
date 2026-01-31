@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 class RunState(str, Enum):
     """Canonical run states for the orchestration engine."""
     INTAKE = "intake"           # Receiving and validating input
+    BRAINSTORM = "brainstorm"   # Multi-agent brainstorming
     PLAN = "plan"               # Planning tasks with architect/planner
     TASK_GRAPH = "task_graph"   # Building and validating task DAG
     EXECUTE = "execute"         # Running tasks
@@ -88,6 +89,7 @@ class EngineEventType(str, Enum):
     BRAINSTORMING_STARTED = "brainstorming_started"
     BRAINSTORMING_PROGRESS = "brainstorming_progress"
     BRAINSTORMING_COMPLETED = "brainstorming_completed"
+    BRAINSTORMING_VISUALIZATION = "brainstorming_visualization"
 
     # Task graph events
     TASK_GRAPH_BUILT = "task_graph_built"
@@ -141,7 +143,17 @@ class EngineEvent:
             "timestamp": self.timestamp.isoformat(),
             **self.data,
         }
-        return f"data: {json.dumps(payload)}\n\n"
+        
+        def _encoder(obj):
+            if hasattr(obj, "model_dump"):
+                return obj.model_dump()
+            if hasattr(obj, "dict"):
+                return obj.dict()
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+        return f"data: {json.dumps(payload, default=_encoder)}\n\n"
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -171,7 +183,9 @@ class RunConfig:
 
     # Planning settings
     planner_model: str = ""  # Empty = use default
+    planner_model: str = ""  # Empty = use default
     planning_timeout_seconds: float = 120.0
+    auto_approve: bool = True # Default to True to unblock execution until UI catch-up
 
     # Resume settings
     resume_from_state: dict | None = None
@@ -191,6 +205,9 @@ class RunContext:
     original_prompt: str = ""
     workspace_path: str | None = None
     session_id: str | None = None  # For inline mode
+    
+    # Generic context data (e.g. brainstorm outputs)
+    context_data: dict[str, Any] = field(default_factory=dict)
 
     # Plan and graph
     plan: ExecutionPlan | None = None
@@ -252,6 +269,7 @@ class RunContext:
             "original_prompt": self.original_prompt,
             "workspace_path": self.workspace_path,
             "session_id": self.session_id,
+            "context_data": self.context_data,
             "started_at": self.started_at.isoformat(),
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "error": self.error,
@@ -272,6 +290,7 @@ class RunContext:
             original_prompt=data.get("original_prompt", ""),
             workspace_path=data.get("workspace_path"),
             session_id=data.get("session_id"),
+            context_data=data.get("context_data", {}),
         )
         ctx.started_at = datetime.fromisoformat(data["started_at"])
         if data.get("completed_at"):
@@ -442,17 +461,23 @@ class OrchestrationEngine:
                     task_count=len(ctx.plan.tasks),
                 )
 
-                # Emit approval request and pause
+                # Emit approval request
                 yield self._emit(
                     ctx,
                     EngineEventType.PLAN_APPROVAL_REQUESTED,
                     plan=ctx.plan.model_dump()
                 )
                 
-                ctx.resume_state = RunState.TASK_GRAPH
-                ctx.transition_to(RunState.PAUSED)
-                yield self._emit(ctx, EngineEventType.PAUSED)
-                return
+                if ctx.config.auto_approve:
+                    # Auto-proceed to task graph
+                    logger.info("Auto-approving plan based on config.")
+                    ctx.transition_to(RunState.TASK_GRAPH)
+                else:
+                    # Pause for manual approval
+                    ctx.resume_state = RunState.TASK_GRAPH
+                    ctx.transition_to(RunState.PAUSED)
+                    yield self._emit(ctx, EngineEventType.PAUSED)
+                    return
 
                 # ctx.transition_to(RunState.TASK_GRAPH)
 
@@ -666,6 +691,17 @@ class OrchestrationEngine:
         task_id = node.task_id
 
         try:
+            # Emit start event
+            await queue.put(
+                self._emit(
+                    ctx,
+                    EngineEventType.TASK_STARTED,
+                    task_id=task_id,
+                    title=node.task.title,
+                    agent_id=node.task.agent_id
+                )
+            )
+
             # Get input artifacts from dependencies
             inputs = ctx.graph.get_input_artifacts(task_id)
 
@@ -731,10 +767,11 @@ class OrchestrationEngine:
                     if ctx.graph.can_retry(task_id):
                         ctx.graph.retry_task(task_id)
                         await queue.put(
-                            self._emit(
                                 ctx,
                                 EngineEventType.TASK_RETRYING,
                                 task_id=task_id,
+                                title=node.task.title,
+                                agent_id=node.task.agent_id,
                                 reason="Verification failed",
                                 next_attempt=node.attempt + 1,
                             )
@@ -746,6 +783,8 @@ class OrchestrationEngine:
                                 ctx,
                                 EngineEventType.TASK_FAILED,
                                 task_id=task_id,
+                                title=node.task.title,
+                                agent_id=node.task.agent_id,
                                 error="Verification failed after max attempts",
                             )
                         )
@@ -758,6 +797,8 @@ class OrchestrationEngine:
                             ctx,
                             EngineEventType.TASK_RETRYING,
                             task_id=task_id,
+                            title=node.task.title,
+                            agent_id=node.task.agent_id,
                             reason=error,
                             next_attempt=node.attempt + 1,
                         )
@@ -769,6 +810,8 @@ class OrchestrationEngine:
                             ctx,
                             EngineEventType.TASK_FAILED,
                             task_id=task_id,
+                            title=node.task.title,
+                            agent_id=node.task.agent_id,
                             error=error,
                         )
                     )
@@ -838,7 +881,7 @@ ARTIFACTS PRODUCED:
 {json.dumps([f"{k}: {type(v).__name__}" for k, v in node.artifacts.items()], indent=2)}
 
 OUTPUT:
-{node.result.get('response', 'No text response')}
+{node.result.get('response', 'No text response') if isinstance(node.result, dict) else str(node.result)}
 
 Check specifically for: {criterion.description}
 """
@@ -1057,7 +1100,10 @@ class DefaultPlanner(PlannerProtocol):
         if not architect:
             raise RuntimeError("Architect agent not available")
 
-        # Inject Brainstorming RFCs if available
+        # Define strategies: Try with RFCs first, fallback to simpler prompt if failed
+        attempts = []
+        
+        # Attempt 1: Full Context with RFCs
         rfcs_text = ""
         if ctx.context_data.get("brainstorm_rfcs"):
             rfcs = ctx.context_data["brainstorm_rfcs"]
@@ -1065,14 +1111,28 @@ class DefaultPlanner(PlannerProtocol):
             rfcs_text += "The Council of Specialists has already brainstormed this approach. Use these architecture decisions as your primary guide:\n\n"
             for rfc in rfcs:
                 rfcs_text += f"### {rfc['role'].upper()} RFC\n{rfc['content']}\n\n"
+        
+        attempts.append({"use_rfcs": True, "rfcs_text": rfcs_text})
+        
+        # Attempt 2: Fallback without RFCs (if we had them)
+        if rfcs_text:
+             attempts.append({"use_rfcs": False, "rfcs_text": ""})
 
-        # Build planning prompt
-        planning_prompt = f"""Analyze this request and create a detailed execution plan.
+        last_error = None
+
+        for i, attempt in enumerate(attempts):
+            if i > 0:
+                logger.warning(f"Retrying planning without brainstorming context (Attempt {i+1})")
+                
+            rfcs_content = attempt["rfcs_text"]
+            
+            # Build planning prompt
+            planning_prompt = f"""Analyze this request and create a detailed execution plan.
 
 REQUEST:
 {ctx.original_prompt}
 
-WORKSPACE: {ctx.workspace_path or 'Not specified'}{rfcs_text}
+WORKSPACE: {ctx.workspace_path or 'Not specified'}{rfcs_content}
 
 You must output a JSON execution plan with this structure:
 {{
@@ -1096,47 +1156,110 @@ You must output a JSON execution plan with this structure:
 Output ONLY the JSON, no other text.
 """
 
-        response_text = ""
-        async for chunk in architect.chat(
-            messages=[{"role": "user", "content": planning_prompt}],
-            context={"workspace": ctx.workspace_path},
-        ):
-            response_text += chunk
-            yield EngineEvent(
-                type=EngineEventType.PLANNING_PROGRESS,
-                run_id=ctx.run_id,
-                data={"progress": min(len(response_text) / 2000, 0.9)},
-            )
+            try:
+                response_text = ""
+                async for chunk in architect.chat(
+                    messages=[{"role": "user", "content": planning_prompt}],
+                    context={"workspace": ctx.workspace_path},
+                ):
+                    response_text += chunk
+                    yield EngineEvent(
+                        type=EngineEventType.PLANNING_PROGRESS,
+                        run_id=ctx.run_id,
+                        data={"progress": min(len(response_text) / 2000, 0.9)},
+                    )
 
-        # Parse JSON from response
-        try:
-            # Extract JSON from response (may be wrapped in markdown)
-            json_str = response_text
-            if "```json" in json_str:
-                json_str = json_str.split("```json")[1].split("```")[0]
-            elif "```" in json_str:
-                json_str = json_str.split("```")[1].split("```")[0]
+                logger.info(f"Planner response length (Attempt {i+1}): {len(response_text)}")
+                
+                if not response_text.strip():
+                    raise ValueError("Empty response from Planner Agent")
 
-            plan_data = json.loads(json_str.strip())
+                # Parse JSON
+                json_str = response_text
+                plan_data = None
+                
+                # Method 1: Markdown blocks (most reliable if present)
+                if "```json" in json_str:
+                    try:
+                        block = json_str.split("```json")[1].split("```")[0].strip()
+                        plan_data = json.loads(block)
+                    except Exception:
+                        pass # Fallback to search
+                elif "```" in json_str:
+                    try:
+                        block = json_str.split("```")[1].split("```")[0].strip()
+                        plan_data = json.loads(block)
+                    except Exception:
+                        pass
 
-            # Add required fields
-            plan_data["original_prompt"] = ctx.original_prompt
-            plan_data["workspace_path"] = ctx.workspace_path
-            plan_data["version"] = "1.0"
-            if "plan_id" not in plan_data:
-                plan_data["plan_id"] = f"plan-{uuid.uuid4().hex[:8]}"
+                # Method 2: Scan for JSON object using raw_decode
+                if not plan_data:
+                    decoder = json.JSONDecoder()
+                    # Search for start of object
+                    idx = 0
+                    while idx < len(json_str):
+                        next_brace = json_str.find('{', idx)
+                        if next_brace == -1:
+                            break
+                        
+                        try:
+                            plan_data, end_idx = decoder.raw_decode(json_str[next_brace:])
+                            # Verify it looks like a plan (has 'tasks' or 'summary') to avoid capturing trivial objects
+                            if isinstance(plan_data, dict) and ("tasks" in plan_data or "summary" in plan_data):
+                                break
+                            else:
+                                # Not the droids we're looking for, keep searching
+                                idx = next_brace + 1
+                                plan_data = None
+                        except ValueError:
+                            # Not valid JSON starting here
+                            idx = next_brace + 1
+                
+                if not plan_data:
+                    # Final desperate fallback: Regex extraction for messy cases
+                    # (This helps if raw_decode failed due to minor syntax error usually caught by stricter parsers, 
+                    # but sometimes json.loads is more lenient than raw_decode? No, they are same backend usually.
+                    # But maybe we can try to fix it.)
+                    import re
+                    # Non-greedy search for { ... }
+                    json_match = re.search(r"(\{.*\})", json_str, re.DOTALL)
+                    if json_match:
+                        try:
+                            # Try to fix common missing comma issue: " "\n" -> ", "\n"
+                            candidate = json_match.group(1)
+                            candidate = re.sub(r'\"\s*\n\s*\"', '",\n"', candidate)
+                            plan_data = json.loads(candidate)
+                        except:
+                            pass
 
-            plan = ExecutionPlan.model_validate(plan_data)
+                if not plan_data:
+                     raise ValueError("Could not extract valid JSON plan from response")
 
-            yield EngineEvent(
-                type=EngineEventType.PLANNING_COMPLETED,
-                run_id=ctx.run_id,
-                data={"plan": plan},
-            )
+                # Add required fields
+                plan_data["original_prompt"] = ctx.original_prompt
+                plan_data["workspace_path"] = ctx.workspace_path
+                plan_data["version"] = "1.0"
+                if "plan_id" not in plan_data:
+                    plan_data["plan_id"] = f"plan-{uuid.uuid4().hex[:8]}"
 
-        except Exception as e:
-            logger.exception(f"Failed to parse plan: {e}")
-            raise ValueError(f"Failed to parse execution plan: {e}")
+                plan = ExecutionPlan.model_validate(plan_data)
+
+                yield EngineEvent(
+                    type=EngineEventType.PLANNING_COMPLETED,
+                    run_id=ctx.run_id,
+                    data={"plan": plan},
+                )
+                return
+
+            except Exception as e:
+                logger.warning(f"Planning attempt {i+1} failed: {e}")
+                if "JSONDecodeError" in str(type(e)):
+                     logger.error(f"Failed JSON content: {response_text[:500]}...")
+                last_error = e
+                # Continue to next fallback attempt
+
+        logger.exception("All planning attempts failed")
+        raise ValueError(f"Failed to parse execution plan after validation: {last_error}")
 
 
 class DefaultExecutor(ExecutorProtocol):
@@ -1172,6 +1295,25 @@ ACCEPTANCE CRITERIA:
 
 INPUTS FROM DEPENDENCIES:
 {json.dumps(inputs, indent=2) if inputs else 'None'}
+"""
+
+        # Add failure context if this is a retry
+        if node.attempt > 1 and node.verification_results:
+            failed_criteria = [
+                f"- {c.description}" 
+                for c in node.task.acceptance 
+                if c.id in node.verification_results and not node.verification_results[c.id]
+            ]
+            if failed_criteria:
+                task_prompt += f"""
+CRITICAL - PREVIOUS ATTEMPT FAILED:
+The previous implementation failed the following verification checks. 
+YOU MUST FIX THESE ISSUES IN THIS ATTEMPT.
+
+FAILED CHECKS:
+{chr(10).join(failed_criteria)}
+
+Refine your implementation to specifically address these failures.
 """
 
         response_text = ""

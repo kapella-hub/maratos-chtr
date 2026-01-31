@@ -120,7 +120,7 @@ const agentLabels: Record<string, string> = {
 }
 
 const agentIcons: Record<string, string> = {
-  mo: 'MO',
+  mo: '/assets/maratos_logo.png',
   architect: '🏗️',
   coder: '💻',
   reviewer: '🔍',
@@ -479,14 +479,23 @@ export default function MessageBubble({ message, isThinking, showTimestamp = tru
         initial={{ scale: 0.8 }}
         animate={{ scale: 1 }}
         className={cn(
-          'w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0',
+          'w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden',
           'shadow-lg transition-shadow duration-300 hover:shadow-xl',
           isUser
             ? 'bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 text-gray-600 dark:text-gray-300'
-            : `bg-gradient-to-br ${agentColors[agentId] || agentColors.mo} text-white font-bold text-xs`
+            : cn(
+              agentIcons[agentId]?.startsWith('/') ? 'bg-black/20' : `bg-gradient-to-br ${agentColors[agentId] || agentColors.mo}`,
+              'text-white font-bold text-xs'
+            )
         )}
       >
-        {isUser ? <User className="w-4 h-4" /> : (agentIcons[agentId] || 'MO')}
+        {isUser ? (
+          <User className="w-4 h-4" />
+        ) : agentIcons[agentId]?.startsWith('/') ? (
+          <img src={agentIcons[agentId]} alt={agentId} className="w-full h-full object-cover" />
+        ) : (
+          agentIcons[agentId] || 'MO'
+        )}
       </motion.div>
 
       {/* Content */}

@@ -1,0 +1,39 @@
+diff --git a/src/services/auth.ts b/src/services/auth.ts
+index 2d4e8a1..9b3c7f2 100644
+--- a/src/services/auth.ts
++++ b/src/services/auth.ts
+@@ -1,25 +1,18 @@
+ import jwt from 'jsonwebtoken';
+ import { config } from '../config';
+ 
+-export function createToken(userId: string) {
+-  const token = jwt.sign({ sub: userId }, config.secret, { expiresIn: '1h' });
+-  return token;
+-}
++const TOKEN_OPTIONS = { expiresIn: '1h' };
+ 
+-export function verifyToken(token: string) {
+-  try {
+-    const decoded = jwt.verify(token, config.secret);
+-    return decoded;
+-  } catch (err) {
+-    return null;
+-  }
+-}
++export const createToken = (userId: string) =>
++  jwt.sign({ sub: userId }, config.secret, TOKEN_OPTIONS);
+ 
+-export function refreshToken(token: string) {
+-  const decoded = verifyToken(token);
+-  if (!decoded) return null;
+-  const newToken = createToken(decoded.sub as string);
+-  return newToken;
++export const verifyToken = (token: string) => {
++  try { return jwt.verify(token, config.secret); }
++  catch { return null; }
++};
++
++export const refreshToken = (token: string) => {
++  const decoded = verifyToken(token);
++  return decoded ? createToken(decoded.sub as string) : null;
+ }

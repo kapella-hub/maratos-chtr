@@ -5,6 +5,7 @@ across server restarts.
 """
 
 import logging
+import json
 from datetime import datetime
 from typing import Any, AsyncIterator
 
@@ -145,7 +146,21 @@ class PersistentOrchestrationEngine:
         elif etype == EngineEventType.PLANNING_COMPLETED:
             plan = event.data.get("plan")
             if plan:
-                plan_json = plan if isinstance(plan, dict) else plan
+                # Convert Pydantic model to JSON-safe dict (handling datetimes)
+                # Use robust default=str to handle any non-serializable objects (like datetime)
+                try:
+                    if hasattr(plan, "model_dump"):
+                        data = plan.model_dump()
+                    elif hasattr(plan, "dict"):
+                        data = plan.dict()
+                    else:
+                        data = plan
+                        
+                    plan_json = json.loads(json.dumps(data, default=str))
+                except Exception as e:
+                    logger.error(f"Failed to serialize plan: {e}")
+                    plan_json = {} # Safe fallback
+
                 await RunRepository.update_plan(run_id, plan_json)
 
         # Task graph built - persist tasks

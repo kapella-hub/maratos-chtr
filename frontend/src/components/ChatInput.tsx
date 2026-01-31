@@ -145,7 +145,7 @@ export default function ChatInput({
 
   const charCount = input.length
   const showCharCount = charCount > 100
-  const isOverLimit = charCount > 2000
+  const isOverLimit = charCount > 50000
   const isCommand = input.trim().startsWith('/')
 
   return (

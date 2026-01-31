@@ -1,0 +1,15 @@
+diff --git a/src/utils/parser.ts b/src/utils/parser.ts
+index 7c8d3e2..1a4f5b9 100644
+--- a/src/utils/parser.ts
++++ b/src/utils/parser.ts
+@@ -5,7 +5,10 @@ interface ParseResult {
+ }
+ 
+ export function parseInput(input: string): ParseResult {
+-  const data = JSON.parse(input);
++  if (!input || input.trim() === '') {
++    return { valid: false, data: null };
++  }
++  const data = JSON.parse(input.trim());
+   return { valid: true, data };
+ }

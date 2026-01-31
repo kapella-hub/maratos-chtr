@@ -385,13 +385,17 @@ class Agent:
                 result = await executor.execute(skill, exec_context)
                 
                 if result["success"]:
-                    yield f"✅ Workflow completed ({result['steps_run']} steps)\n"
+                    yield f"\n**✅ Workflow Completed** ({result['steps_run']} steps)\n\n"
                 else:
-                    yield f"⚠️ Workflow partially completed\n"
+                    yield f"\n**⚠️ Workflow - Partial Success**\n\n"
                 
                 for step_result in result["results"]:
-                    status = "✓" if step_result["success"] else "✗"
-                    yield f"  {status} {step_result['step']}\n"
+                    status = "✅" if step_result["success"] else "❌"
+                    step_name = step_result['step'].replace('_', ' ').title()
+                    error_msg = f" - {step_result.get('error')}" if not step_result["success"] and step_result.get('error') else ""
+                    yield f"- {status} **{step_name}**{error_msg}\n"
+                
+                yield "\n*Proceeding with conversation...*\n"
 
     async def chat(
         self,
