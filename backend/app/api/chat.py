@@ -66,8 +66,8 @@ SPAWN_PATTERN = re.compile(r'\[SPAWN:(\w+)\]\s*(.+?)(?=\[SPAWN:|\Z)', re.DOTALL)
 WORKFLOW_PATTERN = re.compile(r'\[WORKFLOW:(\w+)\]\s*(.+?)(?=\[WORKFLOW:|\[SPAWN:|\Z)', re.DOTALL)
 
 
-def _workflow_event_to_progress(event_str: str) -> str | None:
-    """Convert a workflow SSE event to a clean, structured progress message.
+def _workflow_event_to_progress(event_str: str) -> dict[str, Any] | None:
+    """Convert a workflow SSE event to a structured status event.
 
     Output is designed to be minimal and scannable:
     - Phase changes on new lines with arrows
@@ -78,7 +78,7 @@ def _workflow_event_to_progress(event_str: str) -> str | None:
         event_str: The raw SSE event string (e.g., 'data: {...}\n\n')
 
     Returns:
-        A clean progress message, or None if no message needed.
+        A dict with "type": "status_update" (or other event), or None.
     """
     try:
         # Parse the SSE data
@@ -91,40 +91,36 @@ def _workflow_event_to_progress(event_str: str) -> str | None:
         data = json.loads(data_str)
         event_type = data.get("type")
 
-        # Show workflow phase changes - clean format
+        # Show workflow phase changes - structured status
         if event_type == "workflow_state":
             state = data.get("state", "")
             fix_cycle = data.get('fix_cycles', 0) + 1
             phase_map = {
-                "coding": "👨‍💻 coding",
-                "testing": "🧪 testing",
-                "fixing": f"🔧 fix #{fix_cycle}",
-                "escalating": "🏗️ architect",
-                "deploying": "🚢 devops",
-                "documenting": "📝 docs",
+                "coding": "👨‍💻 Coding",
+                "testing": "🧪 Testing",
+                "fixing": f"🔧 Fixing (Cycle {fix_cycle})",
+                "escalating": "🏗️ Architecting",
+                "deploying": "🚢 Deploying",
+                "documenting": "📝 Documenting",
             }
             if state in phase_map:
-                return f"  → {phase_map[state]}"
+                return {
+                    "type": "status_update",
+                    "status": state,
+                    "message": phase_map[state]
+                }
             return None
 
         # Show agent completed - just status and files
         elif event_type == "agent_completed":
             status = data.get("status", "")
-            artifacts = data.get("artifacts", [])
-
-            # Status indicator
-            indicator = "✓" if status == "done" else "✗" if status in ("error", "blocked") else ""
-
-            # Show files if available (clean, no verbose summaries)
-            if artifacts:
-                # Just show filenames, not full paths
-                filenames = [a.split("/")[-1] for a in artifacts[:4]]
-                file_str = ", ".join(filenames)
-                if len(artifacts) > 4:
-                    file_str += f" +{len(artifacts) - 4}"
-                return f" {indicator} `{file_str}`"
-
-            return f" {indicator}" if indicator else None
+            if status == "done":
+                return {
+                    "type": "status_update",
+                    "status": "completed",
+                    "message": "✓ Agent completed task"
+                }
+            return None
 
         # Show test results - concise
         elif event_type == "gate_result":
@@ -132,31 +128,37 @@ def _workflow_event_to_progress(event_str: str) -> str | None:
             passed = data.get("passed", False)
             tests_run = data.get("tests_run", 0)
             tests_passed = data.get("tests_passed", 0)
-            no_tests = data.get("no_tests_found", False)
-
+            
             if gate == "tester":
-                if no_tests:
-                    return " ✓ _(new)_"
-                elif passed:
-                    return f" ✓ {tests_passed}/{tests_run}" if tests_run else " ✓"
-                else:
-                    return f" ✗ {tests_passed}/{tests_run}"
+                msg = f"Tests: {tests_passed}/{tests_run} passed" if tests_run else "Tests completed"
+                return {
+                    "type": "status_update",
+                    "status": "testing",
+                    "message": f"{'✓' if passed else '✗'} {msg}"
+                }
             return None
 
-        # Show user decision - on new line
+        # Show user decision
         elif event_type == "user_decision_requested":
+             # Decision requests should still be content to halt the flow and show UI
             question = data.get("question", data.get("message", ""))
-            if question:
-                return f"\\n\\n{question}"
-            return None
+            return None # Decisions are handled via content/ui-interrupt, not status pill
 
         # Show completion
         elif event_type == "workflow_completed":
-            return "\\n  **done**"
+            return {
+                "type": "status_update",
+                "status": "completed",
+                "message": "✓ Workflow completed"
+            }
 
         elif event_type == "workflow_failed":
             error = data.get("error", "Unknown error")[:50]
-            return f"\\n  **failed:** {error}"
+            return {
+                "type": "status_update",
+                "status": "failed",
+                "message": f"✗ Failed: {error}"
+            }
 
         return None
 
@@ -989,10 +991,9 @@ async def chat(
                     ):
                         yield workflow_event
                         # Also emit progress messages
-                        progress_msg = _workflow_event_to_progress(workflow_event)
-                        if progress_msg:
-                            escaped_msg = progress_msg.replace('"', '\\"').replace('\n', '\\n')
-                            yield f'data: {{"content": "{escaped_msg}"}}\n\n'
+                        progress_event = _workflow_event_to_progress(workflow_event)
+                        if progress_event:
+                            yield f'data: {json.dumps(progress_event)}\n\n'
 
                     yield "data: [DONE]\n\n"
                     return
@@ -1070,10 +1071,9 @@ async def chat(
                         except (json.JSONDecodeError, KeyError):
                             pass
 
-                        progress_msg = _workflow_event_to_progress(workflow_event)
-                        if progress_msg:
-                            escaped_msg = progress_msg.replace('"', '\\"').replace('\n', '\\n')
-                            yield f'data: {{"content": "{escaped_msg}"}}\n\n'
+                        progress_event = _workflow_event_to_progress(workflow_event)
+                        if progress_event:
+                            yield f'data: {json.dumps(progress_event)}\n\n'
 
                     # Update session state
                     if followup_completed or followup_files:
@@ -1574,10 +1574,9 @@ async def chat(
                             except (json.JSONDecodeError, KeyError):
                                 pass
 
-                            progress_msg = _workflow_event_to_progress(workflow_event)
-                            if progress_msg:
-                                escaped_msg = progress_msg.replace('"', '\\"').replace('\n', '\\n')
-                                yield f'data: {{"content": "{escaped_msg}"}}\n\n'
+                            progress_event = _workflow_event_to_progress(workflow_event)
+                            if progress_event:
+                                yield f'data: {json.dumps(progress_event)}\n\n'
 
                         if workflow_completed or workflow_files:
                             update_session_state(

@@ -4,10 +4,11 @@ import { cn } from '@/lib/utils'
 
 interface StatusPillProps {
   status: 'thinking' | 'streaming' | 'orchestrating' | 'idle'
+  message?: string | null
   className?: string
 }
 
-export default function StatusPill({ status, className }: StatusPillProps) {
+export default function StatusPill({ status, message, className }: StatusPillProps) {
   if (status === 'idle') return null
 
   const statusConfig = {
@@ -47,7 +48,7 @@ export default function StatusPill({ status, className }: StatusPillProps) {
           config.animate && 'animate-spin'
         )}
       />
-      <span className="font-medium">{config.label}</span>
+      <span className="font-medium">{message || config.label}</span>
       <motion.span
         className="flex gap-0.5"
         initial={{ opacity: 0 }}

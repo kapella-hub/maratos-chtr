@@ -137,6 +137,8 @@ export type ChatEventType =
   | 'project_cancelled'
   | 'git_commit'
   | 'git_pr_created'
+  | 'status_update'   // New: transient status updates
+
 
 export interface SubagentGoal {
   id: number
@@ -296,6 +298,13 @@ export async function* streamChat(
             }
             if (parsed.orchestrating !== undefined) {
               yield { type: 'orchestrating', data: parsed.orchestrating }
+            }
+            if (parsed.type === 'status_update') {
+              yield {
+                type: 'status_update',
+                data: parsed.message,
+                status: parsed.status
+              }
             }
             if (parsed.subagent) {
               yield {
@@ -502,6 +511,12 @@ export async function* streamChatWithProjectAction(
               yield { type: 'project_completed', projectId: parsed.project_id, project: parsed.project }
             } else if (parsed.type === 'project_failed') {
               yield { type: 'project_failed', projectId: parsed.project_id, error: parsed.error }
+            } else if (parsed.type === 'status_update') {
+              yield {
+                type: 'status_update',
+                data: parsed.message,
+                status: parsed.status
+              }
             } else if (parsed.content) {
               yield { type: 'content', data: parsed.content.replace(/\\n/g, '\n') }
             }

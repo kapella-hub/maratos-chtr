@@ -55,6 +55,8 @@ export default function ChatPage() {
     clearProject,
     setCurrentThinkingBlock,
     setLastMessageThinking,
+    statusMessage,
+    setStatusMessage,
   } = useChatStore()
 
   const { addToast } = useToastStore()
@@ -160,6 +162,16 @@ export default function ChatPage() {
           setLastMessageThinking(event.data as unknown as ThinkingBlock)
         } else if (event.type === 'orchestrating') {
           setOrchestrating(event.data as boolean)
+        } else if (event.type === 'status_update') {
+          // Update transient status message
+          setStatusMessage(event.data as string)
+
+          // Notify user on completion
+          if (event.status === 'completed') {
+            addToast({ type: 'success', description: event.data as string })
+          } else if (event.status === 'failed') {
+            addToast({ type: 'error', description: event.data as string })
+          }
         } else if (event.type === 'subagent' && event.subagent) {
           updateSubagent({
             id: event.taskId || event.subagent,
@@ -263,9 +275,11 @@ export default function ChatPage() {
       setThinking(false)
       setModelThinking(false)
       setAbortController(null)
+      setAbortController(null)
       clearSubagents()
+      setStatusMessage(null)
     }
-  }, [agentId, sessionId, selectedProjectName, addMessage, appendToLastMessage, setSessionId, setLastMessageAgent, setCurrentModel, setActiveProjectContext, setStreaming, setThinking, setModelThinking, setCurrentThinkingBlock, setLastMessageThinking, setOrchestrating, updateSubagent, clearSubagents, setAbortController, setProjectStatus, setProjectPlan, updateProjectTask, addProjectEvent, setProjectError, addCanvasArtifact, addToast])
+  }, [agentId, sessionId, selectedProjectName, addMessage, appendToLastMessage, setSessionId, setLastMessageAgent, setCurrentModel, setActiveProjectContext, setStreaming, setThinking, setModelThinking, setCurrentThinkingBlock, setLastMessageThinking, setOrchestrating, updateSubagent, clearSubagents, setAbortController, setProjectStatus, setProjectPlan, updateProjectTask, addProjectEvent, setProjectError, addCanvasArtifact, addToast, setStatusMessage])
 
   // Project action handlers
   const handleProjectApprove = useCallback(async () => {
@@ -410,7 +424,7 @@ export default function ChatPage() {
         <div className="absolute top-0 left-0 right-0 h-1 bg-muted/30 overflow-hidden z-50">
           <div
             className="h-full bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 rounded-full"
-            style={{ 
+            style={{
               animation: 'progress 2s ease-in-out infinite',
               width: '40%',
               boxShadow: '0 0 20px rgba(139, 92, 246, 0.5)'
@@ -441,6 +455,7 @@ export default function ChatPage() {
         isThinking={isThinking}
         isStreaming={isStreaming}
         isOrchestrating={isOrchestrating}
+        statusMessage={statusMessage}
         onCancelSubagent={(taskId) => {
           updateSubagent({
             id: taskId,
@@ -483,7 +498,7 @@ export default function ChatPage() {
                 {inlineProject.status === 'detecting' ? 'Analyzing request...' : 'Creating project plan...'}
               </span>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {inlineProject.status === 'detecting' 
+                {inlineProject.status === 'detecting'
                   ? 'Determining the best approach for your request'
                   : 'Breaking down tasks and estimating effort'}
               </p>

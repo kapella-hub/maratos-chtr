@@ -9,6 +9,7 @@ export interface ChatMessage {
   agentId?: string
   isSubagentResult?: boolean
   thinkingData?: ThinkingBlock  // Structured thinking data
+  statusMessage?: string  // Transient status message for this message generation
 }
 
 export interface SubagentGoal {
@@ -104,6 +105,7 @@ interface ChatStore {
   isStreaming: boolean
   isThinking: boolean
   isModelThinking: boolean
+  statusMessage: string | null // Current transient status message (e.g., "Running tests...")
   isOrchestrating: boolean
   activeSubagents: SubagentTask[]
   abortController: AbortController | null
@@ -130,6 +132,7 @@ interface ChatStore {
   setStreaming: (streaming: boolean) => void
   setThinking: (thinking: boolean) => void
   setModelThinking: (thinking: boolean) => void
+  setStatusMessage: (message: string | null) => void
   setCurrentThinkingBlock: (block: Partial<ThinkingBlock> | null) => void
   setOrchestrating: (orchestrating: boolean) => void
   updateSubagent: (task: SubagentTask) => void
@@ -170,6 +173,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   isStreaming: false,
   isThinking: false,
   isModelThinking: false,
+  statusMessage: null,
   isOrchestrating: false,
   activeSubagents: [],
   abortController: null,
@@ -245,6 +249,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setThinking: (thinking) => set({ isThinking: thinking }),
   setModelThinking: (thinking) => set({ isModelThinking: thinking }),
+  setStatusMessage: (message) => set({ statusMessage: message }),
   setCurrentThinkingBlock: (block) => set({ currentThinkingBlock: block }),
   setOrchestrating: (orchestrating) => set({ isOrchestrating: orchestrating }),
 
@@ -282,6 +287,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     currentModel: null,
     isThinking: false,
     isModelThinking: false,
+    statusMessage: null,
     isOrchestrating: false,
     activeSubagents: [],
     activeProjectContext: null,

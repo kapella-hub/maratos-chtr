@@ -16,6 +16,7 @@ interface ChatStreamProps {
   isOrchestrating: boolean
   onCancelSubagent?: (taskId: string) => void
   onSendQuickPrompt?: (prompt: string) => void
+  statusMessage?: string | null
   className?: string
 }
 
@@ -27,6 +28,7 @@ const ChatStream = forwardRef<HTMLDivElement, ChatStreamProps>(({
   isOrchestrating,
   onCancelSubagent,
   onSendQuickPrompt,
+  statusMessage,
   className,
 }, ref) => {
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -117,7 +119,7 @@ const ChatStream = forwardRef<HTMLDivElement, ChatStreamProps>(({
   }
 
   return (
-    <div 
+    <div
       ref={(node) => {
         (internalRef as React.MutableRefObject<HTMLDivElement | null>).current = node
         if (typeof ref === 'function') ref(node)
@@ -155,7 +157,7 @@ const ChatStream = forwardRef<HTMLDivElement, ChatStreamProps>(({
         <AnimatePresence>
           {status !== 'idle' && messages.length > 0 && messages[messages.length - 1]?.content && (
             <div className="px-4 py-2">
-              <StatusPill status={status} />
+              <StatusPill status={status} message={statusMessage} />
             </div>
           )}
         </AnimatePresence>
@@ -165,8 +167,8 @@ const ChatStream = forwardRef<HTMLDivElement, ChatStreamProps>(({
       </div>
 
       {/* Scroll to bottom button */}
-      <ScrollToBottom 
-        visible={showScrollButton} 
+      <ScrollToBottom
+        visible={showScrollButton}
         onClick={scrollToBottom}
         className="bottom-4 left-1/2 -translate-x-1/2"
       />
