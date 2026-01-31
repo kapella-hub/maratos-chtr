@@ -1,0 +1,20 @@
+[
+  {
+    "id": "bbc1eae4",
+    "context": "File Modified: /path/to/test_file.py",
+    "critique": "Action: write_to_file\nDescription: Implement tracking feature\n\nOutcome: File written successfully.",
+    "tags": [
+      "file_change",
+      "context",
+      "write_to_file"
+    ],
+    "project_id": null,
+    "created_at": "2026-01-31T03:09:59.521704",
+    "metadata": {
+      "tool": "write_to_file",
+      "file_path": "/path/to/test_file.py",
+      "session_id": "59488cb2",
+      "auto_generated": true
+    }
+  }
+]

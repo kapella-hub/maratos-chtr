@@ -96,12 +96,12 @@ def _workflow_event_to_progress(event_str: str) -> str | None:
             state = data.get("state", "")
             fix_cycle = data.get('fix_cycles', 0) + 1
             phase_map = {
-                "coding": "coding",
-                "testing": "testing",
-                "fixing": f"fix #{fix_cycle}",
-                "escalating": "architect",
-                "deploying": "devops",
-                "documenting": "docs",
+                "coding": "👨‍💻 coding",
+                "testing": "🧪 testing",
+                "fixing": f"🔧 fix #{fix_cycle}",
+                "escalating": "🏗️ architect",
+                "deploying": "🚢 devops",
+                "documenting": "📝 docs",
             }
             if state in phase_map:
                 return f"  → {phase_map[state]}"
@@ -332,6 +332,9 @@ def clean_cli_output(text: str) -> str:
     cleaned = []
     skip_until_empty = False
 
+    # Regex to strip ANSI escape codes
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
     # Track numbered line sequences to collapse them
     numbered_line_pattern = re.compile(r'^\s*(?:[•\-\*]\s*)?(\d+)(?:,\s*\d+)?\s*:\s?(.*)$')
     in_numbered_sequence = False
@@ -340,6 +343,14 @@ def clean_cli_output(text: str) -> str:
     current_file_path = None
 
     for i, line in enumerate(lines):
+        # Strip ANSI codes first for cleaner matching
+        line = ansi_escape.sub('', line)
+
+        # Replace unicode separator with markdown
+        if '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' in line:
+            cleaned.append('---')
+            continue
+
         # Skip ASCII art banner lines (contain lots of Unicode box/block chars)
         special_count = sum(1 for c in line if c in '⠀▀▄█░▒▓│╭╮╯╰─┌┐└┘├┤┬┴┼⣴⣶⣦⣿⢰⢸⠈⠙⠁⠀')
         if special_count > len(line) * 0.3 and len(line) > 10:
@@ -363,9 +374,13 @@ def clean_cli_output(text: str) -> str:
             continue
 
         # Skip verbose operation summaries
-        if re.match(r'^\s*Summary:\s*\d+\s*operations?', line):
+        # Match "Summary: 4 operations processed..."
+        if re.match(r'^\s*Summary:\s*\d+\s*operations?', line, re.IGNORECASE):
             continue
-        if re.match(r'^\s*\d+\s*operations?\s+processed', line):
+        if re.match(r'^\s*\d+\s*operations?\s+processed', line, re.IGNORECASE):
+            continue
+        # Catch variations like "4 operations processed"
+        if 'operations processed' in line and (line.strip().startswith('Summary:') or line.strip()[0].isdigit()):
             continue
 
         # Track file paths being created/modified
@@ -408,8 +423,86 @@ def clean_cli_output(text: str) -> str:
         else:
             cleaned.append(f"```\n{numbered_first_line}...\n({numbered_count} lines)\n```")
 
-    # Remove leading/trailing empty lines and collapse multiple empty lines
+
+    # Logic to wrap code snippets that look like "File: ... \n python ..."
+    # This detects lines starting with "File:" followed by a line starting with a language name or common code pattern
+    final_lines = []
+    in_code_block = False
+    
+    # Common language identifiers that might appear in grep/tool output
+    lang_ids = {'python', 'javascript', 'typescript', 'java', 'html', 'css', 'bash', 'sh', 'yaml', 'json', 'sql', 'go', 'rust'}
+    
+    for i, line in enumerate(cleaned):
+        # Check for start of code block pattern: "File: ..." header
+        # followed by (optional empty line) and then a language identifier or clear code
+        if not in_code_block and (line.startswith("File:") or line.startswith("Files:")):
+            final_lines.append(line)
+            
+            # Look ahead to see if next content looks like code
+            # Simple heuristic: next non-empty line starts with a language name or looks like code
+            is_code_next = False
+            look_ahead_idx = i + 1
+            while look_ahead_idx < len(cleaned) and not cleaned[look_ahead_idx].strip():
+                look_ahead_idx += 1
+            
+            if look_ahead_idx < len(cleaned):
+                next_content = cleaned[look_ahead_idx].strip()
+                first_word = next_content.split(' ')[0].lower()
+                
+                # Check if it starts with a language ID (common in some tool outputs)
+                if first_word in lang_ids:
+                    # It's likely a code block marker
+                    # We'll inject the code block start before this line
+                    # But we're iterating linearly, so we can't easily inject ahead without refactoring loop
+                    # Instead, we just mark state and handle in the loop
+                    pass 
+
+        # This simple linear pass is tricky for lookahead. Let's try a regex replacement on the full text instead.
+        # It's cleaner than complex state machine.
+        pass
+
+    # Re-join first
     result = '\n'.join(cleaned)
+    
+    # Regex to wrap "File: ... \n\n python ..." patterns
+    # Matches:
+    # 1. File: ... (header)
+    # 2. Optional newlines
+    # 3. (python|...) (language identifier start of code)
+    # 4. Content until double newline or end
+    
+    def code_block_replacer(match):
+        header = match.group(1)
+        spacing = match.group(2)
+        content = match.group(3)
+        
+        # If content already has backticks, don't wrap
+        if '```' in content:
+            return match.group(0)
+            
+        # Extract lang if present at start of content
+        first_line = content.split('\n')[0].strip()
+        first_word = first_line.split(' ')[0].lower() if first_line else ""
+        
+        lang = first_word if first_word in lang_ids else ""
+        
+        return f"{header}\n{spacing}```{lang}\n{content}\n```"
+
+    # Pattern: ^(File: .+?)(\n+)(?=(?:python|javascript|typescript|bash|sh|html|css|yaml|json|sql|go|rust)\b)(.+?)(?=\n\n|\Z)
+    # We need to be careful not to match too greedily. 
+    # Let's match the specific user example: "File: ... \n\n python ..."
+    
+    # Improved Pattern:
+    # Group 1: File header
+    # Group 2: Spacing
+    # Group 3: Code content (starting with lang keyword, assuming the tool outputs "python code...")
+    pattern = re.compile(
+        r'^(File:.+?)(\n+)(?=(?:python|javascript|typescript|bash|sh|html|css|yaml|json|sql|go|rust)\b)(.+?)(?=\n\n|━━━━━━━━|-----|\Z)', 
+        re.MULTILINE | re.DOTALL
+    )
+    
+    result = pattern.sub(code_block_replacer, result)
+
     result = re.sub(r'\n{3,}', '\n\n', result)
     return result.strip()
 

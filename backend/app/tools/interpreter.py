@@ -712,6 +712,11 @@ def format_tool_results_for_llm(results: list[ToolExecutionResult]) -> str:
         if result.result.success:
             parts.append(f"<status>success</status>")
             output = result.result.output
+            try:
+                output = _format_output_with_codeblocks(output)
+            except Exception:
+                pass  # Fallback to raw output if regex fails
+
             # Truncate very long outputs
             if len(output) > 10000:
                 output = output[:10000] + "\n... [truncated]"
@@ -725,6 +730,35 @@ def format_tool_results_for_llm(results: list[ToolExecutionResult]) -> str:
     parts.append("</tool_results>")
 
     return "\n".join(parts)
+
+
+def _format_output_with_codeblocks(text: str) -> str:
+    """Format tool output to wrap code interactions in markdown blocks.
+    
+    This helps the LLM recognize code in tool output and format its own response accordingly.
+    """
+    lang_ids = {'python', 'javascript', 'typescript', 'java', 'html', 'css', 'bash', 'sh', 'yaml', 'json', 'sql', 'go', 'rust'}
+    
+    def replacer(match):
+        header = match.group(1)
+        spacing = match.group(2)
+        content = match.group(3)
+        
+        if '```' in content:
+            return match.group(0)
+            
+        first_line = content.split('\n')[0].strip()
+        first_word = first_line.split(' ')[0].lower() if first_line else ""
+        lang = first_word if first_word in lang_ids else ""
+        
+        return f"{header}\n{spacing}```{lang}\n{content}\n```"
+
+    pattern = re.compile(
+        r'^(File:.+?)(\n+)(?=(?:python|javascript|typescript|bash|sh|html|css|yaml|json|sql|go|rust)\b)(.+?)(?=\n\n|━━━━━━━━|-----|\Z)', 
+        re.MULTILINE | re.DOTALL
+    )
+    
+    return pattern.sub(replacer, text)
 
 
 def create_repair_prompt(raw_json: str, error: str) -> str:

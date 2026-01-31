@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.thinking.models import ThinkingLevel
+from app.thinking.models import ThinkingLevel, TaskType
 from app.thinking.templates import detect_template, ThinkingTemplate
 
 
@@ -25,8 +25,10 @@ class ComplexityFactors:
     urgency_indicators: int = 0
     error_indicators: int = 0
     architecture_indicators: int = 0
+    security_indicators: int = 0
+    detected_task_type: TaskType = TaskType.GENERAL
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "message_length": self.message_length,
             "code_blocks": self.code_blocks,
@@ -37,6 +39,8 @@ class ComplexityFactors:
             "urgency_indicators": self.urgency_indicators,
             "error_indicators": self.error_indicators,
             "architecture_indicators": self.architecture_indicators,
+            "security_indicators": self.security_indicators,
+            "detected_task_type": self.detected_task_type.value,
         }
 
 
@@ -81,6 +85,7 @@ class AdaptiveThinkingManager:
         "encryption", "framework", "interface", "microservice", "migration",
         "optimization", "performance", "refactor", "scalability", "security",
         "transaction", "validation", "vulnerability", "webhook", "api",
+        "token", "jwt", "oauth", "protocol", "race condition", "deadlock",
     }
 
     # Patterns for detecting various indicators
@@ -88,8 +93,9 @@ class AdaptiveThinkingManager:
     FILE_REFERENCE_PATTERN = re.compile(r"[\w/.-]+\.(py|js|ts|tsx|jsx|go|rs|java|rb|php|c|cpp|h|hpp|css|html|json|yaml|yml|md|sql)")
     MULTI_STEP_PATTERN = re.compile(r"\b(first|then|next|after|finally|step\s*\d|1\.|2\.|3\.)\b", re.IGNORECASE)
     URGENCY_PATTERN = re.compile(r"\b(asap|urgent|quickly|fast|hurry|immediately|now)\b", re.IGNORECASE)
-    ERROR_PATTERN = re.compile(r"\b(error|bug|crash|fail|broken|issue|problem|exception|traceback)\b", re.IGNORECASE)
-    ARCHITECTURE_PATTERN = re.compile(r"\b(design|architect|structure|system|scale|pattern|service|component|module)\b", re.IGNORECASE)
+    ERROR_PATTERN = re.compile(r"\b(error|bug|crash|fail|broken|issue|problem|exception|traceback|undefined|unhandled)\b", re.IGNORECASE)
+    ARCHITECTURE_PATTERN = re.compile(r"\b(design|architect|structur|system|scal|pattern|service|component|module|relationship)", re.IGNORECASE)
+    SECURITY_PATTERN = re.compile(r"\b(security|vulnerability|exploit|injection|auth|credential|password|secret|key|hack|safe)", re.IGNORECASE)
     QUESTION_PATTERN = re.compile(r"\?")
 
     def __init__(
@@ -121,6 +127,32 @@ class AdaptiveThinkingManager:
             ThinkingLevel.HIGH,
             ThinkingLevel.MAX,
         ]
+
+    def _detect_task_type(self, message: str, factors: ComplexityFactors) -> TaskType:
+        """Heuristic detection of task type."""
+        message_lower = message.lower()
+        
+        # Security takes precedence
+        if factors.security_indicators > 0:
+            return TaskType.SECURITY
+            
+        # Architecture is high level
+        if factors.architecture_indicators > 1:
+            return TaskType.ARCHITECTURE
+            
+        # Debugging
+        if factors.error_indicators > 0 or "fix" in message_lower or "debug" in message_lower:
+            return TaskType.DEBUGGING
+            
+        # Refactoring
+        if "refactor" in message_lower or "rewrite" in message_lower or "clean up" in message_lower:
+            return TaskType.REFACTORING
+            
+        # Implementation/Code
+        if "implement" in message_lower or "create" in message_lower or "build" in message_lower or "write" in message_lower:
+            return TaskType.IMPLEMENTATION
+            
+        return TaskType.GENERAL
 
     def analyze_complexity(self, message: str) -> ComplexityFactors:
         """Analyze a message to determine complexity factors.
@@ -162,6 +194,12 @@ class AdaptiveThinkingManager:
 
         # Architecture indicators
         factors.architecture_indicators = len(self.ARCHITECTURE_PATTERN.findall(message))
+        
+        # Security indicators
+        factors.security_indicators = len(self.SECURITY_PATTERN.findall(message))
+        
+        # Detect task type
+        factors.detected_task_type = self._detect_task_type(message, factors)
 
         return factors
 
@@ -175,32 +213,42 @@ class AdaptiveThinkingManager:
             Float between 0.0 (simple) and 1.0 (complex)
         """
         # Weighted scoring
-        score = 0.0
+        score = 0.1 # Base score
 
-        # Message length contribution (longer = more complex, up to 0.2)
-        length_score = min(factors.message_length / 1000, 1.0) * 0.15
+        # Task type weights
+        type_weights = {
+            TaskType.SECURITY: 0.5,
+            TaskType.ARCHITECTURE: 0.35,
+            TaskType.DEBUGGING: 0.3,
+            TaskType.REFACTORING: 0.25,
+            TaskType.IMPLEMENTATION: 0.2,
+            TaskType.CODE: 0.15,
+            TaskType.GENERAL: 0.0,
+        }
+        score += type_weights.get(factors.detected_task_type, 0.0)
+
+        # Message length contribution (longer = more complex, up to 0.15)
+        length_score = min(factors.message_length / 1500, 1.0) * 0.15
         score += length_score
 
         # Code blocks (each adds complexity)
-        score += min(factors.code_blocks * 0.1, 0.2)
+        score += min(factors.code_blocks * 0.05, 0.15)
 
         # Technical terms (strong complexity indicator)
-        score += min(factors.technical_terms * 0.05, 0.25)
+        score += min(factors.technical_terms * 0.04, 0.2)
 
         # File references (suggests real work)
-        score += min(factors.file_references * 0.05, 0.15)
+        score += min(factors.file_references * 0.05, 0.1)
 
         # Multi-step indicators (multi-part task)
         score += min(factors.multi_step_indicators * 0.05, 0.15)
 
-        # Architecture indicators (high complexity)
-        score += min(factors.architecture_indicators * 0.08, 0.2)
-
         # Error indicators (debugging needs thinking)
-        score += min(factors.error_indicators * 0.05, 0.1)
+        if factors.detected_task_type != TaskType.DEBUGGING:
+            score += min(factors.error_indicators * 0.05, 0.1)
 
         # Urgency indicators (reduce complexity to be faster)
-        score -= min(factors.urgency_indicators * 0.1, 0.2)
+        score -= min(factors.urgency_indicators * 0.1, 0.15)
 
         # Clamp to [0, 1]
         return max(0.0, min(1.0, score))
@@ -209,12 +257,14 @@ class AdaptiveThinkingManager:
         self,
         base_level: ThinkingLevel,
         complexity_score: float,
+        template: ThinkingTemplate | None = None,
     ) -> tuple[ThinkingLevel, str]:
         """Adjust the thinking level based on complexity score.
 
         Args:
             base_level: The user's configured thinking level
             complexity_score: Calculated complexity score (0.0-1.0)
+            template: Optional template to enforce constraints
 
         Returns:
             Tuple of (adjusted_level, reason)
@@ -222,12 +272,16 @@ class AdaptiveThinkingManager:
         base_index = self._level_order.index(base_level)
 
         # Determine target based on complexity
-        if complexity_score >= 0.7:
-            # High complexity - consider upgrading
+        if complexity_score >= 0.8:
+            # Very high complexity - force HIGH or MAX
             target_level = ThinkingLevel.HIGH
             reason = "High complexity detected"
-        elif complexity_score >= 0.5:
-            # Medium complexity - stay around medium/high
+            # If base is already HIGH, consider MAX
+            if base_level == ThinkingLevel.HIGH:
+                target_level = ThinkingLevel.MAX
+                reason = "Very high complexity detected"
+        elif complexity_score >= 0.6:
+            # Medium-High complexity
             target_level = ThinkingLevel.MEDIUM
             reason = "Moderate complexity"
         elif complexity_score >= 0.3:
@@ -242,6 +296,11 @@ class AdaptiveThinkingManager:
         target_index = self._level_order.index(target_level)
 
         # Apply constraints
+        if template and template.min_level:
+            # Never go below template minimum
+            template_min_index = self._level_order.index(template.min_level)
+            target_index = max(target_index, template_min_index)
+
         if target_index > base_index:
             # Upgrading
             if not self.allow_upgrade:
@@ -287,17 +346,28 @@ class AdaptiveThinkingManager:
 
         # Consider template minimum level
         if template and template.min_level:
-            template_min_index = self._level_order.index(template.min_level)
-            base_index = self._level_order.index(base_level)
-            if template_min_index > base_index:
-                # Template requires higher level
-                complexity_score = max(complexity_score, 0.6)
+            try:
+                template_min_index = self._level_order.index(template.min_level)
+                base_index = self._level_order.index(base_level)
+                
+                # If template needs a higher level, boost the score
+                if template_min_index > base_index:
+                    # Map level to minimum score required to trigger it
+                    min_scores = {
+                        ThinkingLevel.HIGH: 0.8,
+                        ThinkingLevel.MEDIUM: 0.6,
+                        ThinkingLevel.LOW: 0.3,
+                    }
+                    target_score = min_scores.get(template.min_level, 0.6)
+                    complexity_score = max(complexity_score, target_score)
+            except ValueError:
+                pass # Level might not be in order list
 
         # Consider context if provided
         if context:
             # Error history suggests need for more careful thinking
             if context.get("recent_errors", 0) > 0:
-                complexity_score = min(complexity_score + 0.1, 1.0)
+                complexity_score = min(complexity_score + 0.15, 1.0)
 
             # User expertise level
             if context.get("user_expertise") == "expert":
@@ -308,7 +378,7 @@ class AdaptiveThinkingManager:
                 complexity_score = min(complexity_score + 0.1, 1.0)
 
         # Adjust level based on complexity
-        adaptive_level, reason = self._adjust_level(base_level, complexity_score)
+        adaptive_level, reason = self._adjust_level(base_level, complexity_score, template)
 
         return AdaptiveResult(
             original_level=base_level,

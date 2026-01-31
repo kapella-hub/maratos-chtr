@@ -1,0 +1,32 @@
+id: implementation
+name: Implementation
+category: code
+description: Feature implementation with planning and validation
+focus_areas:
+  - Requirements clarity
+  - Implementation approach
+  - Dependencies and impacts
+  - Testing strategy
+  - Documentation needs
+required_steps:
+  - analysis
+  - decision
+  - implementation
+optional_steps:
+  - evaluation
+  - risk_assessment
+  - validation
+min_level: medium
+keywords:
+  - implement
+  - create
+  - build
+  - add
+  - develop
+  - write
+prompt_additions: |
+  For implementation:
+  1. Clarify all requirements before starting
+  2. Plan the approach and data structures
+  3. Consider error handling and edge cases
+  4. Plan for testing and documentation

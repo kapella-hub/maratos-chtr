@@ -1,0 +1,32 @@
+id: refactoring
+name: Refactoring
+category: code
+description: Code refactoring with safety and improvement validation
+focus_areas:
+  - Current code problems
+  - Improvement goals
+  - Refactoring safety
+  - Backward compatibility
+  - Test coverage
+required_steps:
+  - analysis
+  - evaluation
+  - validation
+optional_steps:
+  - risk_assessment
+  - implementation
+  - critique
+min_level: medium
+keywords:
+  - refactor
+  - improve
+  - clean
+  - restructure
+  - reorganize
+prompt_additions: |
+  For refactoring:
+  1. Identify what's wrong with current code
+  2. Define clear improvement goals
+  3. Ensure tests exist before changing
+  4. Make small, incremental changes
+  5. Verify behavior is preserved

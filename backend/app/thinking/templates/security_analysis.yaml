@@ -1,0 +1,32 @@
+id: security_analysis
+name: Security Analysis
+category: analysis
+description: Security-focused analysis of code or systems
+focus_areas:
+  - Authentication and authorization
+  - Input validation and sanitization
+  - Data protection and encryption
+  - Injection vulnerabilities
+  - Security configuration
+required_steps:
+  - analysis
+  - risk_assessment
+  - validation
+optional_steps:
+  - evaluation
+  - critique
+min_level: high
+keywords:
+  - security
+  - vulnerability
+  - exploit
+  - auth
+  - injection
+  - xss
+prompt_additions: |
+  Security analysis checklist:
+  1. OWASP Top 10 vulnerabilities
+  2. Authentication/authorization flaws
+  3. Sensitive data exposure
+  4. Security misconfigurations
+  5. Input validation gaps

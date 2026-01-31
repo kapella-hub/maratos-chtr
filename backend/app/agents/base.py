@@ -117,7 +117,40 @@ def convert_numbered_lines_to_codeblock(text: str) -> str:
         result.extend(code_block_lines)
         result.append('```')
 
-    return '\n'.join(result)
+    text_result = '\n'.join(result)
+
+    # Secondary pass: Wrap "File: ... \n python ..." patterns
+    # Matches:
+    # 1. File: ... (header)
+    # 2. Optional newlines
+    # 3. (python|...) (language identifier start of code)
+    # 4. Content until double newline or end
+    
+    lang_ids = {'python', 'javascript', 'typescript', 'java', 'html', 'css', 'bash', 'sh', 'yaml', 'json', 'sql', 'go', 'rust'}
+    
+    def code_block_replacer(match):
+        header = match.group(1)
+        spacing = match.group(2)
+        content = match.group(3)
+        
+        # If content already has backticks, don't wrap
+        if '```' in content:
+            return match.group(0)
+            
+        # Extract lang if present at start of content
+        first_line = content.split('\n')[0].strip()
+        first_word = first_line.split(' ')[0].lower() if first_line else ""
+        
+        lang = first_word if first_word in lang_ids else ""
+        
+        return f"{header}\n{spacing}```{lang}\n{content}\n```"
+
+    pattern = re.compile(
+        r'^(File:.+?)(\n+)(?=(?:python|javascript|typescript|bash|sh|html|css|yaml|json|sql|go|rust)\b)(.+?)(?=\n\n|━━━━━━━━|-----|\Z)', 
+        re.MULTILINE | re.DOTALL
+    )
+    
+    return pattern.sub(code_block_replacer, text_result)
 
 
 @dataclass
@@ -211,6 +244,27 @@ class Agent:
             # Inject file context
             if "files" in context:
                 prompt += f"\n\n## Files to Work With\n{context['files']}\n"
+
+            # Inject Thinking Lessons (Thinking 3.0)
+            if THINKING_AVAILABLE and "user_message" in context and context["user_message"]:
+                try:
+                    from app.thinking.memory import get_thinking_memory
+                    import hashlib
+                    memory = get_thinking_memory()
+                    
+                    # Derive project_id from workspace
+                    project_id = None
+                    if "workspace" in context and context["workspace"]:
+                        project_id = hashlib.md5(context["workspace"].encode()).hexdigest()[:8]
+                        
+                    lessons = memory.search_lessons(context["user_message"], project_id=project_id)
+                    if lessons:
+                        prompt += "\n\n## Lessons from Past Critiques\n"
+                        prompt += "Apply these insights to avoid repeating mistakes:\n"
+                        for lesson in lessons:
+                            prompt += f"- {lesson.critique}\n"
+                except Exception as e:
+                    logger.warning(f"Failed to inject thinking lessons: {e}")
 
         # Inject Thinking Level Instructions using the thinking module
         if THINKING_AVAILABLE:
@@ -388,11 +442,23 @@ class Agent:
 
             # Determine adaptive level
             adaptive_result = determine_thinking_level(user_message, base_level, context)
+            
+            # Derive project_id
+            project_id = None
+            active_project_name = None
+            if context and "workspace" in context and context["workspace"]:
+                import hashlib
+                project_id = hashlib.md5(context["workspace"].encode()).hexdigest()[:8]
+            
+            if context and "active_project_name" in context:
+                active_project_name = context["active_project_name"]
 
-            thinking_session = self._thinking_manager.create_session(
+            thinking_session = await self._thinking_manager.create_session(
                 message_id=message_id,
                 level=adaptive_result.adaptive_level,
                 complexity_score=adaptive_result.complexity_score,
+                project_id=project_id,
+                active_project_name=active_project_name,
             )
             thinking_session.original_level = base_level
             thinking_session.adaptive_level = adaptive_result.adaptive_level
@@ -456,7 +522,7 @@ class Agent:
                                 for step in steps:
                                     step.duration_ms = duration_ms // max(len(steps), 1)
                                     current_block.add_step(step)
-                                self._thinking_manager.complete_block(current_block)
+                                await self._thinking_manager.complete_block(current_block, thinking_session)
 
                             # Discard everything up to and including closing tag
                             buffer = buffer[end_idx + len(end_tag):]
@@ -720,6 +786,19 @@ class Agent:
                         event_data["output_preview"] = output[:200] + "..."
 
                 yield f"__TOOL_RESULT__:{json.dumps(event_data)}"
+
+                # Record tool usage for collaborative memory
+                if self._thinking_manager and self._current_thinking_session:
+                    try:
+                        await self._thinking_manager.record_tool_usage(
+                            session=self._current_thinking_session,
+                            tool_name=result.invocation.tool_id,
+                            tool_args=result.invocation.args,
+                            success=result.result.success,
+                            output=result.result.output
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to record tool usage: {e}")
 
             # Format results for next LLM turn
             results_message = interpreter.format_results(results)

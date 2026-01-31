@@ -1,0 +1,33 @@
+id: architecture
+name: Architecture Design
+category: architecture
+description: System architecture analysis with scalability, trade-offs, and implementation planning
+focus_areas:
+  - Scalability and performance at scale
+  - System boundaries and interfaces
+  - Trade-offs between approaches
+  - Implementation complexity
+  - Future extensibility
+required_steps:
+  - analysis
+  - evaluation
+  - decision
+optional_steps:
+  - risk_assessment
+  - implementation
+  - validation
+  - critique
+min_level: high
+keywords:
+  - architecture
+  - design
+  - system
+  - structure
+  - scale
+  - pattern
+prompt_additions: |
+  For architecture decisions, consider:
+  1. Current requirements vs future growth
+  2. Team capabilities and maintenance burden
+  3. Integration with existing systems
+  4. Cost and resource implications

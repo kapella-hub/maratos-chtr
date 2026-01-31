@@ -77,239 +77,94 @@ class ThinkingTemplate:
         }
 
 
-# Built-in templates
-TEMPLATES: dict[str, ThinkingTemplate] = {
-    "code_review": ThinkingTemplate(
-        id="code_review",
-        name="Code Review",
-        category=TemplateCategory.CODE,
-        description="Systematic code review with security, performance, and maintainability checks",
-        focus_areas=[
-            "Security vulnerabilities (injection, XSS, auth issues)",
-            "Performance bottlenecks and optimization opportunities",
-            "Code maintainability and readability",
-            "Error handling and edge cases",
-            "Test coverage and testability",
-        ],
-        required_steps=[
-            ThinkingStepType.ANALYSIS,
-            ThinkingStepType.EVALUATION,
-        ],
-        optional_steps=[
-            ThinkingStepType.RISK_ASSESSMENT,
-            ThinkingStepType.VALIDATION,
-            ThinkingStepType.CRITIQUE,
-        ],
-        min_level=ThinkingLevel.MEDIUM,
-        keywords=["review", "code review", "check", "audit", "examine"],
-        prompt_additions=(
-            "When reviewing code, systematically check:\n"
-            "1. Security: Look for injection points, auth bypass, data exposure\n"
-            "2. Performance: Identify N+1 queries, unnecessary loops, memory leaks\n"
-            "3. Maintainability: Check naming, structure, documentation\n"
-            "4. Edge cases: Consider null, empty, boundary conditions\n"
-        ),
-    ),
-
-    "architecture": ThinkingTemplate(
-        id="architecture",
-        name="Architecture Design",
-        category=TemplateCategory.ARCHITECTURE,
-        description="System architecture analysis with scalability, trade-offs, and implementation planning",
-        focus_areas=[
-            "Scalability and performance at scale",
-            "System boundaries and interfaces",
-            "Trade-offs between approaches",
-            "Implementation complexity",
-            "Future extensibility",
-        ],
-        required_steps=[
-            ThinkingStepType.ANALYSIS,
-            ThinkingStepType.EVALUATION,
-            ThinkingStepType.DECISION,
-        ],
-        optional_steps=[
-            ThinkingStepType.RISK_ASSESSMENT,
-            ThinkingStepType.IMPLEMENTATION,
-            ThinkingStepType.VALIDATION,
-            ThinkingStepType.CRITIQUE,
-        ],
-        min_level=ThinkingLevel.HIGH,
-        keywords=["architecture", "design", "system", "structure", "scale", "pattern"],
-        prompt_additions=(
-            "For architecture decisions, consider:\n"
-            "1. Current requirements vs future growth\n"
-            "2. Team capabilities and maintenance burden\n"
-            "3. Integration with existing systems\n"
-            "4. Cost and resource implications\n"
-        ),
-    ),
-
-    "debugging": ThinkingTemplate(
-        id="debugging",
-        name="Debugging",
-        category=TemplateCategory.DEBUGGING,
-        description="Systematic debugging with root cause analysis and fix validation",
-        focus_areas=[
-            "Root cause identification",
-            "Reproduction steps",
-            "Impact assessment",
-            "Fix validation",
-            "Regression prevention",
-        ],
-        required_steps=[
-            ThinkingStepType.ANALYSIS,
-            ThinkingStepType.VALIDATION,
-        ],
-        optional_steps=[
-            ThinkingStepType.RISK_ASSESSMENT,
-            ThinkingStepType.IMPLEMENTATION,
-            ThinkingStepType.CRITIQUE,
-        ],
-        min_level=ThinkingLevel.MEDIUM,
-        keywords=["debug", "bug", "fix", "error", "issue", "problem", "broken", "crash"],
-        prompt_additions=(
-            "When debugging:\n"
-            "1. Understand the expected vs actual behavior\n"
-            "2. Identify the minimal reproduction case\n"
-            "3. Trace the execution path to the root cause\n"
-            "4. Consider why the bug wasn't caught earlier\n"
-            "5. Verify the fix doesn't introduce new issues\n"
-        ),
-    ),
-
-    "implementation": ThinkingTemplate(
-        id="implementation",
-        name="Implementation",
-        category=TemplateCategory.CODE,
-        description="Feature implementation with planning and validation",
-        focus_areas=[
-            "Requirements clarity",
-            "Implementation approach",
-            "Dependencies and impacts",
-            "Testing strategy",
-            "Documentation needs",
-        ],
-        required_steps=[
-            ThinkingStepType.ANALYSIS,
-            ThinkingStepType.DECISION,
-            ThinkingStepType.IMPLEMENTATION,
-        ],
-        optional_steps=[
-            ThinkingStepType.EVALUATION,
-            ThinkingStepType.RISK_ASSESSMENT,
-            ThinkingStepType.VALIDATION,
-        ],
-        min_level=ThinkingLevel.MEDIUM,
-        keywords=["implement", "create", "build", "add", "develop", "write"],
-        prompt_additions=(
-            "For implementation:\n"
-            "1. Clarify all requirements before starting\n"
-            "2. Plan the approach and data structures\n"
-            "3. Consider error handling and edge cases\n"
-            "4. Plan for testing and documentation\n"
-        ),
-    ),
-
-    "refactoring": ThinkingTemplate(
-        id="refactoring",
-        name="Refactoring",
-        category=TemplateCategory.CODE,
-        description="Code refactoring with safety and improvement validation",
-        focus_areas=[
-            "Current code problems",
-            "Improvement goals",
-            "Refactoring safety",
-            "Backward compatibility",
-            "Test coverage",
-        ],
-        required_steps=[
-            ThinkingStepType.ANALYSIS,
-            ThinkingStepType.EVALUATION,
-            ThinkingStepType.VALIDATION,
-        ],
-        optional_steps=[
-            ThinkingStepType.RISK_ASSESSMENT,
-            ThinkingStepType.IMPLEMENTATION,
-            ThinkingStepType.CRITIQUE,
-        ],
-        min_level=ThinkingLevel.MEDIUM,
-        keywords=["refactor", "improve", "clean", "restructure", "reorganize"],
-        prompt_additions=(
-            "For refactoring:\n"
-            "1. Identify what's wrong with current code\n"
-            "2. Define clear improvement goals\n"
-            "3. Ensure tests exist before changing\n"
-            "4. Make small, incremental changes\n"
-            "5. Verify behavior is preserved\n"
-        ),
-    ),
-
-    "security_analysis": ThinkingTemplate(
-        id="security_analysis",
-        name="Security Analysis",
-        category=TemplateCategory.ANALYSIS,
-        description="Security-focused analysis of code or systems",
-        focus_areas=[
-            "Authentication and authorization",
-            "Input validation and sanitization",
-            "Data protection and encryption",
-            "Injection vulnerabilities",
-            "Security configuration",
-        ],
-        required_steps=[
-            ThinkingStepType.ANALYSIS,
-            ThinkingStepType.RISK_ASSESSMENT,
-            ThinkingStepType.VALIDATION,
-        ],
-        optional_steps=[
-            ThinkingStepType.EVALUATION,
-            ThinkingStepType.CRITIQUE,
-        ],
-        min_level=ThinkingLevel.HIGH,
-        keywords=["security", "vulnerability", "exploit", "auth", "injection", "xss"],
-        prompt_additions=(
-            "Security analysis checklist:\n"
-            "1. OWASP Top 10 vulnerabilities\n"
-            "2. Authentication/authorization flaws\n"
-            "3. Sensitive data exposure\n"
-            "4. Security misconfigurations\n"
-            "5. Input validation gaps\n"
-        ),
-    ),
-
-    "general": ThinkingTemplate(
-        id="general",
-        name="General Analysis",
-        category=TemplateCategory.GENERAL,
-        description="General-purpose thinking for unclassified tasks",
-        focus_areas=[
-            "Problem understanding",
-            "Approach options",
-            "Best solution selection",
-        ],
-        required_steps=[
-            ThinkingStepType.ANALYSIS,
-            ThinkingStepType.DECISION,
-        ],
-        optional_steps=[
-            ThinkingStepType.EVALUATION,
-            ThinkingStepType.VALIDATION,
-            ThinkingStepType.CRITIQUE,
-        ],
-        min_level=ThinkingLevel.LOW,
-        keywords=[],  # Fallback template
-        prompt_additions="",
-    ),
-}
+# Templates are now loaded from YAML files in the templates/ directory
 
 
 class ThinkingTemplates:
     """Manager for thinking templates."""
 
     def __init__(self):
-        self._templates = dict(TEMPLATES)
+        self._templates: dict[str, ThinkingTemplate] = {}
         self._custom_templates: dict[str, ThinkingTemplate] = {}
+        self._load_templates()
+
+    def _load_templates(self):
+        """Load templates from YAML files."""
+        import yaml
+        import os
+        from pathlib import Path
+
+        # Define template directories
+        base_dir = Path(__file__).parent / "templates"
+        
+        # Load built-in templates
+        if base_dir.exists():
+            for file_path in base_dir.glob("*.yaml"):
+                try:
+                    with open(file_path, "r") as f:
+                        data = yaml.safe_load(f)
+                        if self._validate_template_data(data):
+                            template = self._create_template_from_dict(data)
+                            self._templates[template.id] = template
+                        else:
+                            print(f"Invalid template data in {file_path}")
+                except Exception as e:
+                    print(f"Error loading template {file_path}: {e}")
+
+        # Ensure general template exists as fallback
+        if "general" not in self._templates:
+            self._templates["general"] = ThinkingTemplate(
+                id="general",
+                name="General Analysis",
+                category=TemplateCategory.GENERAL,
+                description="General-purpose thinking for unclassified tasks",
+                focus_areas=["Problem understanding", "Approach options", "Solution selection"],
+                required_steps=[ThinkingStepType.ANALYSIS, ThinkingStepType.DECISION],
+                optional_steps=[],
+                min_level=ThinkingLevel.LOW,
+                keywords=[],
+                prompt_additions=""
+            )
+
+    def _validate_template_data(self, data: dict) -> bool:
+        """Validate template dictionary structure."""
+        required_fields = ["id", "name", "category", "description", "focus_areas", "required_steps"]
+        return all(field in data for field in required_fields)
+
+    def _create_template_from_dict(self, data: dict) -> ThinkingTemplate:
+        """Create a ThinkingTemplate object from dictionary."""
+        # Convert string values to enums
+        category = TemplateCategory(data["category"])
+        
+        required_steps = []
+        for step_str in data["required_steps"]:
+            try:
+                required_steps.append(ThinkingStepType(step_str.lower()))
+            except ValueError:
+                pass # Skip invalid steps
+                
+        optional_steps = []
+        if "optional_steps" in data:
+            for step_str in data["optional_steps"]:
+                try:
+                    optional_steps.append(ThinkingStepType(step_str.lower()))
+                except ValueError:
+                    pass
+
+        min_level = ThinkingLevel(data.get("min_level", "medium").lower())
+
+        return ThinkingTemplate(
+            id=data["id"],
+            name=data["name"],
+            category=category,
+            description=data["description"],
+            focus_areas=data["focus_areas"],
+            required_steps=required_steps,
+            optional_steps=optional_steps,
+            min_level=min_level,
+            keywords=data.get("keywords", []),
+            prompt_additions=data.get("prompt_additions", "")
+        )
 
     def get(self, template_id: str) -> ThinkingTemplate | None:
         """Get a template by ID."""

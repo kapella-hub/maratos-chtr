@@ -174,6 +174,8 @@ STRONG_CODING_PATTERNS = [
     (r'\bfix\s+(?:\w+\s+)*bug\b', 0.95),
     (r'\bwrite\s+(?:\w+\s+)*test', 0.95),
     (r'\badd\s+(?:\w+\s+)*test', 0.9),
+    (r'\bdevelop\s+something\b', 0.85),
+    (r'\bsurpri[sz]e\s+me\b', 0.85),
 ]
 
 # Medium confidence keywords (need more context)
@@ -637,18 +639,30 @@ def classify_by_keywords(message: str) -> ClassificationResult:
     if needs_clarification:
         if task_type == TaskType.CODING:
             clarification_question = (
-                "This looks like a coding task. Should I implement this using the "
-                "coder → tester → devops workflow? (yes/no)"
+                "🚀 **Coding Task Detected**\n\n"
+                "Shall I spin up the autonomous **Thinking Workflow**?\n\n"
+                "**Pipeline:**\n"
+                "1. 👨‍💻 **Coder**: Implement changes\n"
+                "2. 🧪 **Tester**: Verify logic\n"
+                "3. 🚢 **DevOps**: Operations check\n\n"
+                "*(Reply 'yes' to proceed)*"
             )
         elif task_type == TaskType.TESTING:
             clarification_question = (
-                "Should I write and run tests for this? The workflow will validate "
-                "the implementation. (yes/no)"
+                "🧪 **Testing Task Detected**\n\n"
+                "Shall I run the **Verification Workflow**?\n\n"
+                "**Scope:**\n"
+                "1. Generate test cases\n"
+                "2. Execute test suite\n"
+                "3. Report coverage\n\n"
+                "*(Reply 'yes' to proceed)*"
             )
         else:
             clarification_question = (
-                "I'm not sure if this requires code changes. Should I start "
-                "the coding workflow? (yes/no)"
+                "❓ **Ambiguous Request**\n\n"
+                "I'm detecting potential code changes but confidence is low.\n"
+                "Should I force-start the **Coding Workflow**?\n\n"
+                "*(Reply 'yes' to proceed)*"
             )
 
     return ClassificationResult(

@@ -1,0 +1,18 @@
+id: general
+name: General Analysis
+category: general
+description: General-purpose thinking for unclassified tasks
+focus_areas:
+  - Problem understanding
+  - Approach options
+  - Best solution selection
+required_steps:
+  - analysis
+  - decision
+optional_steps:
+  - evaluation
+  - validation
+  - critique
+min_level: low
+keywords: []
+prompt_additions: ""

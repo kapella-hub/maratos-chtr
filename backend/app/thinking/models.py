@@ -76,9 +76,33 @@ class ThinkingStepType(str, Enum):
     EVALUATION = "evaluation"       # Weighing options/approaches
     DECISION = "decision"           # Making a choice
     VALIDATION = "validation"       # Checking the decision
+
     RISK_ASSESSMENT = "risk"        # Identifying potential issues
     IMPLEMENTATION = "implementation"  # Planning execution
     CRITIQUE = "critique"           # Self-review of reasoning
+    TOOL_CALL = "tool_call"         # Choosing to use a tool
+    TOOL_RESULT = "tool_result"     # Processing tool output
+
+
+class ThinkingBlockStatus(str, Enum):
+    """Status of a thinking block."""
+    
+    RUNNING = "running"
+    PAUSED_FOR_TOOL = "paused_for_tool"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class TaskType(str, Enum):
+    """Broad category of the user's task."""
+    
+    GENERAL = "general"
+    CODE = "code"
+    DEBUGGING = "debugging"
+    ARCHITECTURE = "architecture"
+    SECURITY = "security"
+    REFACTORING = "refactoring"
+    IMPLEMENTATION = "implementation"
 
 
 @dataclass
@@ -126,6 +150,7 @@ class ThinkingBlock:
     id: str = field(default_factory=lambda: str(uuid4())[:8])
     started_at: datetime = field(default_factory=datetime.utcnow)
     completed_at: datetime | None = None
+    status: ThinkingBlockStatus = ThinkingBlockStatus.RUNNING
     is_complete: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -151,7 +176,7 @@ class ThinkingBlock:
     def complete(self) -> None:
         """Mark this block as complete."""
         self.completed_at = datetime.utcnow()
-        self.is_complete = True
+        self.status = ThinkingBlockStatus.COMPLETED
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -164,6 +189,7 @@ class ThinkingBlock:
             "total_tokens": self.total_tokens,
             "started_at": self.started_at.isoformat(),
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "status": self.status.value,
             "is_complete": self.is_complete,
             "metadata": self.metadata,
         }
@@ -175,9 +201,13 @@ class ThinkingBlock:
             id=data.get("id", str(uuid4())[:8]),
             level=ThinkingLevel.from_string(data["level"]),
             template=data.get("template"),
-            is_complete=data.get("is_complete", False),
             metadata=data.get("metadata", {}),
         )
+        if "status" in data:
+            block.status = ThinkingBlockStatus(data["status"])
+        elif data.get("is_complete"): # Backwards compatibility
+            block.status = ThinkingBlockStatus.COMPLETED
+            
         block.steps = [ThinkingStep.from_dict(s) for s in data.get("steps", [])]
         if data.get("started_at"):
             block.started_at = datetime.fromisoformat(data["started_at"])
@@ -200,6 +230,8 @@ class ThinkingSession:
     original_level: ThinkingLevel = ThinkingLevel.MEDIUM
     adaptive_level: ThinkingLevel | None = None
     complexity_score: float = 0.5
+    project_id: str | None = None
+    active_project_name: str | None = None
     id: str = field(default_factory=lambda: str(uuid4())[:8])
     created_at: datetime = field(default_factory=datetime.utcnow)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -250,6 +282,8 @@ class ThinkingSession:
             "adaptive_level": self.adaptive_level.value if self.adaptive_level else None,
             "effective_level": self.effective_level.value,
             "complexity_score": self.complexity_score,
+            "project_id": self.project_id,
+            "active_project_name": self.active_project_name,
             "total_duration_ms": self.total_duration_ms,
             "total_tokens": self.total_tokens,
             "total_steps": self.total_steps,
@@ -266,6 +300,8 @@ class ThinkingSession:
             message_id=data["message_id"],
             original_level=ThinkingLevel.from_string(data.get("original_level", "medium")),
             complexity_score=data.get("complexity_score", 0.5),
+            project_id=data.get("project_id"),
+            active_project_name=data.get("active_project_name"),
             metadata=data.get("metadata", {}),
         )
         if data.get("adaptive_level"):

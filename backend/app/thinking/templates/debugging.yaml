@@ -1,0 +1,34 @@
+id: debugging
+name: Debugging
+category: debugging
+description: Systematic debugging with root cause analysis and fix validation
+focus_areas:
+  - Root cause identification
+  - Reproduction steps
+  - Impact assessment
+  - Fix validation
+  - Regression prevention
+required_steps:
+  - analysis
+  - validation
+optional_steps:
+  - risk_assessment
+  - implementation
+  - critique
+min_level: medium
+keywords:
+  - debug
+  - bug
+  - fix
+  - error
+  - issue
+  - problem
+  - broken
+  - crash
+prompt_additions: |
+  When debugging:
+  1. Understand the expected vs actual behavior
+  2. Identify the minimal reproduction case
+  3. Trace the execution path to the root cause
+  4. Consider why the bug wasn't caught earlier
+  5. Verify the fix doesn't introduce new issues

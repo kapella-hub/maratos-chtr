@@ -1,0 +1,30 @@
+id: code_review
+name: Code Review
+category: code
+description: Systematic code review with security, performance, and maintainability checks
+focus_areas:
+  - Security vulnerabilities (injection, XSS, auth issues)
+  - Performance bottlenecks and optimization opportunities
+  - Code maintainability and readability
+  - Error handling and edge cases
+  - Test coverage and testability
+required_steps:
+  - analysis
+  - evaluation
+optional_steps:
+  - risk_assessment
+  - validation
+  - critique
+min_level: medium
+keywords:
+  - review
+  - code review
+  - check
+  - audit
+  - examine
+prompt_additions: |
+  When reviewing code, systematically check:
+  1. Security: Look for injection points, auth bypass, data exposure
+  2. Performance: Identify N+1 queries, unnecessary loops, memory leaks
+  3. Maintainability: Check naming, structure, documentation
+  4. Edge cases: Consider null, empty, boundary conditions
