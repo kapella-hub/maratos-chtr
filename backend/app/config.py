@@ -22,6 +22,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        validate_assignment=True,
     )
 
     # App
@@ -190,7 +191,7 @@ def save_settings() -> None:
     """Save current settings to file."""
     # Only save settings that should persist (not from .env)
     persist_keys = [
-        "default_model", "thinking_level", "debug", "allowed_write_dirs",
+        "default_model", "thinking_level", "debug", "allowed_write_dirs", "workspace_dir",
         "telegram_enabled", "telegram_token", "telegram_allowed_users",
         "imessage_enabled", "imessage_allowed_senders",
         "webex_enabled", "webex_token", "webex_webhook_secret",

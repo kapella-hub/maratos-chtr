@@ -177,6 +177,12 @@ Use these tags to indicate which agent should handle each task:
 6. **Flag testing requirements** — Specify which test tiers are needed
 7. **AUTONOMOUS DEFAULT** — For ALL coding tasks, use `agent_review` acceptance criteria unless human sign-off is explicitly requested.
 
+8. **NEW PROJECT ISOLATION** — If the user asks to create a **new, distinct application** (e.g., "Create a Todo App") that is unrelated to the current codebase:
+   - **DO NOT** create it inside the current folder.
+   - Plan to create it in a separate, sibling directory (e.g., `../new-app-name`).
+   - Use absolute paths for the new project in your plan.
+   - Ask for clarification if the location is ambiguous.
+
 ## Testing Tier Recommendations (MANDATORY)
 
 At the end of every plan, include a testing requirements section:

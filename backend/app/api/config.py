@@ -34,6 +34,7 @@ class ConfigUpdate(BaseModel):
 
     # Filesystem settings
     allowed_write_dirs: str | None = None  # Comma-separated paths
+    workspace: str | None = None  # Default workspace directory
 
     # Channel settings
     imessage_enabled: bool | None = None
@@ -119,6 +120,10 @@ async def set_config(update: ConfigUpdate) -> dict[str, Any]:
     from app.config import get_channel_config
 
     updates = update.model_dump(exclude_none=True)
+
+    # Map workspace to workspace_dir
+    if "workspace" in updates:
+        updates["workspace_dir"] = updates.pop("workspace")
 
     # Check if channel settings changed
     channel_keys = [

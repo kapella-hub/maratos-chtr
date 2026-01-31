@@ -71,9 +71,14 @@ class FilesystemTool(Tool):
             ],
         )
         # Use configured workspace
-        from app.config import settings
-        self.workspace = workspace or settings.workspace_dir
-        self.workspace.mkdir(parents=True, exist_ok=True)
+        # If workspace is None, we use settings.workspace_dir dynamically via property
+        self._custom_workspace = workspace
+        if self._custom_workspace:
+            self._custom_workspace.mkdir(parents=True, exist_ok=True)
+        else:
+            # Ensure default exists
+            from app.config import settings
+            settings.workspace_dir.mkdir(parents=True, exist_ok=True)
 
         # Context for audit logging
         self._agent_id: str | None = None
@@ -159,6 +164,14 @@ class FilesystemTool(Tool):
             return p, error
 
         return resolved, None
+
+    @property
+    def workspace(self) -> Path:
+        """Get current workspace path."""
+        if self._custom_workspace:
+            return self._custom_workspace
+        from app.config import settings
+        return settings.workspace_dir
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         """Execute filesystem operation with security validation."""

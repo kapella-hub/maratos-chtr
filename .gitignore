@@ -34,6 +34,8 @@ data/
 .env.local
 .env.*.local
 *.pid
+backend.pid
+frontend.pid
 
 # Logs
 *.log

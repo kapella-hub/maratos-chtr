@@ -40,7 +40,7 @@ export default function SettingsPage() {
   const [reanalyzingProject, setReanalyzingProject] = useState<string | null>(null)
   const [newAllowedDir, setNewAllowedDir] = useState('')
   const [showFolderBrowser, setShowFolderBrowser] = useState(false)
-  const [folderBrowserTarget, setFolderBrowserTarget] = useState<'project' | 'allowedDir'>('project')
+  const [folderBrowserTarget, setFolderBrowserTarget] = useState<'project' | 'allowedDir' | 'workspace'>('project')
   const [removingDir, setRemovingDir] = useState<string | null>(null)
   // Documentation state
   const [showDocsPanel, setShowDocsPanel] = useState(false)
@@ -883,10 +883,24 @@ export default function SettingsPage() {
 
             <div className="p-4 space-y-2">
               {/* Default Workspace */}
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/50">
-                <FolderOpen className="w-4 h-4 text-primary" />
-                <span className="font-mono text-sm flex-1 truncate">{config?.workspace || '~/maratos-workspace'}</span>
-                <span className="text-xs px-2 py-0.5 rounded bg-primary/20 text-primary">default</span>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground ml-1">Default Workspace</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={localConfig.workspace || ''}
+                    onChange={(e) => setLocalConfig({ ...localConfig, workspace: e.target.value })}
+                    className="flex-1 px-3 py-2 rounded-lg text-sm bg-muted border border-input focus:outline-none focus:ring-2 focus:ring-ring font-mono"
+                    placeholder="~/maratos-workspace"
+                  />
+                  <button
+                    onClick={() => { setFolderBrowserTarget('workspace'); setShowFolderBrowser(true) }}
+                    className="px-3 py-2 rounded-lg bg-muted border border-input hover:bg-muted/80"
+                  >
+                    <FolderSearch className="w-4 h-4" />
+                  </button>
+                </div>
+                <p className="text-[10px] text-muted-foreground ml-1">Base directory for new projects (default)</p>
               </div>
 
               {/* Custom Directories */}
@@ -1045,9 +1059,10 @@ export default function SettingsPage() {
         onSelect={(path) => {
           if (folderBrowserTarget === 'project' && editingProject) setEditingProject({ ...editingProject, path })
           else if (folderBrowserTarget === 'allowedDir') setNewAllowedDir(path)
+          else if (folderBrowserTarget === 'workspace') setLocalConfig({ ...localConfig, workspace: path })
         }}
-        initialPath={folderBrowserTarget === 'project' && editingProject?.path ? editingProject.path : '~'}
-        title={folderBrowserTarget === 'project' ? 'Select Project Folder' : 'Select Directory'}
+        initialPath={folderBrowserTarget === 'project' && editingProject?.path ? editingProject.path : (folderBrowserTarget === 'workspace' && localConfig.workspace ? localConfig.workspace : '~')}
+        title={folderBrowserTarget === 'project' ? 'Select Project Folder' : folderBrowserTarget === 'workspace' ? 'Select Default Workspace' : 'Select Directory'}
       />
     </div>
   )
