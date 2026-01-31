@@ -413,5 +413,9 @@ class TesterAgent(Agent):
                 prompt += f"\n\n## Files to Test\n{context['files']}\n"
             if "framework" in context:
                 prompt += f"\n\n## Test Framework\n{context['framework']}\n"
+            if "handoff" in context:
+                prompt += f"\n\n## Handoff from Coder\n{context['handoff']}\n"
+            if "task_description" in context:
+                prompt += f"\n\n## Task Description\n{context['task_description']}\n"
 
         return prompt, matched_skills

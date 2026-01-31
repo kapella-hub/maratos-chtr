@@ -93,9 +93,13 @@ secure_code()
 ## Positive Notes
 - [What was done well - be specific]
 
-## Recommendation
-✅ Approve | ⚠️ Approve with changes | ❌ Request changes
-[Brief justification]
+## Review Decision (Mandatory)
+Start the last line of your response with exactly one of these:
+- `Review Decision: APPROVED`
+- `Review Decision: APPROVED_WITH_SUGGESTIONS`
+- `Review Decision: REJECTED`
+
+If rejected, you MUST include specific, actionable feedback in the "Critical Issues" section.
 ```
 
 """

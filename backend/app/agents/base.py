@@ -473,7 +473,15 @@ class Agent:
             api_messages.append({"role": "system", "content": system_prompt})
 
         # Conversation messages
-        api_messages.extend([m.to_dict() for m in messages])
+        for m in messages:
+            if isinstance(m, dict):
+                api_messages.append(m)
+            elif hasattr(m, "to_dict"):
+                api_messages.append(m.to_dict())
+            else:
+                # Fallback for unexpected types
+                logger.warning(f"Unexpected message type in chat: {type(m)}")
+                api_messages.append(dict(m))
 
         # Get model - use kiro-cli friendly names
         model = model_override or self.config.model

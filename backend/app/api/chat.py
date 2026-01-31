@@ -839,7 +839,7 @@ async def chat(
                 }
             }
             yield f"data: {json.dumps(project_event)}\n\n"
-            logger.debug(f"Emitted project context event: {project_name_for_context} (auto={project_auto_detected})")
+
 
         # Handle inline project actions (approve, pause, cancel, etc.)
         if chat_request.project_action:
@@ -932,7 +932,7 @@ async def chat(
                 yield f'data: {{"content": "Note: Project mode unavailable, handling as regular request.\\n\\n"}}\n\n'
 
         # Check for active workflow awaiting user decision
-        active_workflow = get_active_workflow_for_session(session.id)
+        active_workflow = await get_active_workflow_for_session(session.id)
         if active_workflow and active_workflow.state == WorkflowState.AWAITING_USER:
             # User is responding to a workflow decision (commit, pr, deploy, docs)
             pending_decision = active_workflow.pending_decision
@@ -1099,13 +1099,87 @@ async def chat(
                 logger.info("User declined workflow, passing to MO")
                 # Fall through to normal chat processing
 
-        # NOTE: Auto-detection of coding tasks is DISABLED
-        # MO now explicitly triggers workflows via [WORKFLOW:delivery] marker
-        # This gives MO full control over orchestration decisions
-        #
-        # The classification is still logged for debugging but doesn't auto-trigger
+        # Auto-detect coding tasks
+        # If router is very confident (0.8+), we auto-trigger the delivery workflow
+        # This provides a faster, more reliable experience than waiting for MO to decide
         classification = classify_message_sync(actual_message, session_id=session.id)
-        logger.debug(f"Router classification (info only): {classification.task_type.value}, confidence={classification.confidence:.2f}")
+
+
+        if classification.should_trigger_workflow and agent_id == "mo":
+            logger.info(f"Auto-triggering workflow for high-confidence task: {classification.task_type.value}")
+            yield 'data: {"thinking": true}\n\n'
+            yield f'data: {{"content": "🚀 **Auto-detected Coding Task**\\n\\nSpinning up the logical workflow...\\n\\n"}}\n\n'
+            yield 'data: {"thinking": false}\n\n'
+            yield 'data: {"orchestrating": true}\n\n'
+
+            # Get workspace from selected project or context
+            workspace = _get_workspace_for_project(
+                chat_request.project_name,
+                session.active_project_name,
+                chat_request.context,
+            )
+
+            async def save_auto_workflow_message(content: str) -> None:
+                try:
+                    async with db.begin():
+                        wf_msg = DBMessage(
+                            id=str(uuid.uuid4()),
+                            session_id=session.id,
+                            role="assistant",
+                            content=content,
+                        )
+                        db.add(wf_msg)
+                except Exception as e:
+                    logger.error(f"Failed to save workflow message: {e}")
+
+            # Expand task with context
+            task_with_context = get_task_with_context(actual_message, session.id)
+            workflow_files: list[str] = []
+            workflow_completed = False
+
+            try:
+                # Determine workflow type based on classification
+                # Currently only 'delivery' is fully supported for auto-trigger
+                async for workflow_event in run_delivery_workflow(
+                    session_id=session.id,
+                    task=task_with_context,
+                    workspace_path=workspace or None,
+                    context=chat_request.context,
+                    save_message_fn=save_auto_workflow_message,
+                ):
+                    yield workflow_event
+
+                    try:
+                        if workflow_event.startswith("data: "):
+                            event_data = json.loads(workflow_event[6:].strip())
+                            if event_data.get("type") == "file_changed":
+                                workflow_files.append(event_data.get("file", ""))
+                            if event_data.get("type") == "workflow_completed":
+                                workflow_completed = True
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+
+                    progress_event = _workflow_event_to_progress(workflow_event)
+                    if progress_event:
+                        yield f'data: {json.dumps(progress_event)}\n\n'
+
+                if workflow_completed or workflow_files:
+                    update_session_state(
+                        session_id=session.id,
+                        task=actual_message,
+                        task_type=classification.task_type,
+                        files=workflow_files if workflow_files else None,
+                        project_path=workspace or None,
+                    )
+
+            except Exception as e:
+                logger.error(f"Auto-workflow error: {e}", exc_info=True)
+                escaped_err = str(e).replace('"', '\\"').replace('\n', ' ')
+                yield f'data: {{"error": "Workflow failed: {escaped_err}"}}\n\n'
+
+            yield 'data: {"orchestrating": false}\n\n'
+            yield "data: [DONE]\n\n"
+            return
 
         # Handle clarification needed (confidence between thresholds)
         if classification.needs_clarification and agent_id == "mo" and classification.clarification_question:
@@ -1258,6 +1332,15 @@ async def chat(
             # Unexpected error - log with full traceback for debugging
             logger.error(f"Unexpected memory error: {e}", exc_info=True)
 
+        # Resolve workspace from project selection (Critical for file system tools)
+        resolved_workspace = _get_workspace_for_project(
+            chat_request.project_name,
+            session.active_project_name,
+            chat_request.context,
+        )
+        if resolved_workspace:
+            context["workspace"] = resolved_workspace
+            logger.info(f"Set context workspace to: {resolved_workspace}")
         # Inject project context if loaded
         if project_context:
             context["project"] = project_context

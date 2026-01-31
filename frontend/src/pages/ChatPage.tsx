@@ -57,6 +57,7 @@ export default function ChatPage() {
     setLastMessageThinking,
     statusMessage,
     setStatusMessage,
+    currentThinkingBlock,
   } = useChatStore()
 
   const { addToast } = useToastStore()
@@ -465,6 +466,7 @@ export default function ChatPage() {
           })
         }}
         onSendQuickPrompt={handleSend}
+        currentThinkingBlock={currentThinkingBlock}
         className="flex-1"
       />
 

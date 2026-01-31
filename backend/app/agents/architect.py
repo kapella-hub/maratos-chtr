@@ -142,6 +142,7 @@ Output a structured plan using this format:
 ### Task 1: [coder] Add timestamp display
 - File: /path/to/ChatMessage.tsx
 - Add: Format and display message.timestamp
+- Verification: agent_review (Autonomous Code Review)
 - Pattern: Follow existing component structure
 
 ### Task 2: [coder] Add copy button
@@ -174,6 +175,7 @@ Use these tags to indicate which agent should handle each task:
 4. **Include context** — Note existing patterns to follow
 5. **Don't implement** — Your job is to PLAN only
 6. **Flag testing requirements** — Specify which test tiers are needed
+7. **AUTONOMOUS DEFAULT** — For ALL coding tasks, use `agent_review` acceptance criteria unless human sign-off is explicitly requested.
 
 ## Testing Tier Recommendations (MANDATORY)
 

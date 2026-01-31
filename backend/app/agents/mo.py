@@ -313,7 +313,7 @@ class MOAgent(Agent):
                 model="",  # Inherit from settings
                 temperature=0.6,  # Slightly higher for more personality
                 system_prompt=prompt,
-                tools=["routing", "filesystem", "shell", "web_search", "web_fetch", "kiro", "sessions", "canvas"],
+                tools=["routing", "filesystem", "shell", "web_search", "web_fetch", "kiro", "sessions", "canvas", "create_handoff"],
             )
         )
 

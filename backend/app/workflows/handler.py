@@ -10,16 +10,12 @@ import logging
 import re
 from typing import Any, AsyncIterator, Callable
 
+from app.autonomous.persistent_engine import get_persistent_engine
+from app.autonomous.engine import EngineEventType, EngineEvent
 from app.workflows.delivery_loop import (
-    DeliveryLoopPolicy,
-    WorkflowContext,
-    WorkflowEvent,
-    WorkflowState,
-    UserDecision,
     UserDecisionType,
     UserDecisionResponse,
-    ArtifactReport,
-    delivery_loop_policy,
+    WorkflowState,
 )
 from app.subagents.runner import subagent_runner
 from app.subagents.manager import subagent_manager, TaskStatus
@@ -146,46 +142,73 @@ async def run_delivery_workflow(
     context: dict[str, Any] | None = None,
     save_message_fn: Callable | None = None,
 ) -> AsyncIterator[str]:
-    """Run the delivery loop workflow and yield SSE events.
+    """Run the orchestration workflow and yield SSE events.
 
-    This is the main entry point called from chat.py.
-
-    Args:
-        session_id: The chat session ID
-        task: The coding task description
-        workspace_path: Optional workspace directory
-        context: Additional context
-        save_message_fn: Async function to save messages to DB
-
-    Yields:
-        SSE event strings
+    This uses the PersistentOrchestrationEngine for autonomous execution.
     """
-    logger.info(f"Starting delivery workflow for session {session_id}")
-
-    # Create spawn function with session context
-    async def spawn_fn(agent_id: str, prompt: str, ctx: dict) -> str:
-        return await spawn_agent_for_workflow(agent_id, prompt, ctx, session_id)
-
-    # Run the workflow
-    async for event in delivery_loop_policy.run(
+    logger.info(f"Starting orchestration workflow for session {session_id}")
+    
+    engine = get_persistent_engine()
+    
+    async for event in engine.run(
+        prompt=task,
         session_id=session_id,
-        task=task,
         workspace_path=workspace_path,
-        context=context,
-        spawn_agent_fn=spawn_fn,
+        mode="autonomous"
     ):
-        # Convert workflow event to SSE
-        yield event.to_sse()
+        # Handle Plan Approval Request
+        if event.type == EngineEventType.PLAN_APPROVAL_REQUESTED:
+            plan = event.data.get("plan", {})
+            summary = plan.get("summary", "No summary")
+            task_list = "\n".join([f"- {t.get('title')}" for t in plan.get("tasks", [])])
+            
+            msg = f"**Plan Proposed** 📋\n\n{summary}\n\n**Tasks:**\n{task_list}\n\nDo you want to proceed?"
+            
+            # Map to user_decision_requested for frontend compatibility
+            payload = {
+                "type": "user_decision_requested",
+                "workflow_id": event.run_id,
+                "timestamp": event.timestamp.isoformat(),
+                "data": {
+                    "decision_type": "approve_plan",
+                    "question": msg,
+                    "options": ["Proceed", "Abort"],
+                    "required": True,
+                }
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+            
+        # Handle Completion
+        elif event.type == EngineEventType.RUN_STATE and event.data.get("state") == "done":
+            # Map to workflow_completed
+            summary = event.data.get("summary", {})
+            payload = {
+                "type": "workflow_completed",
+                "workflow_id": event.run_id,
+                "timestamp": event.timestamp.isoformat(),
+                "data": {
+                    "user_choices": {},
+                    "artifact_report": {
+                        "status": "completed",
+                        "summary": "Autonomous execution finished successfully.",
+                        "files_modified": [], # TODO: Extract from artifacts
+                    }
+                }
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+            
+        # Default: yield engine event (supported by TaskGraph)
+        else:
+            yield event.to_sse()
 
-        # Save agent results to DB if save function provided
-        if save_message_fn and event.type == "agent_completed":
-            agent = event.data.get("agent", "unknown")
-            summary = event.data.get("summary", "")
-            if summary:
-                try:
-                    await save_message_fn(f"**[{agent.upper()}]**\n\n{summary}")
-                except Exception as e:
-                    logger.warning(f"Failed to save workflow message: {e}")
+        # Save important messages to DB
+        if save_message_fn:
+            if event.type == EngineEventType.TASK_COMPLETED:
+                title = event.data.get("title", "Task")
+                result = event.data.get("result", {}).get("response", "")
+                if result:
+                    await save_message_fn(f"**Task Completed: {title}**\n\n{clean_agent_response(result)[:500]}...")
+
 
 
 async def resume_workflow_with_docs_decision(
@@ -217,98 +240,48 @@ async def resume_workflow_with_decision(
     context: dict[str, Any] | None = None,
     save_message_fn: Callable | None = None,
 ) -> AsyncIterator[str]:
-    """Resume workflow after any user decision.
-
-    This handles the multi-step decision flow:
-    COMMIT -> PR -> DEPLOY -> DOCS -> COMPLETED
-
-    Args:
-        workflow_id: The workflow ID
-        decision: The user's decision response
-        context: Additional context
-        save_message_fn: Function to save messages
-
-    Yields:
-        SSE event strings
-    """
-    ctx = delivery_loop_policy.resume_after_user_decision(workflow_id, decision)
-    if not ctx:
-        yield 'data: {"error": "Workflow not found or not awaiting user decision"}\n\n'
+    """Resume workflow after any user decision using OrchestrationEngine."""
+    logger.info(f"Resuming workflow {workflow_id} with decision {decision}")
+    
+    engine = get_persistent_engine()
+    
+    if not decision.approved:
+        # User aborted
+        await engine.cancel(workflow_id)
+        yield f'data: {json.dumps({"type": "cancelled", "workflow_id": workflow_id})}\n\n'
         return
 
-    # Emit decision result
-    yield WorkflowEvent(
-        type="decision_result",
-        workflow_id=ctx.workflow_id,
-        data={
-            "decision_type": decision.decision_type.value,
-            "approved": decision.approved,
-            "value": decision.value,
-        },
-    ).to_sse()
+    # Resume the engine
+    try:
+        async for event in engine.resume(workflow_id):
+            if event.type == EngineEventType.RUN_STATE and event.data.get("state") == "done":
+                summary = event.data.get("summary", {})
+                payload = {
+                    "type": "workflow_completed",
+                    "workflow_id": event.run_id,
+                    "timestamp": event.timestamp.isoformat(),
+                    "data": {
+                        "user_choices": {},
+                        "artifact_report": {
+                            "status": "completed",
+                            "summary": "Autonomous execution finished successfully.",
+                            "files_modified": [],
+                        }
+                    }
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+            else:
+                yield event.to_sse()
 
-    # Create spawn function
-    async def spawn_fn(agent_id: str, prompt: str, _ctx: dict) -> str:
-        return await spawn_agent_for_workflow(agent_id, prompt, _ctx, ctx.session_id)
+            if save_message_fn and event.type == EngineEventType.TASK_COMPLETED:
+                title = event.data.get("title", "Task")
+                result = event.data.get("result", {}).get("response", "")
+                if result:
+                    await save_message_fn(f"**Task Completed: {title}**\n\n{clean_agent_response(result)[:500]}...")
 
-    # If there's a next decision, emit it
-    next_decision = delivery_loop_policy.get_next_decision(ctx)
-    if next_decision and ctx.state == WorkflowState.AWAITING_USER:
-        yield WorkflowEvent(
-            type="user_decision_requested",
-            workflow_id=ctx.workflow_id,
-            data={
-                "decision_type": next_decision.decision_type.value,
-                "question": next_decision.question,
-                "options": next_decision.options,
-                "context": next_decision.context,
-                "required": next_decision.required,
-            },
-        ).to_sse()
-        return  # Wait for next user decision
-
-    # If we've transitioned to DOCUMENTING, run docs agent
-    if ctx.state == WorkflowState.DOCUMENTING:
-        async for event in delivery_loop_policy._run_docs(ctx, context or {}, spawn_fn):
-            yield event.to_sse()
-
-            # Save docs result if save function provided
-            if save_message_fn and event.type == "agent_completed" and event.data.get("agent") == "docs":
-                artifacts = event.data.get("artifacts", [])
-                if artifacts:
-                    try:
-                        await save_message_fn(f"**[DOCS]** Created documentation: {', '.join(artifacts)}")
-                    except Exception as e:
-                        logger.warning(f"Failed to save docs message: {e}")
-
-        # After docs, complete the workflow
-        if ctx.state == WorkflowState.DOCUMENTING:
-            ctx.transition(WorkflowState.COMPLETED)
-
-    # Emit completion if we're done
-    if ctx.state == WorkflowState.COMPLETED:
-        # Build final artifact report
-        report = ctx.artifact_report or delivery_loop_policy._build_artifact_report(ctx)
-
-        # Update report with user choices
-        if ctx.user_wants_docs and ctx.docs_result:
-            report.docs_created = ctx.docs_result.artifacts
-
-        yield WorkflowEvent(
-            type="workflow_completed",
-            workflow_id=ctx.workflow_id,
-            data={
-                "user_choices": {
-                    "committed": ctx.user_wants_commit,
-                    "pr_created": ctx.user_wants_pr,
-                    "deployed": ctx.user_wants_deploy,
-                    "documented": ctx.user_wants_docs,
-                },
-                "artifact_report": report.to_dict(),
-            },
-        ).to_sse()
-
-        delivery_loop_policy.cleanup_workflow(workflow_id)
+    except Exception as e:
+        logger.error(f"Error resuming workflow {workflow_id}: {e}")
+        yield f'data: {json.dumps({"type": "error", "data": {"error": str(e)}})}\n\n'
 
 
 def parse_user_decision_from_message(
@@ -374,6 +347,35 @@ def parse_user_decision_from_message(
     )
 
 
-def get_active_workflow_for_session(session_id: str) -> WorkflowContext | None:
+class WorkflowContextShim:
+    """Shim to make Persistent Engine runs look like WorkflowContext for chat.py."""
+    def __init__(self, run_data: dict):
+        self._data = run_data
+        self.workflow_id = run_data.get("run_id")
+        self.session_id = None # Not needed by chat.py usually
+        
+    @property
+    def state(self) -> str:
+        s = self._data.get("state")
+        if s == "paused":
+            return WorkflowState.AWAITING_USER
+        return s
+
+    @property
+    def pending_decision(self) -> UserDecisionType | None:
+        if self._data.get("state") == "paused":
+            # Assume plan approval for now
+            # We could return a custom type if chat.py supports it, but reusing COMMIT/PR might be confusing.
+            # chat.py just checks `if pending_decision:`
+            # But let's check parse_user_decision_from_message
+            return UserDecisionType.APPROVE_DIFF # Closest map?
+        return None
+
+
+async def get_active_workflow_for_session(session_id: str) -> WorkflowContextShim | None:
     """Get any active workflow for a session."""
-    return delivery_loop_policy.get_workflow_for_session(session_id)
+    engine = get_persistent_engine()
+    run = await engine.get_run_by_session(session_id)
+    if run and run.get("state") in ("running", "paused", "plan", "execute", "verify"):
+        return WorkflowContextShim(run)
+    return None

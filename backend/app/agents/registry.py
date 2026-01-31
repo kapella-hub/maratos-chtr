@@ -43,6 +43,24 @@ class AgentRegistry:
             self._agents[agent_id] = agent
             return agent
 
+        if agent_id.startswith("dynamic:"):
+            # Create dynamic agent
+            role_part = agent_id.split(":", 1)[1]
+            role_name = role_part.replace("_", " ").title()
+            
+            config = AgentConfig(
+                id=agent_id,
+                name=role_name,
+                description=f"Dynamic agent specializing in {role_name}",
+                icon="⚡",
+                model="", # Inherit default
+                system_prompt=f"You are a {role_name}. You are a highly skilled specialist in this domain. Focus on providing expert analysis and implementation for tasks related to {role_name}.",
+                tools=["filesystem", "web_search", "web_fetch", "shell"], # Standard toolset
+            )
+            agent = Agent(config)
+            self._agents[agent_id] = agent
+            return agent
+
         return None
 
     def get_default(self) -> Agent:

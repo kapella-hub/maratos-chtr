@@ -276,7 +276,7 @@ class CoderAgent(Agent):
                 model="",  # Inherit from settings
                 temperature=0.3,  # Slightly higher for better variable naming and idiomatic code
                 system_prompt=prompt,
-                tools=["filesystem", "shell", "kiro"],
+                tools=["filesystem", "shell", "kiro", "create_handoff"],
             )
         )
 

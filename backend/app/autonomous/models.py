@@ -38,6 +38,7 @@ class QualityGateType(str, Enum):
     LINT_CLEAN = "lint_clean"
     TYPE_CHECK = "type_check"
     BUILD_SUCCESS = "build_success"
+    HUMAN_APPROVAL = "human_approval"
 
 
 @dataclass

@@ -22,6 +22,7 @@ from app.tools.sessions import SessionsTool
 from app.tools.canvas import CanvasTool
 from app.tools.routing import RoutingTool
 from app.tools.market_data import MarketDataTool, QuoteTool
+from app.tools.collaboration import CreateHandoffTool
 
 __all__ = [
     "Tool",
@@ -51,4 +52,5 @@ __all__ = [
     "RoutingTool",
     "MarketDataTool",
     "QuoteTool",
+    "CreateHandoffTool",
 ]

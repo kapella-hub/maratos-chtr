@@ -25,7 +25,7 @@ class AcceptanceCriterion(BaseModel):
     description: str = Field(..., description="What needs to be true for acceptance")
     verification_type: str = Field(
         default="manual",
-        description="How to verify: 'test', 'lint', 'typecheck', 'build', 'manual', 'review'"
+        description="How to verify: 'test', 'lint', 'typecheck', 'build', 'manual', 'review', 'agent_review', 'human_approval'"
     )
     command: str | None = Field(
         default=None,
@@ -110,9 +110,11 @@ class PlannedTask(BaseModel):
     def validate_agent_id(cls, v: str) -> str:
         """Validate agent ID is a known agent type."""
         valid_agents = {"architect", "coder", "reviewer", "tester", "docs", "devops", "mo"}
-        if v not in valid_agents:
-            raise ValueError(f"Unknown agent_id: {v}. Must be one of {valid_agents}")
-        return v
+        if v in valid_agents:
+            return v
+        if v.startswith("dynamic:"):
+            return v
+        raise ValueError(f"Unknown agent_id: {v}. Must be one of {valid_agents} or start with 'dynamic:'")
 
     @field_validator("depends_on")
     @classmethod

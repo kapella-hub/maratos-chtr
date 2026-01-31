@@ -55,7 +55,8 @@ class RunState(str, Enum):
 
 # Valid state transitions
 STATE_TRANSITIONS: dict[RunState, set[RunState]] = {
-    RunState.INTAKE: {RunState.PLAN, RunState.FAILED, RunState.CANCELLED},
+    RunState.INTAKE: {RunState.BRAINSTORM, RunState.PLAN, RunState.FAILED, RunState.CANCELLED},
+    RunState.BRAINSTORM: {RunState.PLAN, RunState.FAILED, RunState.CANCELLED},
     RunState.PLAN: {RunState.TASK_GRAPH, RunState.FAILED, RunState.CANCELLED, RunState.PAUSED},
     RunState.TASK_GRAPH: {RunState.EXECUTE, RunState.FAILED, RunState.CANCELLED},
     RunState.EXECUTE: {RunState.VERIFY, RunState.FAILED, RunState.CANCELLED, RunState.PAUSED},
@@ -82,6 +83,11 @@ class EngineEventType(str, Enum):
     PLANNING_STARTED = "planning_started"
     PLANNING_PROGRESS = "planning_progress"
     PLANNING_COMPLETED = "planning_completed"
+
+    # Brainstorming events
+    BRAINSTORMING_STARTED = "brainstorming_started"
+    BRAINSTORMING_PROGRESS = "brainstorming_progress"
+    BRAINSTORMING_COMPLETED = "brainstorming_completed"
 
     # Task graph events
     TASK_GRAPH_BUILT = "task_graph_built"
@@ -112,6 +118,11 @@ class EngineEventType(str, Enum):
     PAUSED = "paused"
     RESUMED = "resumed"
     CANCELLED = "cancelled"
+
+    # Human-in-the-loop events
+    APPROVAL_REQUESTED = "approval_requested"
+    APPROVAL_RECEIVED = "approval_received"
+    PLAN_APPROVAL_REQUESTED = "plan_approval_requested"
 
 
 @dataclass
@@ -199,6 +210,10 @@ class RunContext:
 
     # Event queue for streaming
     _event_queue: asyncio.Queue | None = field(default=None, repr=False)
+
+    # Human-in-the-loop state
+    approval_events: dict[str, asyncio.Event] = field(default_factory=dict)
+    approval_decisions: dict[str, bool] = field(default_factory=dict)
 
     def __post_init__(self):
         self._event_queue = asyncio.Queue()
@@ -371,7 +386,35 @@ class OrchestrationEngine:
                     yield event
                 return
 
-            ctx.transition_to(RunState.PLAN)
+            ctx.transition_to(RunState.BRAINSTORM)
+
+        # BRAINSTORM
+        if ctx.state == RunState.BRAINSTORM:
+            yield self._emit(ctx, EngineEventType.RUN_STATE, state="brainstorm")
+            
+            try:
+                from app.autonomous.squads import SquadFactory, BrainstormingSession
+                
+                # Check directly if we should brainstorm
+                if SquadFactory.analyze_task_complexity(ctx.original_prompt):
+                    session = BrainstormingSession(
+                        run_id=ctx.run_id,
+                        prompt=ctx.original_prompt,
+                        workspace_path=ctx.workspace_path
+                    )
+                    
+                    async for event in session.run():
+                        yield event
+                        if event.type == EngineEventType.BRAINSTORMING_COMPLETED:
+                            # Store RFCs for the Planner to see
+                            ctx.context_data["brainstorm_rfcs"] = event.data.get("rfcs", [])
+                
+                ctx.transition_to(RunState.PLAN)
+                
+            except Exception as e:
+                logger.error(f"Brainstorming failed: {e}")
+                # Don't fail the run, just proceed to planning without RFCs
+                ctx.transition_to(RunState.PLAN)
 
         # PLAN
         if ctx.state == RunState.PLAN:
@@ -398,7 +441,20 @@ class OrchestrationEngine:
                     plan=ctx.plan.model_dump(),
                     task_count=len(ctx.plan.tasks),
                 )
-                ctx.transition_to(RunState.TASK_GRAPH)
+
+                # Emit approval request and pause
+                yield self._emit(
+                    ctx,
+                    EngineEventType.PLAN_APPROVAL_REQUESTED,
+                    plan=ctx.plan.model_dump()
+                )
+                
+                ctx.resume_state = RunState.TASK_GRAPH
+                ctx.transition_to(RunState.PAUSED)
+                yield self._emit(ctx, EngineEventType.PAUSED)
+                return
+
+                # ctx.transition_to(RunState.TASK_GRAPH)
 
             except Exception as e:
                 logger.exception(f"Planning failed: {e}")
@@ -527,6 +583,7 @@ class OrchestrationEngine:
         """Execute tasks from the graph with parallel support."""
         graph = ctx.graph
         running: dict[str, asyncio.Task] = {}
+        queue = asyncio.Queue()
 
         while not graph.is_complete:
             # Check for pause
@@ -555,55 +612,57 @@ class OrchestrationEngine:
 
                 # Create async task for execution
                 running[task_id] = asyncio.create_task(
-                    self._execute_single_task(ctx, node)
+                    self._execute_single_task(ctx, node, queue)
                 )
 
-            if not running:
+            if not running and not graph.get_ready_tasks():
                 # No tasks running and none ready - might be blocked
-                if not graph.get_ready_tasks():
-                    break
-                await asyncio.sleep(0.1)
-                continue
+                break
 
-            # Wait for any task to complete
-            done, _ = await asyncio.wait(
-                running.values(),
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+            # Wait for event or task completion
+            get_event_task = asyncio.create_task(queue.get())
+            wait_set = set(running.values()) | {get_event_task}
+            
+            done, _ = await asyncio.wait(wait_set, return_when=asyncio.FIRST_COMPLETED)
+            
+            # Handle event
+            if get_event_task in done:
+                event = get_event_task.result()
+                yield event
+            else:
+                get_event_task.cancel()
 
-            # Process completed tasks
-            for completed_task in done:
-                # Find which task completed
-                task_id = None
-                for tid, t in running.items():
-                    if t == completed_task:
-                        task_id = tid
-                        break
+            # Handle finished tasks
+            finished_ids = []
+            for tid, t in running.items():
+                if t.done():
+                    finished_ids.append(tid)
+                    if not t.cancelled() and t.exception():
+                        logger.error(f"Task {tid} crashed", exc_info=t.exception())
+                        # Try to fail the task if not already
+                        if not graph.nodes[tid].status == "failed":
+                             graph.mark_failed(tid, str(t.exception()))
+                             yield self._emit(
+                                 ctx,
+                                 EngineEventType.TASK_FAILED,
+                                 task_id=tid,
+                                 error=str(t.exception())
+                             )
 
-                if task_id:
-                    del running[task_id]
+            for tid in finished_ids:
+                del running[tid]
 
-                    try:
-                        events = completed_task.result()
-                        for event in events:
-                            yield event
-                    except Exception as e:
-                        logger.exception(f"Task {task_id} raised exception: {e}")
-                        graph.mark_failed(task_id, str(e))
-                        yield self._emit(
-                            ctx,
-                            EngineEventType.TASK_FAILED,
-                            task_id=task_id,
-                            error=str(e),
-                        )
+            # Drain remaining events to prevent lag
+            while not queue.empty():
+                yield queue.get_nowait()
 
     async def _execute_single_task(
         self,
         ctx: RunContext,
         node: TaskNode,
-    ) -> list[EngineEvent]:
-        """Execute a single task and return events."""
-        events = []
+        queue: asyncio.Queue,
+    ) -> None:
+        """Execute a single task and put events in queue."""
         task_id = node.task_id
 
         try:
@@ -615,10 +674,10 @@ class OrchestrationEngine:
                 ctx=ctx,
                 node=node,
                 inputs=inputs,
-                on_progress=lambda p: events.append(
+                on_progress=lambda p: queue.put_nowait(
                     self._emit(ctx, EngineEventType.TASK_PROGRESS, task_id=task_id, progress=p)
                 ),
-                on_output=lambda o: events.append(
+                on_output=lambda o: queue.put_nowait(
                     self._emit(ctx, EngineEventType.TASK_OUTPUT, task_id=task_id, output=o)
                 ),
             )
@@ -630,9 +689,9 @@ class OrchestrationEngine:
 
                 verification_passed = True
                 for criterion in node.task.acceptance:
-                    passed = await self._check_acceptance(ctx, node, criterion)
+                    passed = await self._check_acceptance(ctx, node, criterion, queue) # Pass queue
                     node.verification_results[criterion.id] = passed
-                    events.append(
+                    await queue.put(
                         self._emit(
                             ctx,
                             EngineEventType.VERIFICATION_RESULT,
@@ -646,7 +705,7 @@ class OrchestrationEngine:
 
                 if verification_passed:
                     ctx.graph.mark_completed(task_id, result)
-                    events.append(
+                    await queue.put(
                         self._emit(
                             ctx,
                             EngineEventType.TASK_COMPLETED,
@@ -658,7 +717,7 @@ class OrchestrationEngine:
 
                     # Emit artifact events
                     for name, value in node.artifacts.items():
-                        events.append(
+                        await queue.put(
                             self._emit(
                                 ctx,
                                 EngineEventType.ARTIFACT_CREATED,
@@ -671,7 +730,7 @@ class OrchestrationEngine:
                     # Verification failed - retry or fail
                     if ctx.graph.can_retry(task_id):
                         ctx.graph.retry_task(task_id)
-                        events.append(
+                        await queue.put(
                             self._emit(
                                 ctx,
                                 EngineEventType.TASK_RETRYING,
@@ -682,7 +741,7 @@ class OrchestrationEngine:
                         )
                     else:
                         ctx.graph.mark_failed(task_id, "Verification failed after max attempts")
-                        events.append(
+                        await queue.put(
                             self._emit(
                                 ctx,
                                 EngineEventType.TASK_FAILED,
@@ -694,7 +753,7 @@ class OrchestrationEngine:
                 error = result.get("error", "Unknown error")
                 if ctx.graph.can_retry(task_id):
                     ctx.graph.retry_task(task_id)
-                    events.append(
+                    await queue.put(
                         self._emit(
                             ctx,
                             EngineEventType.TASK_RETRYING,
@@ -705,7 +764,7 @@ class OrchestrationEngine:
                     )
                 else:
                     ctx.graph.mark_failed(task_id, error)
-                    events.append(
+                    await queue.put(
                         self._emit(
                             ctx,
                             EngineEventType.TASK_FAILED,
@@ -721,19 +780,118 @@ class OrchestrationEngine:
         except Exception as e:
             logger.exception(f"Task {task_id} execution error: {e}")
             ctx.graph.mark_failed(task_id, str(e))
-            events.append(
+            await queue.put(
                 self._emit(ctx, EngineEventType.TASK_FAILED, task_id=task_id, error=str(e))
             )
-
-        return events
 
     async def _check_acceptance(
         self,
         ctx: RunContext,
         node: TaskNode,
         criterion: AcceptanceCriterion,
+        queue: asyncio.Queue,
     ) -> bool:
         """Check a single acceptance criterion."""
+        if criterion.verification_type == "human_approval":
+            key = f"{node.task_id}:{criterion.id}"
+            
+            # Check if already decided
+            if key in ctx.approval_decisions:
+                return ctx.approval_decisions[key]
+                
+            # Create event
+            event = asyncio.Event()
+            ctx.approval_events[key] = event
+            
+            # Emit request
+            await queue.put(
+                self._emit(
+                    ctx,
+                    EngineEventType.APPROVAL_REQUESTED,
+                    task_id=node.task_id,
+                    criterion_id=criterion.id,
+                    description=criterion.description,
+                )
+            )
+            
+            # Wait for approval
+            await event.wait()
+            
+            # Return decision
+            return ctx.approval_decisions.get(key, False)
+
+        if criterion.verification_type == "agent_review":
+            # Autonomous review
+            from app.agents.registry import agent_registry
+            reviewer = agent_registry.get("reviewer")
+            if not reviewer:
+                node.log("Reviewer agent not found")
+                return False
+
+            # Build review prompt
+            review_prompt = f"""Review this implementation:
+
+TASK: {node.task.title}
+DESCRIPTION: {node.task.description}
+
+ARTIFACTS PRODUCED:
+{json.dumps([f"{k}: {type(v).__name__}" for k, v in node.artifacts.items()], indent=2)}
+
+OUTPUT:
+{node.result.get('response', 'No text response')}
+
+Check specifically for: {criterion.description}
+"""
+
+            # Run reviewer
+            response_text = ""
+            try:
+                # Emit start event
+                await queue.put(
+                    self._emit(
+                        ctx,
+                        EngineEventType.TASK_STARTED,
+                        task_id=f"{node.task_id}-review",
+                        agent_id="reviewer",
+                        title=f"Reviewing {node.task.title}",
+                        attempt=1,
+                    )
+                )
+
+                async for chunk in reviewer.chat(
+                    messages=[{"role": "user", "content": review_prompt}],
+                    context={"workspace": ctx.workspace_path},
+                ):
+                    response_text += chunk
+                    # Optional: emit progress for review
+
+                # Check decision
+                approved = "Review Decision: APPROVED" in response_text or "Review Decision: APPROVED_WITH_SUGGESTIONS" in response_text
+                
+                # Emit completion
+                await queue.put(
+                    self._emit(
+                        ctx,
+                        EngineEventType.TASK_COMPLETED,
+                        task_id=f"{node.task_id}-review",
+                        result={"success": True, "response": response_text},
+                        artifacts={},
+                    )
+                )
+                
+                if not approved:
+                     node.log(f"Review rejected: {response_text[-100:]}")
+                     # Append feedback to the task for next retry if applicable
+                     if ctx.graph.can_retry(node.task_id):
+                        feedback = f"\n\nREVIEW FEEDBACK (Attempt {node.attempt}):\n{response_text}"
+                        node.task.description += feedback 
+
+                return approved
+
+            except Exception as e:
+                node.log(f"Review failed: {e}")
+                return False
+
         if criterion.verification_type == "manual":
             return True  # Manual criteria are assumed passed
 
@@ -780,6 +938,23 @@ class OrchestrationEngine:
     # =========================================================================
     # Control Methods
     # =========================================================================
+
+    async def submit_approval(self, run_id: str, task_id: str, criterion_id: str, approved: bool) -> bool:
+        """Submit a human approval decision."""
+        ctx = self._active_runs.get(run_id)
+        if not ctx:
+            return False
+            
+        key = f"{task_id}:{criterion_id}"
+        if key in ctx.approval_events:
+            ctx.approval_decisions[key] = approved
+            ctx.approval_events[key].set()
+            # Also emit event confirming receipt
+            # This will be picked up by the streaming loop if running
+            # If not running (e.g. paused), we might miss it in stream unless we handle it differently.
+            # But the task is waiting on event, so it will wake up.
+            return True
+        return False
 
     async def pause(self, run_id: str) -> bool:
         """Pause a running orchestration."""
@@ -882,13 +1057,22 @@ class DefaultPlanner(PlannerProtocol):
         if not architect:
             raise RuntimeError("Architect agent not available")
 
+        # Inject Brainstorming RFCs if available
+        rfcs_text = ""
+        if ctx.context_data.get("brainstorm_rfcs"):
+            rfcs = ctx.context_data["brainstorm_rfcs"]
+            rfcs_text = "\n\n## EXPERT BRAINSTORMING (THE COUNCIL)\n"
+            rfcs_text += "The Council of Specialists has already brainstormed this approach. Use these architecture decisions as your primary guide:\n\n"
+            for rfc in rfcs:
+                rfcs_text += f"### {rfc['role'].upper()} RFC\n{rfc['content']}\n\n"
+
         # Build planning prompt
         planning_prompt = f"""Analyze this request and create a detailed execution plan.
 
 REQUEST:
 {ctx.original_prompt}
 
-WORKSPACE: {ctx.workspace_path or 'Not specified'}
+WORKSPACE: {ctx.workspace_path or 'Not specified'}{rfcs_text}
 
 You must output a JSON execution plan with this structure:
 {{
@@ -902,7 +1086,7 @@ You must output a JSON execution plan with this structure:
             "agent_id": "coder|tester|reviewer|docs|devops",
             "depends_on": ["task-000"],
             "acceptance": [
-                {{"id": "ac-001", "description": "What must be true", "verification_type": "test|manual"}}
+                {{"id": "ac-001", "description": "Code passes review", "verification_type": "agent_review"}}
             ],
             "target_files": ["path/to/file.py"]
         }}

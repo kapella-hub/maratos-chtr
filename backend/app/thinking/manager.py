@@ -143,6 +143,11 @@ class ThinkingManager:
         """Mark a thinking block as complete."""
         block.complete()
 
+        # Check if block ended with a tool call - if so, mark as PAUSED instead of COMPLETED
+        if block.steps and block.steps[-1].type == ThinkingStepType.TOOL_CALL:
+            from app.thinking.models import ThinkingBlockStatus
+            block.status = ThinkingBlockStatus.PAUSED_FOR_TOOL
+
         # Check for critiques to save as lessons
         if block.level in (ThinkingLevel.HIGH, ThinkingLevel.MAX):
             critique_step = next(
@@ -317,6 +322,16 @@ class ThinkingManager:
             metadata={"tool_name": tool_name}
         )
         block.add_step(result_step)
+        
+    def resume_with_result(self, session: ThinkingSession, tool_output: str) -> None:
+        """Resume a session with a tool result.
+        
+        This finds the last paused block and adds the tool result to it (or a new linked block).
+        For now, we just ensure the session is active.
+        """
+        # Logic to potentially link blocks would go here
+        # Currently we rely on the LLM starting a new block
+        pass
 
     def parse_legacy_content(self, content: str) -> list[ThinkingStep]:
         """Parse legacy XML-style thinking content into steps.

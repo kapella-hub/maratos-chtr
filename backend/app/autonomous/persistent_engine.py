@@ -404,6 +404,18 @@ class PersistentOrchestrationEngine:
             for run in runs
         ]
 
+    async def get_run_by_session(self, session_id: str) -> dict | None:
+        """Get the active run for a session."""
+        run = await RunRepository.get_by_session(session_id)
+        if run:
+            return {
+                "run_id": run.id,
+                "state": run.state,
+                "mode": run.mode,
+                "created_at": run.created_at.isoformat(),
+            }
+        return None
+
 
 # =============================================================================
 # Query Functions

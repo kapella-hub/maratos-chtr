@@ -119,6 +119,10 @@ STRONG_CODING_KEYWORDS = {
     "build an api": 0.9,
     "build a component": 0.9,
     "build an endpoint": 0.9,
+    "create an app": 0.85,
+    "create a new app": 0.85,
+    "build an app": 0.85,
+    "scaffold a": 0.85,
 
     # UI/UX improvements
     "improve the ui": 0.85,
@@ -205,6 +209,8 @@ CODING_CONTEXT_KEYWORDS = {
     "form", "page", "view", "template", "hook",
     "test", "spec", "unit test", "integration test",
     "file", "code", "script", "logic", "algorithm",
+    "app", "application", "project", "tool", "cli", "program", "system",
+    "strategy", "strategies", "backtest", "analysis", # Added for finance/trading context
 }
 
 # Strong indicators of NON-coding tasks (reduce confidence)

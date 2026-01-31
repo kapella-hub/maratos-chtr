@@ -75,7 +75,7 @@ export async function deleteSession(id: string): Promise<void> {
 }
 
 // Thinking step types
-export type ThinkingStepType = 'analysis' | 'evaluation' | 'decision' | 'validation' | 'risk' | 'implementation' | 'critique'
+export type ThinkingStepType = 'analysis' | 'evaluation' | 'decision' | 'validation' | 'risk' | 'implementation' | 'critique' | 'tool_call' | 'tool_result'
 
 // Thinking step data
 export interface ThinkingStep {

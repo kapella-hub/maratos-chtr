@@ -5,8 +5,10 @@ import { cn } from '@/lib/utils'
 import MessageBubble from './MessageBubble'
 import AgentCard from './AgentCard'
 import StatusPill from './StatusPill'
+import ThinkingTree from './ThinkingTree'
 import ScrollToBottom from './ScrollToBottom'
 import type { ChatMessage, SubagentTask } from '@/stores/chat'
+import type { ThinkingBlock } from '@/lib/api'
 
 interface ChatStreamProps {
   messages: ChatMessage[]
@@ -17,6 +19,7 @@ interface ChatStreamProps {
   onCancelSubagent?: (taskId: string) => void
   onSendQuickPrompt?: (prompt: string) => void
   statusMessage?: string | null
+  currentThinkingBlock?: Partial<ThinkingBlock> | null
   className?: string
 }
 
@@ -29,6 +32,7 @@ const ChatStream = forwardRef<HTMLDivElement, ChatStreamProps>(({
   onCancelSubagent,
   onSendQuickPrompt,
   statusMessage,
+  currentThinkingBlock,
   className,
 }, ref) => {
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -156,7 +160,10 @@ const ChatStream = forwardRef<HTMLDivElement, ChatStreamProps>(({
         {/* Status pill when active */}
         <AnimatePresence>
           {status !== 'idle' && messages.length > 0 && messages[messages.length - 1]?.content && (
-            <div className="px-4 py-2">
+            <div className="px-4 py-2 space-y-2">
+              {currentThinkingBlock && isThinking && (
+                <ThinkingTree block={currentThinkingBlock} />
+              )}
               <StatusPill status={status} message={statusMessage} />
             </div>
           )}

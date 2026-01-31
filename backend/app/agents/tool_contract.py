@@ -55,12 +55,17 @@ You have access to tools that you MUST invoke using this exact format:
 ```
 <tool_call>{"tool": "web_fetch", "args": {"url": "https://example.com"}}</tool_call>
 ```
+
+**create_handoff** - Handoff task to another agent
+```
+<tool_call>{"tool": "create_handoff", "args": {"to_agent": "tester", "task_description": "Verify login fix", "files_modified": ["src/login.ts"]}}</tool_call>
+```
 """
 
 # Tool policies by agent type
 TOOL_POLICIES = {
     "mo": {
-        "allowed": ["routing", "filesystem", "shell", "web_search", "web_fetch", "kiro", "sessions", "canvas"],
+        "allowed": ["routing", "filesystem", "shell", "web_search", "web_fetch", "kiro", "sessions", "canvas", "create_handoff"],
         "read_paths": ["*"],  # Can read anywhere
         "write_paths": ["/Projects", "~/maratos-workspace"],
         "notes": "Orchestrator - delegates heavy implementation to specialists"
@@ -72,7 +77,7 @@ TOOL_POLICIES = {
         "notes": "Plans and designs - spawns coders for implementation"
     },
     "coder": {
-        "allowed": ["filesystem", "shell", "kiro"],
+        "allowed": ["filesystem", "shell", "kiro", "create_handoff"],
         "read_paths": ["*"],
         "write_paths": ["/Projects", "~/maratos-workspace"],
         "notes": "Pure implementation - reads existing code, writes new code"
