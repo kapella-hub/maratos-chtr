@@ -248,7 +248,6 @@ export default function ChatPage() {
             // Update agent card progress
             updateSubagent({
               id: event.taskId,
-              agent: '', // partial update via ID match
               status: 'running',
               progress: (event.progress || 0) * 100, // Assuming 0-1 float
             })
@@ -259,7 +258,6 @@ export default function ChatPage() {
 
           updateSubagent({
             id: event.taskId,
-            agent: '',
             status: 'completed',
             progress: 100
           })
@@ -269,7 +267,6 @@ export default function ChatPage() {
 
           updateSubagent({
             id: event.taskId,
-            agent: '',
             status: 'failed',
             error: event.error
           })

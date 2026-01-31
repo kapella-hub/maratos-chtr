@@ -362,7 +362,17 @@ export async function* streamChat(
               yield {
                 type: 'task_started',
                 projectId: parsed.project_id,
-                task: parsed.task,
+                task: parsed.task || {
+                  id: parsed.task_id,
+                  title: parsed.title,
+                  agent_id: parsed.agent_id,
+                  // Add defaults for required fields if missing
+                  status: 'running',
+                  agent_type: parsed.agent_id || 'unknown',
+                  description: parsed.title || 'Task started',
+                  quality_gates: [],
+                  depends_on: []
+                },
               }
             } else if (parsed.type === 'task_progress') {
               yield {

@@ -188,7 +188,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   setActiveProjectContext: (context) => set({ activeProjectContext: context }),
   setSelectedProjectName: (name) => set({ selectedProjectName: name }),
   setAbortController: (controller) => set({ abortController: controller }),
-  
+
   stopGeneration: () => {
     const { abortController } = get()
     if (abortController) {
@@ -196,7 +196,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       set({ isStreaming: false, isThinking: false, abortController: null })
     }
   },
-  
+
   // Queue management
   enqueueMessage: (content) => set((state) => ({
     messageQueue: [...state.messageQueue, {
@@ -205,7 +205,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       timestamp: new Date(),
     }],
   })),
-  
+
   dequeueMessage: () => {
     const { messageQueue } = get()
     if (messageQueue.length === 0) return undefined
@@ -213,9 +213,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({ messageQueue: rest })
     return first
   },
-  
+
   clearQueue: () => set({ messageQueue: [] }),
-  
+
   addMessage: (message) => set((state) => ({
     messages: [...state.messages, {
       ...message,
@@ -263,7 +263,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
     return { messages, currentThinkingBlock: null }
   }),
-  
+
   updateSubagent: (task) => set((state) => {
     // First try to match by id, then by agent name (for when id changes between spawning/running)
     let existing = state.activeSubagents.findIndex(t => t.id === task.id)
@@ -272,12 +272,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
     if (existing >= 0) {
       const updated = [...state.activeSubagents]
-      updated[existing] = task
+      // Merge existing task with updates
+      updated[existing] = { ...updated[existing], ...task }
       return { activeSubagents: updated }
     }
     return { activeSubagents: [...state.activeSubagents, task] }
   }),
-  
+
   clearSubagents: () => set({ activeSubagents: [], isOrchestrating: false }),
 
   clearMessages: () => set({
