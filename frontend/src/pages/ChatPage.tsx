@@ -231,16 +231,48 @@ export default function ChatPage() {
         } else if (event.type === 'task_started' && event.task) {
           updateProjectTask(event.task.id, { status: 'in_progress' })
           addProjectEvent({ type: 'task_started', data: { task_id: event.task.id, task: event.task }, timestamp: new Date().toISOString() })
+
+          // Also show as active subagent card
+          updateSubagent({
+            id: event.task.id,
+            agent: event.task.agent_id || 'mo',
+            status: 'running',
+            progress: 0,
+            currentAction: `Starting: ${event.task.title}`,
+            attempt: 1,
+            maxAttempts: 3 // Default
+          })
         } else if (event.type === 'task_progress') {
           if (event.taskId) {
             updateProjectTask(event.taskId, { progress: event.progress, status: event.status as ProjectTask['status'] })
+            // Update agent card progress
+            updateSubagent({
+              id: event.taskId,
+              agent: '', // partial update via ID match
+              status: 'running',
+              progress: (event.progress || 0) * 100, // Assuming 0-1 float
+            })
           }
         } else if (event.type === 'task_completed' && event.taskId) {
           updateProjectTask(event.taskId, { status: 'completed' })
           addProjectEvent({ type: 'task_completed', data: { task_id: event.taskId }, timestamp: new Date().toISOString() })
+
+          updateSubagent({
+            id: event.taskId,
+            agent: '',
+            status: 'completed',
+            progress: 100
+          })
         } else if (event.type === 'task_failed' && event.taskId) {
           updateProjectTask(event.taskId, { status: 'failed', error: event.error })
           addProjectEvent({ type: 'task_failed', data: { task_id: event.taskId, error: event.error }, timestamp: new Date().toISOString() })
+
+          updateSubagent({
+            id: event.taskId,
+            agent: '',
+            status: 'failed',
+            error: event.error
+          })
         } else if (event.type === 'project_paused') {
           setProjectStatus('paused')
         } else if (event.type === 'project_resumed') {
