@@ -40,7 +40,26 @@ def get_prompt(key: str, default: str = "") -> str:
         else:
             return default
             
+    
     if value is None:
         return default
         
+    # Automatic Shared Injection
+    # If we are retrieving an agent prompt (string), inject shared variables if present
+    if isinstance(value, str) and "shared_" in value and "render_hints" in prompts:
+        try:
+            injectables = prompts.get("render_hints", {}).get("injectables", {})
+            # Only format if we have injectables and the string looks like it needs them
+            if injectables:
+                # We use safe_format (or strict, depending on preference). 
+                # Here we do a partial format to resolve shared_* but leave tool_section for later.
+                # However, python's .format() is all-or-nothing.
+                # Strategy: We will replace {shared_X} manually to avoid breaking {tool_section}
+                for share_key, share_val in injectables.items():
+                    placeholder = f"{{{share_key}}}"
+                    if placeholder in value:
+                        value = value.replace(placeholder, str(share_val))
+        except Exception as e:
+            print(f"Warning: Failed to inject shared prompt variables: {e}")
+
     return str(value)

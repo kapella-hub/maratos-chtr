@@ -296,10 +296,17 @@ class MOAgent(Agent):
     """MO - Conversational AI that orchestrates specialized agents for coding work."""
 
     def __init__(self) -> None:
+        # Load system prompt from yaml (Centralized!)
+        from app.prompts import get_prompt
+        base_prompt = get_prompt("agent_prompts.mo")
+
         # Inject tool section and diagram instructions into prompt
         tool_section = get_full_tool_section("mo")
         diagram_instructions = get_rich_content_instructions()
-        prompt = MO_SYSTEM_PROMPT.format(
+        
+        # Format the prompt
+        # Note: shared_ variables are already injected by get_prompt()
+        prompt = base_prompt.format(
             tool_section=tool_section,
             diagram_instructions=diagram_instructions,
         )
@@ -318,6 +325,7 @@ class MOAgent(Agent):
         )
 
     def get_system_prompt(self, context: dict[str, Any] | None = None) -> tuple[str, list]:
+
         """Build system prompt with context."""
         prompt, matched_skills = super().get_system_prompt(context)
 

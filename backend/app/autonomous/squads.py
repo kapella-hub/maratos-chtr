@@ -45,10 +45,13 @@ class SquadFactory:
         complex_keywords = [
             "distributed", "system", "platform", "microservices",
             "full-stack", "full stack", "architecture", "design",
-            "mvp", "from scratch", "create a", "build a", "traceloom"
+            "mvp", "from scratch", "create a", "build a", "traceloom",
+            "improve", "enhance", "refactor", "optimize", "clean up", 
+            "redesign", "modernize", "fix", "audit", "review"
         ]
         prompt_lower = prompt.lower()
-        return any(k in prompt_lower for k in complex_keywords) and len(prompt.split()) > 10
+        # Relaxed length constraint - even short prompts like "optimize backend" are complex enough
+        return any(k in prompt_lower for k in complex_keywords)
 
     @staticmethod
     async def assemble_squad(prompt: str) -> List[SpecialistAgent]:

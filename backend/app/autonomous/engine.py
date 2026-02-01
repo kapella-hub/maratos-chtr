@@ -1337,8 +1337,29 @@ Refine your implementation to specifically address these failures.
             on_progress(1.0)
             node.result = response_text
 
-            # Extract any artifacts from response
-            # (In a real implementation, parse for file writes, etc.)
+            # Extract any artifacts from response using regex
+            # Pattern matches ```lang:path/to/file.ext
+            import re
+            # Matches ```python:src/main.py or ```:src/main.py
+            code_block_pattern = r"```(?:\w+)?[:](.+?)\n"
+            found_files = re.findall(code_block_pattern, response_text)
+            
+            for fpath in found_files:
+                clean_path = fpath.strip()
+                node.artifacts[clean_path] = "File"
+            
+            # Also support "Files changed:" listing if code blocks miss some
+            # This is a fallback heuristic
+            if "Files changed:" in response_text:
+                try:
+                    section = response_text.split("Files changed:")[1].split("\n\n")[0]
+                    for line in section.strip().split("\n"):
+                        if line.strip().startswith("- "):
+                            path = line.strip()[2:].strip()
+                            if path and path not in node.artifacts:
+                                node.artifacts[path] = "File"
+                except Exception:
+                     pass # Fallback parsing failed, ignore
 
             return {"success": True, "response": response_text}
 
