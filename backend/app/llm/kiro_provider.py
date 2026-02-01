@@ -23,7 +23,7 @@ class KiroConfig:
     timeout: int = 600  # Timeout in seconds (10 min default for complex tasks)
     workdir: str | None = None  # Working directory for kiro
     fallback_model: str = "claude-haiku-4.5"  # Faster model to use on timeout
-    retry_on_timeout: bool = True  # Whether to retry with fallback model on timeout
+    retry_on_timeout: bool = False  # Default to False to prevent duplicate side-effects
 
 
 class KiroProvider:
@@ -228,7 +228,15 @@ class KiroProvider:
             # Skip kiro-cli tool execution logs
             if line.strip().startswith(('Reading ', 'Writing ', 'Executing ', '✓ ', '✗ ', '- Completed in')):
                 continue
+            if line.strip().startswith(('Creating: ', 'Updating: ', 'Deleting: ', 'Skipping: ', 'Running: ')):
+                continue
             if '(using tool:' in line:
+                continue
+
+            # Skip Node/Vite noise
+            if line.strip().startswith('You are using Node.js') and 'Vite requires' in line:
+                continue
+            if line.strip().startswith('vite v') and 'building client' in line:
                 continue
 
             # Detect response start (often prefixed with "> ")

@@ -691,16 +691,16 @@ class OrchestrationEngine:
         task_id = node.task_id
 
         try:
-            # Emit start event
-            await queue.put(
-                self._emit(
-                    ctx,
-                    EngineEventType.TASK_STARTED,
-                    task_id=task_id,
-                    title=node.task.title,
-                    agent_id=node.task.agent_id
-                )
-            )
+            # Emit start event - REMOVED (Handled by _execute_tasks loop)
+            # await queue.put(
+            #     self._emit(
+            #         ctx,
+            #         EngineEventType.TASK_STARTED,
+            #         task_id=task_id,
+            #         title=node.task.title,
+            #         agent_id=node.task.agent_id
+            #     )
+            # )
 
             # Get input artifacts from dependencies
             inputs = ctx.graph.get_input_artifacts(task_id)
@@ -878,6 +878,9 @@ class OrchestrationEngine:
 
 TASK: {node.task.title}
 DESCRIPTION: {node.task.description}
+
+TARGET FILES:
+{json.dumps(node.task.target_files, indent=2)}
 
 ARTIFACTS PRODUCED:
 {json.dumps([f"{k}: {type(v).__name__}" for k, v in node.artifacts.items()], indent=2)}
