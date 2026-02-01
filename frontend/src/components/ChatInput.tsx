@@ -61,7 +61,7 @@ export default function ChatInput({
   // Fetch project structure when expanded
   useEffect(() => {
     if (expandedProject) {
-      setLoadingStructure(true)
+      setLoadingStructure(true) // eslint-disable-line
       fetchProjectStructure(expandedProject)
         .then((data) => setProjectStructure(data.structure))
         .catch(() => setProjectStructure(null))

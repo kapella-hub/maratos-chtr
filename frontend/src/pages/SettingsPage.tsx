@@ -544,7 +544,7 @@ export default function SettingsPage() {
                                           try {
                                             const fullDoc = await fetchProjectDoc(editingProject.name, doc.id)
                                             setEditingDoc({ id: doc.id, title: fullDoc.title, content: fullDoc.content, tags: fullDoc.tags.join(', '), is_core: fullDoc.is_core })
-                                          } catch (e) {
+                                          } catch {
                                             setDocError('Failed to load doc')
                                           }
                                         }}
@@ -847,7 +847,7 @@ export default function SettingsPage() {
                                 content: fullRule.content,
                                 tags: fullRule.tags.join(', ')
                               })
-                            } catch (e) {
+                            } catch {
                               setRuleError('Failed to load rule')
                             }
                           }}

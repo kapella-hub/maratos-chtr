@@ -83,13 +83,7 @@ export default function Chart({
     return keys
   }, [data, xKey, yKeys])
 
-  if (!data.length) {
-    return (
-      <div className={cn('chart-container', className)}>
-        <p className="text-muted-foreground text-center py-8">No data available</p>
-      </div>
-    )
-  }
+
 
   const chartContent = useMemo(() => {
     switch (type) {
@@ -186,7 +180,7 @@ export default function Chart({
           </AreaChart>
         )
 
-      case 'pie':
+      case 'pie': {
         // For pie charts, use the first y key or "value"
         const pieKey = detectedYKeys[0] || 'value'
         return (
@@ -209,11 +203,20 @@ export default function Chart({
             <Legend />
           </PieChart>
         )
+      }
 
       default:
         return null
     }
   }, [type, data, xKey, detectedYKeys])
+
+  if (!data.length) {
+    return (
+      <div className={cn('chart-container', className)}>
+        <p className="text-muted-foreground text-center py-8">No data available</p>
+      </div>
+    )
+  }
 
   return (
     <div className={cn('chart-container my-4', className)}>

@@ -169,9 +169,9 @@ export default function ChatPage() {
 
           // Notify user on completion
           if (event.status === 'completed') {
-            addToast({ type: 'success', description: event.data as string })
+            addToast({ title: 'Task Completed', type: 'success', description: event.data as string })
           } else if (event.status === 'failed') {
-            addToast({ type: 'error', description: event.data as string })
+            addToast({ title: 'Task Failed', type: 'error', description: event.data as string })
           }
         } else if (event.type === 'subagent' && event.subagent) {
           updateSubagent({
@@ -235,7 +235,7 @@ export default function ChatPage() {
           // Also show as active subagent card
           updateSubagent({
             id: event.task.id,
-            agent: event.task.agent_id || 'mo',
+            agent: event.task.agent_type || 'mo',
             status: 'running',
             progress: 0,
             currentAction: `Starting: ${event.task.title}`,
@@ -258,7 +258,7 @@ export default function ChatPage() {
 
           updateSubagent({
             id: event.taskId,
-            ...((event as any).agentId ? { agent: (event as any).agentId } : {}),
+            ...(event.agentId ? { agent: event.agentId } : {}),
             status: 'completed',
             progress: 100
           })
@@ -268,7 +268,7 @@ export default function ChatPage() {
 
           updateSubagent({
             id: event.taskId,
-            ...((event as any).agentId ? { agent: (event as any).agentId } : {}),
+            ...(event.agentId ? { agent: event.agentId } : {}),
             status: 'failed',
             error: event.error
           })

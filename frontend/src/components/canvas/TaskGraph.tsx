@@ -45,8 +45,8 @@ export default function TaskGraph({ data, className }: TaskGraphProps) {
                 const label = node.title.replace(/["\n]/g, '')
                 const safeId = id.replace(/-/g, '_')
 
-                let shape = 'rect' // Default
-                if (node.status === 'completed') shape = 'rounded' // (( )) or ([ ])
+                // let shape = 'rect' // Unused
+                // if (node.status === 'completed') shape = 'rounded'
 
                 // Construct node string: id["Label"]
                 // Using distinct brackets for shapes if desired, simplified for now

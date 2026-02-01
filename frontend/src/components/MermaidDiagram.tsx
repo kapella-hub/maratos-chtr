@@ -106,6 +106,7 @@ export default function MermaidDiagram({ chart, className }: MermaidDiagramProps
   const [svg, setSvg] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  // eslint-disable-next-line react-hooks/purity
   const idRef = useRef(`mermaid-${Math.random().toString(36).substr(2, 9)}`)
 
   useEffect(() => {

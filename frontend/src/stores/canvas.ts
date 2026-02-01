@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 export interface CanvasArtifact {
   id: string
-  type: 'code' | 'preview' | 'form' | 'chart' | 'diagram' | 'table' | 'diff' | 'terminal' | 'markdown'
+  type: 'code' | 'preview' | 'form' | 'chart' | 'diagram' | 'table' | 'diff' | 'terminal' | 'markdown' | 'task_graph'
   title: string
   content: string
   metadata?: {

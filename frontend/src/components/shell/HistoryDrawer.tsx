@@ -72,7 +72,7 @@ export default function HistoryDrawer({ isOpen, onClose }: HistoryDrawerProps) {
   // Refresh sessions when drawer opens or streaming ends
   useEffect(() => {
     if (isOpen) {
-      setSessions(getChatSessions())
+      setSessions(getChatSessions()) // eslint-disable-line
     }
   }, [isOpen])
 

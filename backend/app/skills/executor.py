@@ -335,7 +335,8 @@ class SkillExecutor:
         """Check if output indicates lint failure."""
         output_lower = output.lower()
         # Common lint error patterns
-        if "error:" in output_lower and any(kw in output_lower for kw in ["ruff", "eslint", "lint"]):
+        keywords = ["ruff", "eslint", "lint"]
+        if "error:" in output_lower and any(kw in output_lower for kw in keywords):
             return True
         # Count-based patterns
         if " error" in output_lower and ("found" in output_lower or "detected" in output_lower):

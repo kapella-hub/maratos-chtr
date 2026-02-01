@@ -1,5 +1,5 @@
-import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle, XCircle, Loader2, ChevronRight, AlertCircle } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { CheckCircle, XCircle, Loader2, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SubagentTask } from '@/stores/chat'
 

@@ -3,7 +3,9 @@
 from typing import Any
 
 from app.agents.base import Agent, AgentConfig
+from app.agents.base import Agent, AgentConfig
 from app.agents.tool_contract import get_full_tool_section
+from app.prompts import get_prompt
 
 
 REVIEWER_SYSTEM_PROMPT = """You are an expert code reviewer with deep security and software engineering knowledge.
@@ -109,9 +111,12 @@ class ReviewerAgent(Agent):
     """Reviewer agent for code review via Kiro."""
 
     def __init__(self) -> None:
+        # Load system prompt from yaml
+        base_prompt = get_prompt("agent_prompts.reviewer")
+
         # Inject tool section into prompt
         tool_section = get_full_tool_section("reviewer")
-        prompt = REVIEWER_SYSTEM_PROMPT.format(tool_section=tool_section)
+        prompt = base_prompt.format(tool_section=tool_section)
 
         super().__init__(
             AgentConfig(

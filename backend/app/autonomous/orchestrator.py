@@ -13,6 +13,7 @@ from typing import Any, AsyncIterator
 from app.autonomous.models import (
     ProjectPlan,
     ProjectTask,
+    ProjectConfig,
     ProjectStatus,
     AutonomousTaskStatus,
     QualityGate,
@@ -24,6 +25,12 @@ from app.autonomous.model_selector import (
     model_selector,
     get_model_config_for_task,
     ModelTier,
+)
+from app.autonomous.repositories import (
+    RunRepository,
+    TaskRepository,
+    LogRepository,
+    ArtifactRepository,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,6 +94,55 @@ class Orchestrator:
         self._cancelled = False
         self._start_time: datetime | None = None
 
+    @classmethod
+    async def load(cls, run_id: str) -> "Orchestrator | None":
+        """Load an orchestrator from a persisted run."""
+        # Load run
+        run = await RunRepository.get(run_id)
+        if not run:
+            return None
+            
+        # Load tasks
+        db_tasks = await TaskRepository.get_by_run(run_id)
+        
+        # Reconstruct tasks
+        tasks = []
+        for t in db_tasks:
+            task = ProjectTask(
+                id=t.id,
+                title=t.title,
+                description=t.description,
+                agent_type=t.agent_id, # Remapped from agent_id
+                status=AutonomousTaskStatus(t.status),
+                depends_on=t.depends_on or [],
+                target_files=t.target_files or [],
+                priority=t.priority,
+            )
+            # Restore verification results
+            if t.verification_results:
+                task.iterations.append(TaskIteration(
+                    attempt=t.attempt,
+                    started_at=t.started_at or datetime.now(),
+                    completed_at=t.completed_at,
+                    success=t.status == "completed",
+                    agent_response=t.result or "",
+                    quality_results=t.verification_results
+                ))
+            tasks.append(task)
+            
+        # Reconstruct Plan
+        plan = ProjectPlan(
+            id=run.id,
+            name=f"Run {run.id[:8]}", # Name might be lost if not stored
+            original_prompt=run.original_prompt,
+            workspace_path=run.workspace_path or "/tmp",
+            status=ProjectStatus.IN_PROGRESS if run.state != "done" else ProjectStatus.COMPLETED,
+            tasks=tasks,
+            config=ProjectConfig.from_dict(run.config_json or {})
+        )
+        
+        return cls(plan)
+
     async def start(self) -> AsyncIterator[OrchestratorEvent]:
         """Start the autonomous development process."""
         self._start_time = datetime.now()
@@ -94,6 +150,17 @@ class Orchestrator:
         self.project.status = ProjectStatus.PLANNING
 
         yield self._event(EventType.PROJECT_STARTED)
+
+        # Persistence: Create run record
+        try:
+            await RunRepository.create(
+                run_id=self.project.id,
+                original_prompt=self.project.original_prompt,
+                workspace_path=self.project.workspace_path,
+                config=self.project.config.to_dict(),
+            )
+        except Exception as e:
+            logger.error(f"Failed to persist run creation: {e}")
 
         try:
             # Phase 1: Planning
@@ -134,17 +201,19 @@ class Orchestrator:
             self.project.status = ProjectStatus.COMPLETED
             self.project.completed_at = datetime.now()
             yield self._event(EventType.PROJECT_COMPLETED, {
-                "tasks_completed": self.project.tasks_completed,
-                "tasks_failed": self.project.tasks_failed,
-                "total_iterations": self.project.total_iterations,
-                "branch": self.project.branch_name,
                 "pr_url": self.project.pr_url,
             })
+
+            # Persistence: Mark run completed
+            await RunRepository.update_state("done")
 
         except asyncio.CancelledError:
             self._cancelled = True
             self.project.status = ProjectStatus.CANCELLED
             logger.info(f"Project {self.project.id} cancelled")
+            
+            # Persistence: Mark cancelled
+            await RunRepository.update_state(self.project.id, "cancelled")
 
         except Exception as e:
             logger.error(f"Orchestrator error: {e}", exc_info=True)
@@ -152,6 +221,13 @@ class Orchestrator:
             self.project.error = str(e)
             self.project.completed_at = datetime.now()
             yield self._event(EventType.PROJECT_FAILED, {"error": str(e)})
+
+            # Persistence: Mark failed
+            await RunRepository.update_state(
+                self.project.id, 
+                "failed", 
+                error=str(e)
+            )
 
     async def _run_planning(self) -> AsyncIterator[OrchestratorEvent]:
         """Run the planning phase using the architect agent."""
@@ -234,6 +310,23 @@ Be thorough but practical. Include testing and documentation tasks. Number depen
                 "task_id": task.id,
                 "task": task.to_dict(),
             })
+
+        # Persistence: Save created tasks
+        try:
+            task_dicts = []
+            for t in tasks:
+                 d = t.to_dict()
+                 d["run_id"] = self.project.id
+                 d["agent_id"] = t.agent_type # Map type to ID for now
+                 task_dicts.append(d)
+            
+            await TaskRepository.create_many(task_dicts)
+            
+            # Update state to execution
+            await RunRepository.update_state(self.project.id, "planning_complete")
+            
+        except Exception as e:
+            logger.error(f"Failed to persist tasks: {e}")
 
     def _parse_task_list(self, response: str) -> list[ProjectTask]:
         """Parse task list from architect response."""
@@ -388,6 +481,9 @@ Be thorough but practical. Include testing and documentation tasks. Number depen
         task.status = AutonomousTaskStatus.IN_PROGRESS
         task.started_at = datetime.now()
 
+        # Persistence: Task started
+        await TaskRepository.update_status(task.id, "running")
+
         # Get model info for this task
         gate_types = [g.type.value for g in task.quality_gates]
         task_model = get_model_config_for_task(
@@ -417,6 +513,10 @@ Be thorough but practical. Include testing and documentation tasks. Number depen
             if self.project.total_iterations > self.project.config.max_total_iterations:
                 task.status = AutonomousTaskStatus.FAILED
                 task.error = "Max total iterations exceeded"
+                
+                # Persistence: Task failed (global limit)
+                await TaskRepository.update_status(task.id, "failed", error=task.error)
+                
                 yield self._event(EventType.TASK_FAILED, {
                     "task_id": task.id,
                     "reason": task.error,
@@ -519,8 +619,18 @@ Be thorough but practical. Include testing and documentation tasks. Number depen
                             "message": f"feat: {task.title}",
                         })
 
+
                 task.status = AutonomousTaskStatus.COMPLETED
                 task.completed_at = datetime.now()
+                
+                # Persistence: Task completed
+                await TaskRepository.update_result(
+                    task.id, 
+                    result=iteration.agent_response,
+                    verification_results=iteration.quality_results
+                )
+                await TaskRepository.update_status(task.id, "completed")
+                
                 yield self._event(EventType.TASK_COMPLETED, {
                     "task_id": task.id,
                     "iterations": task.current_attempt,
@@ -541,6 +651,14 @@ Be thorough but practical. Include testing and documentation tasks. Number depen
         task.status = AutonomousTaskStatus.FAILED
         task.error = f"Failed after {task.max_attempts} attempts"
         task.completed_at = datetime.now()
+
+        # Persistence: Task failed (max attempts)
+        await TaskRepository.update_status(
+            task.id, 
+            "failed", 
+            error=task.error
+        )
+
         yield self._event(EventType.TASK_FAILED, {
             "task_id": task.id,
             "reason": task.error,
@@ -712,7 +830,7 @@ Report any test failures with details.
         if any(x in response.lower() for x in ["all tests pass", "tests passed", "0 failed", "success"]):
             return True, None
         elif any(x in response.lower() for x in ["failed", "error", "failure"]):
-            return False, response[:1000]
+            return False, response[:4000]
         else:
             # Ambiguous, assume passed
             return True, None
@@ -850,7 +968,8 @@ Provide a verdict: APPROVED or CHANGES_REQUESTED with specific feedback.
                 pass
 
         if errors:
-            return False, "\n".join(errors)[:1000]
+            return False, "\n".join(errors)[:4000]
+        return True, None
         return True, None
 
     async def _run_build(self, task: ProjectTask) -> tuple[bool, str | None]:
@@ -878,7 +997,7 @@ Provide a verdict: APPROVED or CHANGES_REQUESTED with specific feedback.
                     return True, None
                 # If command exists but failed, report error
                 if "not found" not in (result.stderr + result.stdout).lower():
-                    return False, (result.stdout + result.stderr)[:1000]
+                    return False, (result.stdout + result.stderr)[:4000]
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 continue
 

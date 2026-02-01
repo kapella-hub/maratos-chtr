@@ -969,6 +969,11 @@ class SubagentManager:
     def get_running_count(self) -> int:
         """Get number of currently running tasks."""
         return len(self._running)
+
+    def get_running_tasks(self) -> list[SubagentTask]:
+        """Get list of currently running tasks."""
+        return [t for t in self._tasks.values() if t.status in (TaskStatus.RUNNING, TaskStatus.SPAWNING, TaskStatus.RETRYING)]
+
     
     def cleanup_old(self, max_age_hours: int = 24) -> int:
         """Remove old completed tasks."""

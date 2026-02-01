@@ -197,6 +197,7 @@ export interface ChatEvent {
   data?: string | boolean | number
   subagent?: string
   taskId?: string
+  agentId?: string
   status?: string
   progress?: number
   error?: string

@@ -19,8 +19,12 @@ from app.api.tools import router as tools_router
 from app.api.resilience import router as resilience_router
 from app.api.approvals import router as approvals_router
 from app.api.rules import router as rules_router
+from app.api.dashboard import router as dashboard_router
+from app.api.system import router as system_router
+from app.api.diff import router as diff_router
 
 api_router = APIRouter(prefix="/api")
+api_router.include_router(diff_router)
 api_router.include_router(chat_router, tags=["chat"])
 api_router.include_router(agents_router, tags=["agents"])
 api_router.include_router(audit_router, tags=["audit"])
@@ -38,5 +42,7 @@ api_router.include_router(tools_router, tags=["tools"])
 api_router.include_router(resilience_router, tags=["resilience"])
 api_router.include_router(approvals_router, tags=["approvals"])
 api_router.include_router(rules_router, prefix="/rules", tags=["rules"])
+api_router.include_router(dashboard_router, tags=["dashboard"])
+api_router.include_router(system_router, prefix="/system", tags=["system"])
 
 __all__ = ["api_router"]

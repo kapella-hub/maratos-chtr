@@ -274,8 +274,15 @@ class GuardrailsEnforcer:
             if not jail_result.allowed:
                 await self._log_blocked_tool(tool_id, args, jail_result)
                 return jail_result
+        
+        # 4. Check shell sandbox
+        if tool_id == "shell":
+            shell_result = self._check_shell_jail(args)
+            if not shell_result.allowed:
+                await self._log_blocked_tool(tool_id, args, shell_result)
+                return shell_result
 
-        # 4. Check diff-first approval for high-impact actions
+        # 5. Check diff-first approval for high-impact actions
         if self.context.enable_diff_approval:
             approval_result = await self._check_diff_approval(tool_id, args)
             if not approval_result.allowed:
@@ -398,6 +405,35 @@ class GuardrailsEnforcer:
                 result.error = f"Write operations only allowed in workspace: {workspace}"
                 return result
 
+        return result
+
+    def _check_shell_jail(self, args: dict[str, Any]) -> EnforcementResult:
+        """Check shell execution against jail policy."""
+        policy = self.context.agent_policy or _DEFAULT_RESTRICTIVE_POLICY
+        shell_policy = policy.shell
+        command = args.get("command", "")
+        workdir = args.get("workdir")
+        
+        result = EnforcementResult(allowed=True)
+        
+        # Check command allowed/banned patterns
+        allowed, reason = shell_policy.is_command_allowed(command)
+        if not allowed:
+            result.allowed = False
+            result.policy_blocked = True
+            result.sandbox_violation = True  # Treat as violation
+            result.error = reason
+            return result
+            
+        # Check workdir constraint
+        if shell_policy.workdir_only and workdir:
+            # Must be within workspace
+            if not self._is_in_workspace(workdir):
+                result.allowed = False
+                result.sandbox_violation = True
+                result.error = f"Shell execution only allowed in workspace: {workdir}"
+                return result
+                
         return result
 
     def _is_in_workspace(self, path: str) -> bool:

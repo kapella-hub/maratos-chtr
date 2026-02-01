@@ -53,13 +53,15 @@ export function saveChatSession(sessionId: string, messages: ChatMessage[], titl
 export function getChatSessions(): ChatSession[] {
   const data = localStorage.getItem(STORAGE_KEY)
   if (!data) return []
-  
+
   try {
     const sessions = JSON.parse(data)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return sessions.map((s: any) => ({
       ...s,
       timestamp: new Date(s.timestamp),
       lastUpdated: new Date(s.lastUpdated),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       messages: (s.messages || []).map((m: any) => ({
         ...m,
         timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
@@ -100,7 +102,7 @@ export function exportSessionAsMarkdown(session: ChatSession): string {
     `---`,
     ``,
   ]
-  
+
   session.messages.forEach(msg => {
     lines.push(`## ${msg.role === 'user' ? 'User' : 'Assistant'}`)
     lines.push(`*${msg.timestamp.toLocaleString()}*`)
@@ -108,7 +110,7 @@ export function exportSessionAsMarkdown(session: ChatSession): string {
     lines.push(msg.content)
     lines.push(``)
   })
-  
+
   return lines.join('\n')
 }
 

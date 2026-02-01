@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Sparkles, ChevronDown, Menu, Settings, History, Command, Plus, Cpu, Brain, Check, ShieldCheck, Sun, Moon, Monitor, Volume2, VolumeX } from 'lucide-react'
+import { ChevronDown, Menu, Settings, History, Command, Plus, Cpu, Brain, Check, ShieldCheck, Sun, Moon, Monitor, Volume2, VolumeX } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { fetchConfig, updateConfig } from '@/lib/api'

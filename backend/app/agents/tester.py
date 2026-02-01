@@ -3,7 +3,9 @@
 from typing import Any
 
 from app.agents.base import Agent, AgentConfig
+from app.agents.base import Agent, AgentConfig
 from app.agents.tool_contract import get_full_tool_section
+from app.prompts import get_prompt
 
 
 TESTER_SYSTEM_PROMPT = """You are the Tester agent, specialized in test generation and quality assurance.
@@ -81,16 +83,20 @@ docker compose run --rm frontend npm test
 docker compose down
 ```
 
-## CRITICAL: Self-Validation Before Returning
+## CRITICAL: Self-Validation & Retry Logic
 
-**Before returning, you MUST verify your tests actually work:**
+**Before returning, you MUST verify your tests actually work, but DO NOT LOOP INDEFINITELY.**
 
 1. **Run the tests** — Execute pytest/jest/etc and check output
-2. **Check for failures** — If tests fail, FIX THEM before returning
+2. **Check for failures** — If tests fail:
+   - Attempt to fix the test or code **MAXIMUM 3 TIMES**.
+   - If failures persist after 3 attempts, **STOP and REPORT FAILURE**.
+   - **DO NOT** loop forever trying to fix a fundamental issue.
+
 3. **Verify imports** — Ensure all test imports resolve correctly
 4. **Check coverage** — Confirm tests cover the intended code paths
 
-**If tests fail, fix them in the same response. Don't return broken tests.**
+**If tests fail after retries, return the TEST_REPORT with result: fail and explain why in FAILURE_SUMMARY.**
 
 ## MANDATORY OUTPUT: TEST_REPORT
 
@@ -387,9 +393,12 @@ class TesterAgent(Agent):
     """Tester agent for test generation."""
 
     def __init__(self) -> None:
+        # Load system prompt from yaml
+        base_prompt = get_prompt("agent_prompts.tester")
+
         # Inject tool section into prompt
         tool_section = get_full_tool_section("tester")
-        prompt = TESTER_SYSTEM_PROMPT.format(tool_section=tool_section)
+        prompt = base_prompt.format(tool_section=tool_section)
 
         super().__init__(
             AgentConfig(

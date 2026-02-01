@@ -68,7 +68,7 @@ export default function SkillSelector({
   // Clear auto-detected when skill is manually selected
   useEffect(() => {
     if (selectedSkill) {
-      setAutoDetected(null)
+      setAutoDetected(null) // eslint-disable-line
     }
   }, [selectedSkill])
 

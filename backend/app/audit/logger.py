@@ -372,7 +372,8 @@ class AuditLogger:
                 except Exception as e:
                     logger.error(f"Error reading audit log {log_file}: {e}")
 
-            current = current.replace(day=current.day + 1)
+            from datetime import timedelta
+            current += timedelta(days=1)
 
         return events
 

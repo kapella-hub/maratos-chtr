@@ -102,6 +102,42 @@ class FilesystemPolicy:
 
 
 @dataclass
+class ShellPolicy:
+    """Policy for shell command execution."""
+
+    # Command safelisting/blocklisting
+    allowed_commands: list[str] = field(default_factory=list)  # Regex patterns
+    banned_patterns: list[str] = field(default_factory=lambda: [
+        r"rm\s+-[rR]*f.*\s+/",  # rm -rf /
+        r">\s*/dev/sd[a-z]",    # Overwrite raw device
+        r"mkfs",                # Format filesystem
+        r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;", # Fork bomb
+    ])
+    
+    # Execution constraints
+    workdir_only: bool = True  # Must run in workspace
+    
+    def is_command_allowed(self, command: str) -> tuple[bool, str | None]:
+        """Check if command is allowed."""
+        import re
+        
+        # Check banned patterns first
+        for pattern in self.banned_patterns:
+            if re.search(pattern, command):
+                return False, f"Command matches banned pattern: {pattern}"
+                
+        # If allowlist is populated, command must match at least one
+        if self.allowed_commands:
+            matched = False
+            for pattern in self.allowed_commands:
+                if re.match(pattern, command):
+                    matched = True
+                    break
+            if not matched:
+                return False, "Command does not match any allowed patterns"
+                
+        return True, None
+@dataclass
 class DiffApprovalPolicy:
     """Policy for diff-first mode approval requirements."""
 
@@ -169,6 +205,9 @@ class AgentPolicy:
 
     # Diff approval policy
     diff_approval: DiffApprovalPolicy = field(default_factory=DiffApprovalPolicy)
+
+    # Shell policy
+    shell: ShellPolicy = field(default_factory=ShellPolicy)
 
     # Notes for system prompt
     notes: str = ""

@@ -4,7 +4,10 @@ from typing import Any
 
 from app.agents.base import Agent, AgentConfig
 from app.agents.tool_contract import get_full_tool_section
+from app.agents.base import Agent, AgentConfig
+from app.agents.tool_contract import get_full_tool_section
 from app.agents.diagram_instructions import get_rich_content_instructions
+from app.prompts import get_prompt
 
 
 DOCS_SYSTEM_PROMPT = """You are the Docs agent, specialized in technical documentation.
@@ -242,10 +245,13 @@ class DocsAgent(Agent):
     """Docs agent for documentation generation."""
 
     def __init__(self) -> None:
-        # Inject tool section and diagram instructions into prompt
+        # Load system prompt from yaml
+        base_prompt = get_prompt("agent_prompts.docs")
+
+        # Inject tool section into prompt
         tool_section = get_full_tool_section("docs")
         diagram_instructions = get_rich_content_instructions()
-        prompt = DOCS_SYSTEM_PROMPT.format(
+        prompt = base_prompt.format(
             tool_section=tool_section,
             diagram_instructions=diagram_instructions,
         )

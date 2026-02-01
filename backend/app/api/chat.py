@@ -44,6 +44,7 @@ from app.workflows.delivery_loop import (
     UserDecisionType,
     UserDecisionResponse,
 )
+from app.utils.stream import keep_alive_generator
 from app.workflows.router import (
     classify_message_sync,
     handle_clarification_response,
@@ -814,6 +815,8 @@ async def chat(
 
     async def generate():
         """Generate streaming response."""
+        # Send initial ping to confirm stream start
+        yield 'data: {"type": "ping"}\n\n'
         import time
         start_time = time.time()
         full_response = ""
@@ -1969,8 +1972,10 @@ async def chat(
 
         yield "data: [DONE]\n\n"
 
+
+
     return StreamingResponse(
-        generate(),
+        keep_alive_generator(generate()),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

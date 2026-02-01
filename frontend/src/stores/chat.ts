@@ -135,7 +135,7 @@ interface ChatStore {
   setStatusMessage: (message: string | null) => void
   setCurrentThinkingBlock: (block: Partial<ThinkingBlock> | null) => void
   setOrchestrating: (orchestrating: boolean) => void
-  updateSubagent: (task: SubagentTask) => void
+  updateSubagent: (task: Partial<SubagentTask> & { id: string }) => void
   clearSubagents: () => void
   setAbortController: (controller: AbortController | null) => void
   stopGeneration: () => void
@@ -276,7 +276,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       updated[existing] = { ...updated[existing], ...task }
       return { activeSubagents: updated }
     }
-    return { activeSubagents: [...state.activeSubagents, task] }
+    // New task - ensure required fields are present (with defaults)
+    const newTask = {
+      agent: 'mo',
+      status: 'spawning',
+      progress: 0,
+      goals: { total: 0, completed: 0, current_id: null, items: [] },
+      ...task
+    } as SubagentTask
+    return { activeSubagents: [...state.activeSubagents, newTask] }
   }),
 
   clearSubagents: () => set({ activeSubagents: [], isOrchestrating: false }),
