@@ -547,7 +547,8 @@ def _get_workspace_for_project(
     if context and context.get("workspace"):
         return context["workspace"]
 
-    return ""
+    # Fall back to default workspace directory
+    return str(settings.workspace_dir)
 
 
 async def generate_title(user_message: str, assistant_response: str) -> str:

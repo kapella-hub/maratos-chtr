@@ -46,8 +46,6 @@ def validate_code_blocks(output: str) -> list[dict[str, Any]]:
             block["error"] = error
         elif lang in ("javascript", "typescript", "tsx", "jsx"):
             # Basic JS/TS validation - check for obvious issues
-        elif lang in ("javascript", "typescript", "tsx", "jsx"):
-            # Basic JS/TS validation - check for obvious issues
             pass # TODO: Implement better validation logic (e.g. using a parser)
             # Brace counting is too brittle for production code containing strings/regex/etc.
 
