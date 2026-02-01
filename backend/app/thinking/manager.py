@@ -17,32 +17,25 @@ from app.thinking.models import (
     ThinkingBlock,
     ThinkingSession,
 )
+from app.thinking.patterns import (
+    THINKING_START_PATTERN,
+    THINKING_END_PATTERN,
+    STEP_PATTERN,
+    STEP_TYPE_MAP,
+)
+import yaml
+from app.config import settings
 
 
 class ThinkingManager:
     """Manages thinking operations for AI responses.
-
+    
     Handles:
     - Creating and managing thinking sessions
-    - Parsing thinking content from various formats
+    - Parsing thinking content from various formats with regex
     - Generating structured thinking output
     - Converting between formats (XML tags <-> JSON)
     """
-
-    # Patterns for parsing legacy XML-style thinking tags
-    THINKING_START_PATTERN = re.compile(r"<thinking>|<analysis>|\[THINKING\]", re.IGNORECASE)
-    THINKING_END_PATTERN = re.compile(r"</thinking>|</analysis>|\[/THINKING\]", re.IGNORECASE)
-
-    # Pattern for parsing step markers within thinking blocks
-    # Pattern for parsing step markers within thinking blocks
-    # Handles: [ANALYSIS], # Analysis, **Analysis**, Analysis
-    # Pattern for parsing step markers within thinking blocks
-    # Handles: [ANALYSIS], # Analysis, **Analysis**, Analysis
-    STEP_PATTERN = re.compile(
-        r"(?:^|\n)\s*(?:\[|#+\s*|\*\*?|)(?P<type>ANALYSIS|EVALUATION|DECISION|VALIDATION|RISK|IMPLEMENTATION|CRITIQUE|TOOL_CALL|TOOL_RESULT)(?:\]|:|\*\*?|)\s*\n?"
-        r"(?P<content>.*?)(?=(?:^|\n)\s*(?:\[|#+\s*|\*\*?|)(?:ANALYSIS|EVALUATION|DECISION|VALIDATION|RISK|IMPLEMENTATION|CRITIQUE|TOOL_CALL|TOOL_RESULT)(?:\]|:|\*\*?|)|\Z)",
-        re.IGNORECASE | re.DOTALL
-    )
 
     def __init__(self, default_level: ThinkingLevel = ThinkingLevel.MEDIUM):
         """Initialize the thinking manager.
@@ -52,6 +45,18 @@ class ThinkingManager:
         """
         self.default_level = default_level
         self._active_sessions: dict[str, ThinkingSession] = {}
+        self._prompts = self._load_prompts()
+
+    def _load_prompts(self) -> dict[str, Any]:
+        """Load prompts from YAML config."""
+        try:
+            prompt_path = settings.data_dir / "prompts.yaml"
+            if prompt_path.exists():
+                with open(prompt_path, "r") as f:
+                    return yaml.safe_load(f) or {}
+        except Exception as e:
+            print(f"Error loading prompts: {e}")
+        return {}
 
     async def create_session(
         self,
@@ -229,13 +234,12 @@ class ThinkingManager:
                 )
                 return
 
-            # Ask AI for tags
-            prompt = f"""Analyze this critique and generate 3-5 relevant technical tags (e.g., "security", "python", "react", "api").
+            # Ask AI for tags using configured prompt
+            prompt_template = self._prompts.get("auto_tagging", "")
+            if not prompt_template:
+                 prompt_template = 'Generate 3-5 technical tags for this context. Context: {context}. Critique: {critique}. JSON Array only.'
             
-            Context: {context}
-            Critique: {critique}
-            
-            Return ONLY a JSON array of strings. Example: ["security", "auth"]"""
+            prompt = prompt_template.format(context=context, critique=critique)
 
             response = await kiro_provider.generate_short_response(prompt, max_length=200)
             
@@ -352,19 +356,23 @@ class ThinkingManager:
                 step_type_str = match.group("type").upper()
                 step_content = match.group("content").strip()
 
-                # Map to ThinkingStepType
-                type_map = {
+                # Map to ThinkingStepType using centralized map
+                step_type_str = step_type_str.upper()
+                mapped_type = self.STEP_TYPE_MAP.get(step_type_str, "ANALYSIS")
+                
+                # Convert string key to Enum
+                type_enum_map = {
                     "ANALYSIS": ThinkingStepType.ANALYSIS,
                     "EVALUATION": ThinkingStepType.EVALUATION,
                     "DECISION": ThinkingStepType.DECISION,
                     "VALIDATION": ThinkingStepType.VALIDATION,
-                    "RISK": ThinkingStepType.RISK_ASSESSMENT,
+                    "RISK_ASSESSMENT": ThinkingStepType.RISK_ASSESSMENT,
                     "IMPLEMENTATION": ThinkingStepType.IMPLEMENTATION,
                     "CRITIQUE": ThinkingStepType.CRITIQUE,
                     "TOOL_CALL": ThinkingStepType.TOOL_CALL,
                     "TOOL_RESULT": ThinkingStepType.TOOL_RESULT,
                 }
-                step_type = type_map.get(step_type_str, ThinkingStepType.ANALYSIS)
+                step_type = type_enum_map.get(mapped_type, ThinkingStepType.ANALYSIS)
 
                 if step_content:
                     steps.append(ThinkingStep(type=step_type, content=step_content))
@@ -434,46 +442,14 @@ class ThinkingManager:
         if level == ThinkingLevel.OFF:
             return ""
 
-        base_prompts = {
-            ThinkingLevel.MINIMAL: (
-                "Before responding, briefly consider: Is this request clear? "
-                "Any obvious issues?"
-            ),
-            ThinkingLevel.LOW: (
-                "Before responding, analyze the request:\n"
-                "1. What is being asked?\n"
-                "2. What are the key requirements?\n"
-            ),
-            ThinkingLevel.MEDIUM: (
-                "Before responding, think through this systematically:\n"
-                "[ANALYSIS] Break down the problem\n"
-                "[TOOL_CALL] Verify assumptions if needed (e.g., check files)\n"
-                "[EVALUATION] Consider approaches\n"
-                "[DECISION] Choose the best approach\n"
-            ),
-            ThinkingLevel.HIGH: (
-                "Before responding, perform deep analysis:\n"
-                "[ANALYSIS] Break down the problem completely\n"
-                "[TOOL_CALL] Gather necessary context (read files, grep, etc.)\n"
-                "[EVALUATION] Consider multiple approaches with pros/cons\n"
-                "[RISK] Identify potential issues and edge cases\n"
-                "[DECISION] Select and justify the best approach\n"
-                "[VALIDATION] Verify the decision is sound\n"
-            ),
-            ThinkingLevel.MAX: (
-                "Before responding, perform exhaustive analysis:\n"
-                "[ANALYSIS] Comprehensively break down all aspects\n"
-                "[TOOL_CALL] validate every assumption with ground truth\n"
-                "[EVALUATION] Evaluate all possible approaches\n"
-                "[RISK] Thoroughly assess risks and edge cases\n"
-                "[DECISION] Make a well-justified decision\n"
-                "[IMPLEMENTATION] Plan the execution\n"
-                "[VALIDATION] Verify completeness and correctness\n"
-                "[CRITIQUE] Self-review and identify weaknesses. Use hashtags (e.g., #security, #perf) to tag learned lessons.\n"
-            ),
-        }
-
-        prompt = base_prompts.get(level, base_prompts[ThinkingLevel.MEDIUM])
+        # Get prompts from loaded config or fallback
+        levels_config = self._prompts.get("thinking_levels", {})
+        
+        prompt = levels_config.get(level.value, levels_config.get("medium", ""))
+        
+        if not prompt:
+             # Minimal fallback if YAML missing
+             prompt = "Before responding, think through this systematically."
 
         # Add template-specific guidance if provided
         if template:
@@ -485,14 +461,9 @@ class ThinkingManager:
 
         # General tool use instruction for levels that support it
         if level in (ThinkingLevel.MEDIUM, ThinkingLevel.HIGH, ThinkingLevel.MAX):
-            prompt += (
-                "\n\nYou can use tools during thinking to verify facts. "
-                "If you need to use a tool:\n"
-                "1. Output [TOOL_CALL] to signal intent.\n"
-                "2. CLOSE the thinking block with </thinking>.\n"
-                "3. Output the standard <tool_call> format.\n"
-                "4. After the tool runs, you will receive the result and can start a NEW thinking block to continue analysis."
-            )
+            instruction = self._prompts.get("tool_use_instruction", "")
+            if instruction:
+                prompt += f"\n\n{instruction}"
 
         return prompt
 

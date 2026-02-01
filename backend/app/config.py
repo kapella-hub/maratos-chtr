@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     rate_limit_chat: str = "20/minute"  # Chat endpoint limit
     rate_limit_default: str = "100/minute"  # Default limit for other endpoints
     
+    # Execution Limits
+    max_tool_iterations: int = 6
+    tool_timeout: int = 300  # 5 minutes for tool execution (builds, tests)
+    max_thinking_steps: int = 20
+    
     # === Channel Settings ===
     
     # Telegram

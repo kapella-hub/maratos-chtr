@@ -700,8 +700,8 @@ class Agent:
         workspace = context.get("workspace") if context else None
         policy = ToolPolicy(
             allowed_tools=self.config.tools if self.config.tools else None,
-            max_iterations=6,
-            per_call_timeout_seconds=300.0,
+            max_iterations=settings.max_tool_iterations,
+            per_call_timeout_seconds=float(settings.tool_timeout),
             workspace_path=workspace,
         )
 
